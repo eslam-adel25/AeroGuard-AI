@@ -1,2 +1,20 @@
 # Ignore DC folder
 DC/
+
+# Runtime uploads
+backend/uploads/videos/
+backend/uploads/avatars/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment
+.venv/
+.env
+
+# Node
+node_modules/
+
+# Build
+dist/
