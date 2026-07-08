@@ -15,8 +15,9 @@ from ...ai.processor import ai_engine
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
-# مجلد حفظ الفيديوهات المرفوعة
-UPLOAD_DIR = "uploads/videos"
+# المجلد الجذري لوحدة backend
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "videos")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 1. تسجيل كاميرا (بث مباشر أو رفع فيديو)
@@ -81,7 +82,7 @@ def list_restricted_zones(camera_id: str, db: Session = Depends(get_db)):
 async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
     if not cam: raise HTTPException(404)
-    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url, db)
+    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
     return {"status": "started"}
 
 # 4. جلب الكاميرات
@@ -91,13 +92,18 @@ def get_cameras(db: Session = Depends(get_db)):
 
 # 5. محرك البث (Streaming)
 async def frame_generator(camera_id: str):
+    iteration = 0
     while True:
+        iteration += 1
         frame = ai_engine.get_latest_frame(camera_id)
         if frame is not None:
             ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+            print(f"📌 [stream {camera_id}] generator iter={iteration} frame_present=True encoded={ret}")
             if ret:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        else:
+            print(f"📌 [stream {camera_id}] generator iter={iteration} no frame available")
         await asyncio.sleep(0.1)
 
 @router.get("/{camera_id}/stream")
