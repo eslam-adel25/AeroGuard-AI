@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* إعدادات إضافية بناءً على صفحة 83 في التوثيق */
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+  background-color: #0F172A; /* اللون الداكن الأساسي */
+  color: #F8FAFC;
+  overflow-x: hidden;
+}
+
+/* تنعيم حرك التنبيهات */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}

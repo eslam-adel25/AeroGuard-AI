@@ -1,0 +1,207 @@
+import axios from "axios";
+
+const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
+
+
+
+interface ZoneCreateData {
+  zone_name: string;
+  zone_type: string;
+  polygon_coords: [number, number][]; // مصفوفة من الإحداثيات [x, y]
+}
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+/**
+ * نظام حماية الطلبات: إرفاق توكن JWT تلقائياً (صفحة 79)
+ */
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("ag_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+
+
+
+/**
+ * واجهات البيانات (Interfaces) لضمان جودة الكود ومنع أخطاء any
+ */
+export interface ISystemSettings {
+  organization_name: string;
+  airport_name: string;
+  language: string;
+  timezone: string;
+  system_name: string;
+  detection_confidence: number;
+  tracking_enabled: boolean;
+  object_detection_enabled: boolean;
+  face_detection_enabled: boolean;
+  face_recognition_enabled: boolean;
+  max_objects: number;
+  enable_alert_sounds: boolean;
+  alert_duration: number;
+  min_alert_confidence: number;
+  show_alert_labels: boolean;
+  default_fps: number;
+  recording_quality: string;
+  frame_buffer: number;
+  auto_reconnect: boolean;
+  video_resolution: string;
+  compression_enabled: boolean;
+  jpeg_quality: number;
+  jwt_expiration: number;
+  session_timeout: number;
+}
+
+export interface IUserProfile {
+  user_id: string;
+  full_name: string;
+  username: string;
+  email: string;
+  phone?: string;
+  organization?: string;
+  profile_picture?: string;
+  status: string;
+  created_at: string;
+  last_login?: string;
+  role_id: string;
+
+  role?: {
+    role_name: string;
+  };
+}
+
+export interface RegisterData {
+  full_name: string;
+  username: string;
+  email: string;
+  password: string;
+  confirm_password?: string;
+  phone: string;
+  organization?: string;
+}
+
+export interface LoginData {
+  username: string;
+  password: string;
+}
+
+export const authService = {
+  register: (data: RegisterData) =>
+    api.post("/auth/register", {
+      full_name: data.full_name,
+      username: data.username,
+      email: data.email,
+      password: data.password,
+      phone: data.phone,
+      organization: data.organization,
+    }),
+
+  login: (data: LoginData) => api.post("/auth/login", data),
+
+  logout: () => {
+    localStorage.removeItem("ag_token");
+    localStorage.removeItem("user");
+  },
+};
+
+/**
+ * خدمات المستخدمين والأدوار
+ */
+export const userService = {
+  // ... الدوال السابقة ...
+  getProfile: () => api.get("/users/profile"),
+  updateProfile: (data: IUserProfile) => api.put("/users/profile", data),
+  updatePassword: (data: Record<string, unknown>) =>
+    api.post("/users/profile/password", data),
+  uploadAvatar: (formData: FormData) =>
+    api.post("/users/profile/avatar", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+};
+
+/**
+ * خدمات إدارة الكاميرات والرفع والمناطق المحظورة
+ */
+export const cameraService = {
+  getAll: () => api.get("/cameras/"),
+
+  // دالة شاملة لرفع الفيديو أو ربط البث الحي عبر FormData (صفحة 206)
+  create: (formData: FormData) =>
+    api.post("/cameras/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+
+  start: (id: string) => api.post(`/cameras/${id}/start`),
+
+  getZones: (id: string) => api.get(`/cameras/${id}/zones`),
+
+  // تم استبدال any بـ ZoneCreateData لحل الخطأ الثاني
+  addZone: (id: string, data: ZoneCreateData) =>
+    api.post(`/cameras/${id}/zones`, data),
+};
+
+export const settingsService = {
+  get: () => api.get("/settings/"),
+  update: (data: ISystemSettings) => api.put("/settings/", data),
+};
+
+/**
+ * خدمات التقارير والإحصائيات (صفحة 128)
+ 
+export const reportService = {
+  getAnalytics: (filters: {
+    start_date: string;
+    end_date: string;
+    camera_id: string;
+  }) =>
+    api.get("/analytics/daily", {
+      params: filters,
+    }),
+
+  generateReport: (type: string) =>
+    api.post("/reports/", { report_type: type }),
+
+  getAllReports: () => api.get("/reports/"),
+};*/
+
+
+export const reportService = {
+  getDashboard: (filters: {
+    start_date: string;
+    end_date: string;
+    camera_id?: string;
+  }) =>
+    api.get("/reports/dashboard", {
+      params: filters,
+    }),
+
+  exportPdf: (filters: {
+    start_date: string;
+    end_date: string;
+    camera_id?: string;
+  }) =>
+    api.get("/reports/export/pdf", {
+      params: filters,
+    }),
+
+  generateReport: (type: string) =>
+    api.post("/reports/", { report_type: type }),
+
+  getAllReports: () => api.get("/reports/"),
+};
+
+
+
+
+
+
+export default api;
