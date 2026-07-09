@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cameraService } from "../services/api";
-import { Plus, Play, Upload, Radio, X, Loader2, Video } from "lucide-react";
+import {
+  Plus,
+  Play,
+  Upload,
+  Radio,
+  X,
+  Loader2,
+  Video,
+  Trash,
+} from "lucide-react";
 
 interface Camera {
   camera_id: string;
@@ -27,6 +36,7 @@ const Cameras = () => {
     stream_url: "",
   });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchCameras = async () => {
     try {
@@ -126,16 +136,53 @@ const Cameras = () => {
               📍 {cam.location}
             </p>
 
-            <button
-              onClick={() =>
-                cameraService
-                  .start(cam.camera_id)
-                  .then(() => alert("AI Active"))
-              }
-              className="w-full bg-white/5 hover:bg-ag-success hover:text-white text-gray-300 py-4 rounded-2xl flex items-center justify-center gap-3 font-bold transition-all"
-            >
-              <Play size={18} /> Initialize AI Node
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() =>
+                  cameraService
+                    .start(cam.camera_id)
+                    .then(() => alert("AI Active"))
+                }
+                className="w-full bg-white/5 hover:bg-ag-success hover:text-white text-gray-300 py-4 rounded-2xl flex items-center justify-center gap-3 font-bold transition-all"
+              >
+                <Play size={18} /> Initialize AI Node
+              </button>
+
+              <button
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    t("cameras.confirmDeleteCamera") ||
+                      "Delete this camera and all related data?",
+                  );
+                  if (!confirmed) return;
+
+                  setDeletingId(cam.camera_id);
+                  try {
+                    await cameraService.delete(cam.camera_id);
+                    setCameras((current) =>
+                      current.filter(
+                        (camera) => camera.camera_id !== cam.camera_id,
+                      ),
+                    );
+                    alert(t("cameras.deleteSuccess"));
+                  } catch (err) {
+                    console.error(err);
+                    alert(t("cameras.deleteFailed"));
+                  } finally {
+                    setDeletingId(null);
+                  }
+                }}
+                disabled={deletingId === cam.camera_id}
+                className="w-full bg-red-600/10 border border-red-500/10 hover:bg-red-600 hover:text-white text-red-300 py-4 rounded-2xl flex items-center justify-center gap-3 font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingId === cam.camera_id ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Trash size={18} />
+                )}
+                {t("cameras.deleteCamera")}
+              </button>
+            </div>
           </div>
         ))}
       </div>

@@ -7,6 +7,7 @@ from ...schemas.schemas import UserRegister, UserLogin
 from ...core.security import hash_password, verify_password, create_access_token
 from ...core.security import create_refresh_token_string
 from ...repositories.token_repository import TokenRepository
+from ...repositories.activity_repository import ActivityRepository
 from datetime import datetime, timedelta
 from ...core.emailer import send_verification_email
 from ...models.models import EmailVerificationToken, RefreshToken
@@ -89,6 +90,13 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     rt = RefreshToken(user_id=user.user_id, token=refresh_str, expires_at=rt_expires)
     token_repo.create_refresh_token(rt)
 
+    # Log activity
+    activity_repo = ActivityRepository(db)
+    try:
+        activity_repo.log(str(user.user_id), "login", {"username": user.username}, ip=None, user_agent=None)
+    except Exception:
+        pass
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -136,15 +144,37 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     if ev.expires_at < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Verification token expired")
 
-    # mark user verified
-    user_repo = Role if False else None
+    # mark user verified or apply pending email/username change
     user = db.query(User).filter(User.user_id == ev.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # handle email/username change requests
+    changed = False
+    if getattr(ev, "new_email", None):
+        # ensure new email is not used
+        if db.query(User).filter(User.email == ev.new_email).first():
+            raise HTTPException(status_code=400, detail="Email already in use")
+        user.email = ev.new_email
+        changed = True
+    if getattr(ev, "new_username", None):
+        if db.query(User).filter(User.username == ev.new_username).first():
+            raise HTTPException(status_code=400, detail="Username already in use")
+        user.username = ev.new_username
+        changed = True
+
     user.is_verified = True
     user.status = "Active"
     db.commit()
     token_repo.delete_email_verification(ev.token_id)
+
+    # log activity
+    try:
+        act = ActivityRepository(db)
+        act.log(str(user.user_id), "email_verified", {"changed": changed})
+    except Exception:
+        pass
+
     return {"status": "verified"}
 
 

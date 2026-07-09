@@ -2,8 +2,6 @@ import axios from "axios";
 
 const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 
-
-
 interface ZoneCreateData {
   zone_name: string;
   zone_type: string;
@@ -27,9 +25,6 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
-
-
-
 
 /**
  * واجهات البيانات (Interfaces) لضمان جودة الكود ومنع أخطاء any
@@ -126,6 +121,11 @@ export const userService = {
     api.post("/users/profile/avatar", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
+  changeEmail: (newEmail: string) =>
+    api.post("/users/profile/change-email", { new_email: newEmail }),
+  getActivity: () => api.get("/users/profile/activity"),
+  getSessions: () => api.get("/users/profile/sessions"),
+  logoutAllSessions: () => api.post("/users/profile/logout-all"),
 };
 
 /**
@@ -144,6 +144,8 @@ export const cameraService = {
 
   getZones: (id: string) => api.get(`/cameras/${id}/zones`),
 
+  delete: (id: string) => api.delete(`/cameras/${id}`),
+
   // تم استبدال any بـ ZoneCreateData لحل الخطأ الثاني
   addZone: (id: string, data: ZoneCreateData) =>
     api.post(`/cameras/${id}/zones`, data),
@@ -152,6 +154,7 @@ export const cameraService = {
 export const settingsService = {
   get: () => api.get("/settings/"),
   update: (data: ISystemSettings) => api.put("/settings/", data),
+  reset: () => api.post("/settings/reset"),
 };
 
 /**
@@ -172,7 +175,6 @@ export const reportService = {
 
   getAllReports: () => api.get("/reports/"),
 };*/
-
 
 export const reportService = {
   getDashboard: (filters: {
@@ -198,10 +200,5 @@ export const reportService = {
 
   getAllReports: () => api.get("/reports/"),
 };
-
-
-
-
-
 
 export default api;

@@ -2,15 +2,17 @@
  * تعريف دقيق لأنواع الرسائل القادمة من الباكيند (صفحة 156)
  * هذا يمنع خطأ "Unexpected any"
  */
+export type AlertWSData = {
+  type: string;
+  priority: string;
+  camera_id: string;
+  confidence: number;
+};
+
 export type WSMessage =
   | {
       event: "new_alert";
-      data: {
-        type: string;
-        priority: string;
-        camera_id: string;
-        confidence: number;
-      };
+      data: AlertWSData;
     }
   | {
       event: "ai_status";

@@ -29,15 +29,6 @@ const Reports = () => {
     camera_id: "",
   });
 
-  const loadCameras = async () => {
-    try {
-      const res = await cameraService.getAll();
-      setCameras(res.data);
-    } catch {
-      setCameras([]);
-    }
-  };
-
   const loadReports = async (activeFilters = filters) => {
     setLoading(true);
     try {
@@ -66,9 +57,32 @@ const Reports = () => {
     };
 
     setFilters(defaults);
-    loadCameras();
-    loadReports(defaults);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    (async () => {
+      // inline loadCameras
+      try {
+        const res = await cameraService.getAll();
+        setCameras(res.data);
+      } catch {
+        setCameras([]);
+      }
+
+      // inline loadReports
+      setLoading(true);
+      try {
+        const res = await reportService.getDashboard({
+          start_date: defaults.start_date,
+          end_date: defaults.end_date,
+          camera_id: undefined,
+        });
+        setData(res.data);
+      } catch {
+        setData(null);
+        alert("Failed to fetch analytics data.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   return (

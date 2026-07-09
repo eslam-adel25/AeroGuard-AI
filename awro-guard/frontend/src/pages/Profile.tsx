@@ -18,6 +18,23 @@ import {
   Fingerprint,
 } from "lucide-react";
 
+interface UserActivity {
+  id: string;
+  user_id: string;
+  event_type: string;
+  details?: Record<string, unknown> | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  created_at: string;
+}
+
+interface UserSession {
+  token: string;
+  expires_at: string | null;
+  revoked: boolean;
+  created_at: string | null;
+}
+
 const Profile: React.FC = () => {
   const { t } = useTranslation();
   // --- States ---
@@ -26,6 +43,8 @@ const Profile: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [activity, setActivity] = useState<UserActivity[]>([]);
+  const [sessions, setSessions] = useState<UserSession[]>([]);
 
   // دالة مرجعية لفتح نافذة اختيار الصور
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,8 +70,28 @@ const Profile: React.FC = () => {
     }
   }, []);
 
+  const loadActivity = async () => {
+    try {
+      const res = await userService.getActivity();
+      setActivity(res.data || []);
+    } catch (err) {
+      console.warn("Failed to load activity", err);
+    }
+  };
+
+  const loadSessions = async () => {
+    try {
+      const res = await userService.getSessions();
+      setSessions(res.data || []);
+    } catch (err) {
+      console.warn("Failed to load sessions", err);
+    }
+  };
+
   useEffect(() => {
     loadProfile();
+    loadActivity();
+    loadSessions();
   }, [loadProfile]);
 
   // تحديث البيانات الأساسية (Section 3)
@@ -106,10 +145,38 @@ const Profile: React.FC = () => {
       await userService.uploadAvatar(formData);
       await loadProfile(); // إعادة التحميل لإظهار الصورة الجديدة
       alert("✅ Avatar updated!");
+      loadActivity();
     } catch {
       alert("❌ Failed to upload image.");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    const newEmail = window.prompt("Enter your new email:");
+    if (!newEmail) return;
+    try {
+      await userService.changeEmail(newEmail);
+      alert(
+        "Verification email sent to new address. Follow the link to confirm.",
+      );
+      loadActivity();
+    } catch (err) {
+      console.warn("Failed to request email change", err);
+      alert("Failed to request email change.");
+    }
+  };
+
+  const handleLogoutAll = async () => {
+    if (!window.confirm("Logout all sessions?")) return;
+    try {
+      await userService.logoutAllSessions();
+      alert("All sessions logged out.");
+      loadSessions();
+      loadActivity();
+    } catch {
+      alert("Failed to logout sessions.");
     }
   };
 
@@ -287,14 +354,23 @@ const Profile: React.FC = () => {
                 <label className="text-[10px] text-gray-500 font-black uppercase ml-4">
                   {t("profile.corporateEmail")}
                 </label>
-                <input
-                  disabled={!isEditing}
-                  value={profile?.email}
-                  onChange={(e) =>
-                    setProfile({ ...profile!, email: e.target.value })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
-                />
+                <div className="flex gap-3">
+                  <input
+                    disabled={!isEditing}
+                    value={profile?.email}
+                    onChange={(e) =>
+                      setProfile({ ...profile!, email: e.target.value })
+                    }
+                    className="flex-1 bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleChangeEmail}
+                    className="px-3 py-2 rounded-lg bg-white/5 text-xs font-bold"
+                  >
+                    Change
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-500 font-black uppercase ml-4 flex items-center gap-2">
@@ -415,6 +491,75 @@ const Profile: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Activity Timeline */}
+          <div className="bg-ag-card rounded-[3rem] p-8 border border-white/5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-black">Activity Timeline</h3>
+              <button onClick={loadActivity} className="text-sm text-gray-400">
+                Refresh
+              </button>
+            </div>
+            <div className="space-y-3 max-h-48 overflow-auto">
+              {activity.length === 0 && (
+                <p className="text-sm text-gray-500">No recent activity</p>
+              )}
+              {activity.map((a) => (
+                <div key={a.id} className="flex items-start gap-3">
+                  <div className="w-10 text-xs text-gray-400">
+                    {new Date(a.created_at).toLocaleString()}
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold">{a.event_type}</div>
+                    <div className="text-xs text-gray-400">
+                      {JSON.stringify(a.details || {})}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Sessions */}
+          <div className="bg-ag-card rounded-[3rem] p-8 border border-white/5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-black">Active Sessions</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={loadSessions}
+                  className="text-sm text-gray-400"
+                >
+                  Refresh
+                </button>
+                <button
+                  onClick={handleLogoutAll}
+                  className="text-sm bg-red-600 px-3 py-1 rounded text-white"
+                >
+                  Logout All
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {sessions.length === 0 && (
+                <p className="text-sm text-gray-500">No active sessions</p>
+              )}
+              {sessions.map((s) => (
+                <div
+                  key={s.token}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <div className="font-mono">
+                    {s.token.slice(0, 8)}...{s.token.slice(-8)}
+                  </div>
+                  <div className="text-gray-400">
+                    {s.created_at
+                      ? new Date(s.created_at).toLocaleString()
+                      : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -12,7 +12,6 @@ import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
 import { useTranslation } from "react-i18next";
 import {
-  Bell,
   Maximize,
   Minimize,
   Pause,
@@ -350,10 +349,6 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
-
-        <button className="p-2 bg-white/5 hover:bg-white/8 rounded-full transition-all text-gray-300 hover:text-white border border-white/6 shadow-sm">
-          <Bell size={20} />
-        </button>
       </header>
 
       {/* Camera-first Layout */}

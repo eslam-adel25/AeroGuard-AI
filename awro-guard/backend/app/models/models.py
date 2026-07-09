@@ -91,6 +91,8 @@ class EmailVerificationToken(Base):
     token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
     token = Column(String(255), nullable=False, unique=True, index=True)
+    new_email = Column(String(255), nullable=True)
+    new_username = Column(String(100), nullable=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     attempts = Column(Integer, default=0)
     resend_count = Column(Integer, default=0)
@@ -104,6 +106,17 @@ class RefreshToken(Base):
     token = Column(String(255), nullable=False, unique=True, index=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     revoked = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    event_type = Column(String(100), nullable=False)
+    details = Column(JSONB, nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(300), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
