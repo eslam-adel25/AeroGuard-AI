@@ -8,6 +8,8 @@ from ...database.session import get_db
 from ...services.report_service import ReportService # استدعاء الخدمة
 from ...core.auth_middleware import get_current_user
 from ...repositories.report_repository import ReportRepository
+from ...repositories.ai_repository import AIRepository
+import json
 from ...utils.report_generator import ReportGenerator
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
@@ -208,6 +210,49 @@ async def export_report_csv(report_id: str = Query(...), db: Session = Depends(g
         for row in details:
             writer.writerow([row.get(k, "") for k in keys])
 
+    # AI Events section: include AI events matching the report filters
+    try:
+        ai_repo = AIRepository(db)
+        f = report.filters or {}
+        # parse dates if present
+        sd = None
+        ed = None
+        try:
+            if f.get("start_date"):
+                sd = datetime.fromisoformat(str(f.get("start_date"))).date()
+            if f.get("end_date"):
+                ed = datetime.fromisoformat(str(f.get("end_date"))).date()
+        except Exception:
+            sd = None
+            ed = None
+
+        total_ai, ai_items = ai_repo.query_events_for_report(
+            camera_id=f.get("camera_id"),
+            detection_type=f.get("detection_type"),
+            severity=f.get("severity"),
+            start_date=sd,
+            end_date=ed,
+            limit=10000,
+            offset=0,
+        )
+        writer.writerow([""])
+        writer.writerow(["AI Events"])
+        writer.writerow(["event_id", "camera_id", "detection_type", "severity", "confidence", "created_at", "screenshot_path", "metadata"])
+        for ai in ai_items:
+            writer.writerow([
+                ai.get("event_id", ""),
+                ai.get("camera_id", ""),
+                ai.get("detection_type", ""),
+                ai.get("severity", ""),
+                ai.get("confidence", ""),
+                ai.get("created_at", ""),
+                ai.get("screenshot_path", ""),
+                json.dumps(ai.get("metadata", {}), default=str),
+            ])
+    except Exception:
+        # Do not fail export if AI events retrieval errors
+        pass
+
     buf.seek(0)
     headers = {
         "Content-Disposition": f"attachment; filename=report-{report.report_id}.csv"
@@ -256,6 +301,49 @@ async def export_report_excel(report_id: str = Query(...), db: Session = Depends
             for c_idx, k in enumerate(keys, start=1):
                 ws2.cell(row=r_idx, column=c_idx, value=rowdata.get(k, ""))
 
+    # AI Events sheet
+    try:
+        ai_repo = AIRepository(db)
+        f = report.filters or {}
+        sd = None
+        ed = None
+        try:
+            if f.get("start_date"):
+                sd = datetime.fromisoformat(str(f.get("start_date"))).date()
+            if f.get("end_date"):
+                ed = datetime.fromisoformat(str(f.get("end_date"))).date()
+        except Exception:
+            sd = None
+            ed = None
+
+        _, ai_items = ai_repo.query_events_for_report(
+            camera_id=f.get("camera_id"),
+            detection_type=f.get("detection_type"),
+            severity=f.get("severity"),
+            start_date=sd,
+            end_date=ed,
+            limit=10000,
+            offset=0,
+        )
+
+        if isinstance(ai_items, list) and len(ai_items) > 0:
+            ws3 = wb.create_sheet("AI Events")
+            headers = ["event_id", "camera_id", "detection_type", "severity", "confidence", "created_at", "screenshot_path", "metadata"]
+            for c, h in enumerate(headers, start=1):
+                ws3.cell(row=1, column=c, value=h)
+            for r_idx, rowdata in enumerate(ai_items, start=2):
+                ws3.cell(row=r_idx, column=1, value=rowdata.get("event_id"))
+                ws3.cell(row=r_idx, column=2, value=rowdata.get("camera_id"))
+                ws3.cell(row=r_idx, column=3, value=rowdata.get("detection_type"))
+                ws3.cell(row=r_idx, column=4, value=rowdata.get("severity"))
+                ws3.cell(row=r_idx, column=5, value=rowdata.get("confidence"))
+                ws3.cell(row=r_idx, column=6, value=rowdata.get("created_at"))
+                ws3.cell(row=r_idx, column=7, value=rowdata.get("screenshot_path"))
+                ws3.cell(row=r_idx, column=8, value=str(rowdata.get("metadata", {})))
+    except Exception:
+        # allow exports to continue even if AI retrieval fails
+        pass
+
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -285,6 +373,47 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
         "summary": report.summary or {},
         "details": report.details or [],
     }, filename)
+
+    # Attempt to attach AI events into PDF (non-fatal)
+    try:
+        f = report.filters or {}
+        sd = None
+        ed = None
+        try:
+            if f.get("start_date"):
+                sd = datetime.fromisoformat(str(f.get("start_date"))).date()
+            if f.get("end_date"):
+                ed = datetime.fromisoformat(str(f.get("end_date"))).date()
+        except Exception:
+            sd = None
+            ed = None
+
+        ai_repo = AIRepository(db)
+        _, ai_items = ai_repo.query_events_for_report(
+            camera_id=f.get("camera_id"),
+            detection_type=f.get("detection_type"),
+            severity=f.get("severity"),
+            start_date=sd,
+            end_date=ed,
+            limit=1000,
+            offset=0,
+        )
+        # regenerate PDF with AI events included
+        path = ReportGenerator.generate_pdf_with_ai({
+            "metadata": {
+                "report_id": str(report.report_id),
+                "title": report.title,
+                "generated_by": str(report.generated_by),
+                "generated_at": str(report.generated_at),
+                "filters": report.filters,
+            },
+            "summary": report.summary or {},
+            "details": report.details or [],
+            "ai_events": ai_items,
+        }, filename)
+    except Exception:
+        # keep original generated PDF if enrichment fails
+        pass
 
     with open(path, "rb") as f:
         data = f.read()

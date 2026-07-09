@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database.session import engine, Base
-from .api.v1 import auth, cameras, users, reports, settings, websocket_api
+from .api.v1 import auth, cameras, users, reports, settings, websocket_api, ai
 from .ai.processor import ai_engine
 import logging
 
@@ -28,3 +28,4 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(reports.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(websocket_api.router) # الـ WebSocket غالباً لا يحتاج بريفيكس
+app.include_router(ai.router, prefix="/api/v1")

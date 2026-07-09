@@ -11,10 +11,12 @@ from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
 from ..websocket.manager import manager
 from .tracker import TrackerManager
+from ..services.ai_service import AIService
 
 class AIProcessor:
     def __init__(self, model_path: str):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
+        self.model_path = model_path
         self.model = YOLO(model_path)
         self.decision_engine = DecisionEngine()
         # Tracker (stable facade). Default uses IoU fallback; swap later with ByteTrack/DeepSORT adapter.
@@ -25,6 +27,9 @@ class AIProcessor:
         self.last_frames = {}
         self.last_alert_time = {}
         self.object_history = {}
+        self.loitering_tracker = {}  # camera_id -> {track_id: {first_seen, last_pos, last_move_time}}
+        self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
+        self.crowd_cooldown = {}  # camera_id -> last_alert_time
         self._stop_flags = {}
         
         # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
@@ -34,6 +39,16 @@ class AIProcessor:
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
         self.active_settings = settings_model
         print(f"⚙️ AI Engine updated with new settings: Conf={settings_model.detection_confidence}")
+        # adjust model device if GPU flag changed
+        try:
+            use_gpu = getattr(settings_model, "gpu_enabled", False)
+            dev = "cuda" if use_gpu else "cpu"
+            # recreate model on requested device
+            self.model = YOLO(self.model_path, device=dev)
+            print(f"⚙️ AI Engine model reloaded on device={dev}")
+        except Exception:
+            # ignore if device change not supported in environment
+            pass
 
     def get_latest_frame(self, camera_id):
         return self.last_frames.get(str(camera_id))
@@ -87,6 +102,7 @@ class AIProcessor:
                 return
 
             repo = DetectionRepository(local_db)
+            ai_service = AIService(local_db)
             print(f"🛡️ AeroGuard Monitoring Initiated: {camera_id}")
 
             iteration = 0
@@ -119,7 +135,17 @@ class AIProcessor:
 
                 start_time = time.time()
 
-                results = await asyncio.to_thread(self.model.predict, frame, conf=conf_thr, verbose=False)
+                # respect frame-skip
+                frame_skip = getattr(self.active_settings, "frame_skip", 0) if self.active_settings else 0
+                do_infer = (frame_skip <= 0) or (iteration % (frame_skip + 1) == 0)
+                results = None
+                if do_infer:
+                    results = await asyncio.to_thread(self.model.predict, frame, conf=conf_thr, verbose=False)
+                else:
+                    # create empty results mimic
+                    class Empty:
+                        boxes = type("B", (), {"xyxy": [], "cls": [], "conf": []})
+                    results = [type("R", (), {"boxes": Empty.boxes})()]
                 annotated_frame = frame.copy()
 
                 detections_for_tracker = []
@@ -130,7 +156,7 @@ class AIProcessor:
                 for box, cls_idx, conf in zip(boxes, labels, confs):
                     x1, y1, x2, y2 = box.astype(int)
                     label_name = self.model.names[int(cls_idx)].lower()
-                    if label_name not in ["person", "bag", "suitcase", "backpack"]:
+                    if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke"]:
                         continue
                     detections_for_tracker.append({
                         "bbox": [int(x1), int(y1), int(x2), int(y2)],
@@ -142,6 +168,8 @@ class AIProcessor:
                 active_tracks = self.tracker.get_active_tracks()
                 active_objs_count = len(active_tracks)
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
+                bag_count = sum(1 for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"})
+                vehicle_count = sum(1 for t in active_tracks if t.class_name in {"car", "truck", "bus", "vehicle"})
 
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
@@ -171,18 +199,124 @@ class AIProcessor:
                     if obj_id in self.object_history and not in_restricted:
                         prev_point = self.object_history[obj_id]
                         prev_y = prev_point[1]
-                        if base_point[1] < prev_y - 30:
+                        # Wrong direction heuristic (vertical movement upward)
+                        wrong_enabled = getattr(self.active_settings, "wrong_direction_enabled", False) if self.active_settings else False
+                        if wrong_enabled and base_point[1] < prev_y - 30:
                             status = "WARNING"
                             box_color = (0, 0, 255)
                             display_label = "WRONG DIRECTION"
 
+                    # Loitering detection: person staying within small radius
+                    if label_name == "person":
+                        cam_loiter = self.loitering_tracker.setdefault(str(camera_id), {})
+                        rec = cam_loiter.get(obj_id)
+                        now_ts = time.time()
+                        if rec is None:
+                            cam_loiter[obj_id] = {"first_seen": now_ts, "last_pos": base_point, "last_move": now_ts}
+                        else:
+                            last_pos = rec.get("last_pos", base_point)
+                            dx = base_point[0] - last_pos[0]
+                            dy = base_point[1] - last_pos[1]
+                            dist = (dx * dx + dy * dy) ** 0.5
+                            if dist > 20:
+                                rec["last_move"] = now_ts
+                                rec["last_pos"] = base_point
+                            else:
+                                # stayed roughly in place
+                                loiter_enabled = getattr(self.active_settings, "loitering_enabled", False) if self.active_settings else False
+                                loiter_seconds = getattr(self.active_settings, "loitering_seconds", 30) if self.active_settings else 30
+                                if loiter_enabled and (now_ts - rec.get("last_move", now_ts) >= loiter_seconds):
+                                    status = "DANGER"
+                                    box_color = (0, 0, 255)
+                                    display_label = "LOITERING"
+                                    alert_key = f"{camera_id}_{obj_id}_LOITERING"
+                                    if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                                        # register loitering event
+                                        try:
+                                            _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                            img_bytes = jpg.tobytes() if jpg is not None else None
+                                        except Exception:
+                                            img_bytes = None
+                                        ai_service.register_event(
+                                            camera_id=camera_id,
+                                            detection_type="LOITERING",
+                                            severity="High",
+                                            confidence=float(conf),
+                                            track_id=str(obj_id),
+                                            user_id=None,
+                                            metadata={"bbox": [x1, y1, x2, y2]},
+                                            screenshot_bytes=img_bytes,
+                                        )
+                                        await manager.broadcast({
+                                            "event": "new_alert",
+                                            "data": {"type": display_label, "priority": "High", "camera_id": str(camera_id)}
+                                        })
+                                        self.last_alert_time[alert_key] = time.time()
+
                     self.object_history[obj_id] = base_point
+
+                    # Abandoned bag detection
+                    if label_name in {"bag", "backpack", "suitcase"}:
+                        cam_bags = self.bag_tracker.setdefault(str(camera_id), {})
+                        now_ts = time.time()
+                        bag_rec = cam_bags.get(obj_id)
+                        # find nearest person
+                        nearest_person_dist = None
+                        for p in active_tracks:
+                            if p.class_name == "person":
+                                px1, py1, px2, py2 = p.bbox
+                                p_center = (int((px1 + px2) / 2), int((py1 + py2) / 2))
+                                dx = p_center[0] - base_point[0]
+                                dy = p_center[1] - base_point[1]
+                                d = (dx * dx + dy * dy) ** 0.5
+                                if nearest_person_dist is None or d < nearest_person_dist:
+                                    nearest_person_dist = d
+                        if bag_rec is None:
+                            cam_bags[obj_id] = {"first_seen": now_ts, "last_near_person": now_ts if (nearest_person_dist is not None and nearest_person_dist < 120) else 0}
+                        else:
+                            if nearest_person_dist is not None and nearest_person_dist < 120:
+                                bag_rec["last_near_person"] = now_ts
+                            # evaluate abandoned
+                            abandoned_enabled = getattr(self.active_settings, "abandoned_bag_enabled", False) if self.active_settings else False
+                            abandoned_seconds = getattr(self.active_settings, "abandoned_bag_seconds", 20) if self.active_settings else 20
+                            if abandoned_enabled:
+                                first_seen = bag_rec.get("first_seen", now_ts)
+                                last_near = bag_rec.get("last_near_person", 0)
+                                if (now_ts - first_seen >= abandoned_seconds) and (now_ts - last_near >= abandoned_seconds):
+                                    alert_key = f"{camera_id}_{obj_id}_ABANDONED"
+                                    if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                                        try:
+                                            _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                            img_bytes = jpg.tobytes() if jpg is not None else None
+                                        except Exception:
+                                            img_bytes = None
+                                        ai_service.register_event(
+                                            camera_id=camera_id,
+                                            detection_type="ABANDONED_BAG",
+                                            severity="High",
+                                            confidence=float(conf),
+                                            track_id=str(obj_id),
+                                            user_id=None,
+                                            metadata={"bbox": [x1, y1, x2, y2]},
+                                            screenshot_bytes=img_bytes,
+                                        )
+                                        await manager.broadcast({
+                                            "event": "new_alert",
+                                            "data": {"type": "ABANDONED_BAG", "priority": "High", "camera_id": str(camera_id)}
+                                        })
+                                        self.last_alert_time[alert_key] = time.time()
 
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 2)
                     label_size, _ = cv2.getTextSize(f"{display_label}", cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
                     cv2.rectangle(annotated_frame, (x1, y1 - 25), (x1 + label_size[0] + 10, y1), box_color, -1)
                     cv2.putText(annotated_frame, f"{display_label}", (x1 + 5, y1 - 8),
                                 cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
+
+                    # Fire / Smoke immediate critical events
+                    if label_name in {"fire", "smoke"}:
+                        status = "DANGER"
+                        box_color = (0, 0, 255)
+                        display_label = label_name.upper()
 
                     if status in ["DANGER", "WARNING"]:
                         alert_key = f"{camera_id}_{obj_id}_{status}"
@@ -200,6 +334,25 @@ class AIProcessor:
                                 violation_type=status
                             )
                             repo.save_detection(new_det)
+                            # also register AIEvent and broadcast
+                            try:
+                                # capture a quick JPEG of the annotated frame
+                                _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                img_bytes = jpg.tobytes() if jpg is not None else None
+                            except Exception:
+                                img_bytes = None
+
+                            ai_service.register_event(
+                                camera_id=camera_id,
+                                detection_type=display_label,
+                                severity="Critical" if status == "DANGER" else "High",
+                                confidence=float(conf),
+                                track_id=str(obj_id),
+                                user_id=owner_id,
+                                metadata={"bbox": [x1, y1, x2, y2]},
+                                screenshot_bytes=img_bytes,
+                            )
+
                             await manager.broadcast({
                                 "event": "new_alert",
                                 "data": {
@@ -219,6 +372,8 @@ class AIProcessor:
                         "fps": current_fps,
                         "objects": active_objs_count,
                         "persons": person_count,
+                        "bags": bag_count,
+                        "cars": vehicle_count,
                         "camera_id": str(camera_id)
                    }
                 })

@@ -48,6 +48,22 @@ class SystemSettings(Base):
     video_resolution = Column(String(20), default="720p")
     jpeg_quality = Column(Integer, default=70)
     jwt_expiration = Column(Integer, default=60)
+    # Performance / AI options
+    gpu_enabled = Column(Boolean, default=False)
+    frame_skip = Column(Integer, default=0)
+    tracker_backend = Column(String(50), default="iou")
+    # Phase 7 AI module toggles (system-wide)
+    loitering_enabled = Column(Boolean, default=False)
+    loitering_seconds = Column(Integer, default=30)
+    crowd_density_enabled = Column(Boolean, default=False)
+    crowd_density_threshold = Column(Integer, default=10)
+    abandoned_bag_enabled = Column(Boolean, default=False)
+    abandoned_bag_seconds = Column(Integer, default=20)
+    wrong_direction_enabled = Column(Boolean, default=False)
+    wrong_direction_angle_threshold = Column(Integer, default=150)
+    restricted_area_enabled = Column(Boolean, default=False)
+    fire_detection_enabled = Column(Boolean, default=False)
+    smoke_detection_enabled = Column(Boolean, default=False)
 
 class Camera(Base):
     __tablename__ = "cameras"
@@ -166,6 +182,24 @@ class UserSettings(Base):
     show_alert_labels = Column(Boolean, default=True)
     desktop_notifications = Column(Boolean, default=True)
 
+    # Phase 7 AI Module Toggles
+    loitering_enabled = Column(Boolean, default=False)
+    loitering_seconds = Column(Integer, default=30)
+
+    crowd_density_enabled = Column(Boolean, default=False)
+    crowd_density_threshold = Column(Integer, default=10)
+
+    abandoned_bag_enabled = Column(Boolean, default=False)
+    abandoned_bag_seconds = Column(Integer, default=20)
+
+    wrong_direction_enabled = Column(Boolean, default=False)
+    wrong_direction_angle_threshold = Column(Integer, default=150)
+
+    restricted_area_enabled = Column(Boolean, default=False)
+
+    fire_detection_enabled = Column(Boolean, default=False)
+    smoke_detection_enabled = Column(Boolean, default=False)
+
     # Security Settings
     jwt_expiration = Column(Integer, default=60)
     session_timeout = Column(Integer, default=30)
@@ -198,4 +232,30 @@ class Report(Base):
     charts = Column(JSONB, nullable=True)
     details = Column(JSONB, nullable=True)
     export_history = Column(JSONB, nullable=True)  # list of exports with metadata
+
+
+class Tracking(Base):
+    __tablename__ = "trackings"
+    track_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False, index=True)
+    track_type = Column(String(50), default="person")
+    track_label = Column(String(150), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    last_seen_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    latest_bbox = Column(JSONB, nullable=True)
+    confidence = Column(Float, nullable=True)
+
+
+class AIEvent(Base):
+    __tablename__ = "ai_events"
+    event_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    track_id = Column(UUID(as_uuid=True), ForeignKey("trackings.track_id"), nullable=True, index=True)
+    camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False, index=True)
+    detected_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    detection_type = Column(String(100), nullable=False)
+    severity = Column(String(20), nullable=False)
+    confidence = Column(Float, nullable=True)
+    screenshot_path = Column(String(400), nullable=True)
+    metadata = Column(JSONB, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

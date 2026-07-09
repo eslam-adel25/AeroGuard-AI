@@ -136,8 +136,28 @@ class TrackerManager:
     def __init__(self, backend: Optional[str] = None, **kwargs):
         # backend: 'bytetrack', 'deepsort', 'botsort' or None
         self.backend = backend
-        # for now use IoU fallback; later adapter can be plugged here
-        self._impl = IoUTracker(**kwargs)
+        self._impl = None
+        # try to instantiate requested backend; fallback to IoUTracker
+        backend_choice = (backend or "iou").lower()
+        if backend_choice == "bytetrack":
+            try:
+                # Attempt to import a ByteTrack adapter (if dependency available)
+                from .bytetrack_adapter import ByteTrackAdapter  # type: ignore
+
+                self._impl = ByteTrackAdapter(**kwargs)
+            except Exception:
+                print("[TrackerManager] ByteTrack adapter unavailable, falling back to IoUTracker")
+        elif backend_choice == "deepsort":
+            try:
+                from .deepsort_adapter import DeepSortAdapter  # type: ignore
+
+                self._impl = DeepSortAdapter(**kwargs)
+            except Exception:
+                print("[TrackerManager] DeepSORT adapter unavailable, falling back to IoUTracker")
+
+        if self._impl is None:
+            # final fallback
+            self._impl = IoUTracker(**kwargs)
 
     def initialize(self):
         self._impl.initialize()

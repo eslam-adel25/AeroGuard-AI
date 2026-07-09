@@ -36,6 +36,66 @@ class ReportGenerator:
         return path
 
     @staticmethod
+    def generate_pdf_with_ai(data, filename):
+        """Extended PDF generator that includes AI events if present.
+
+        Keeps backwards compatibility while supporting an 'ai_events' list
+        where each item contains event_id, camera_id, detection_type, severity, confidence, created_at.
+        """
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(200, 10, txt="AeroGuard AI - Operational Report", ln=True, align='C')
+        pdf.set_font("Arial", size=10)
+        pdf.cell(200, 10, txt=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+        pdf.ln(10)
+
+        # Detection table (same as before)
+        pdf.set_fill_color(239, 68, 68)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(60, 10, "Detection Type", 1, 0, 'C', True)
+        pdf.cell(60, 10, "Count", 1, 0, 'C', True)
+        pdf.cell(70, 10, "Status", 1, 1, 'C', True)
+
+        pdf.set_text_color(0, 0, 0)
+        for item in data.get('details', []):
+            pdf.cell(60, 10, str(item.get('type', '')), 1)
+            pdf.cell(60, 10, str(item.get('count', '')), 1)
+            pdf.cell(70, 10, "Verified", 1, 1)
+
+        # AI Events section
+        ai_events = data.get('ai_events') or []
+        if ai_events:
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 10, txt="AI Events", ln=True)
+            pdf.ln(4)
+            pdf.set_font("Arial", size=9)
+            # header
+            pdf.set_fill_color(40, 40, 40)
+            pdf.set_text_color(255, 255, 255)
+            headers = ["Event ID", "Camera", "Type", "Severity", "Confidence", "Time"]
+            widths = [50, 30, 40, 25, 20, 40]
+            for w, h in zip(widths, headers):
+                pdf.cell(w, 8, h, 1, 0, 'C', True)
+            pdf.ln(8)
+            pdf.set_text_color(0, 0, 0)
+            for ev in ai_events:
+                pdf.cell(widths[0], 8, str(ev.get('event_id', ''))[:32], 1)
+                pdf.cell(widths[1], 8, str(ev.get('camera_id', '') )[:16], 1)
+                pdf.cell(widths[2], 8, str(ev.get('detection_type', ''))[:24], 1)
+                pdf.cell(widths[3], 8, str(ev.get('severity', ''))[:12], 1)
+                pdf.cell(widths[4], 8, str(ev.get('confidence', ''))[:8], 1)
+                pdf.cell(widths[5], 8, str(ev.get('created_at', ''))[:24], 1)
+                pdf.ln(8)
+
+        dirpath = os.path.join("uploads", "reports")
+        os.makedirs(dirpath, exist_ok=True)
+        path = os.path.join(dirpath, filename)
+        pdf.output(path)
+        return path
+
+    @staticmethod
     def generate_excel(data, filename):
         df = pd.DataFrame(data['details'])
         dirpath = os.path.join("uploads", "reports")

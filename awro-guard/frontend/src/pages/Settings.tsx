@@ -23,7 +23,20 @@ const DEFAULT_SETTINGS: ISystemSettings = {
   object_detection_enabled: true,
   face_detection_enabled: true,
   face_recognition_enabled: true,
+  loitering_enabled: false,
+  loitering_seconds: 30,
+  crowd_density_enabled: false,
+  crowd_density_threshold: 10,
+  abandoned_bag_enabled: false,
+  abandoned_bag_seconds: 20,
+  wrong_direction_enabled: false,
+  wrong_direction_angle_threshold: 150,
+  restricted_area_enabled: false,
+  fire_detection_enabled: false,
+  smoke_detection_enabled: false,
   max_objects: 50,
+  gpu_enabled: false,
+  frame_skip: 0,
   enable_alert_sounds: true,
   alert_duration: 5,
   min_alert_confidence: 0.6,
@@ -259,6 +272,273 @@ const Settings = () => {
                 className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all ${config.enable_alert_sounds ? "right-1" : "left-1"}`}
               ></div>
             </button>
+          </div>
+        </section>
+
+        {/* AI Modules */}
+        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
+          <div className="flex items-center gap-3 text-ag-danger mb-2">
+            <Zap size={24} />
+            <h3 className="text-xl font-black uppercase tracking-widest">
+              AI Modules
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 gap-4">
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">GPU Acceleration</div>
+                <div className="text-xs text-gray-400">
+                  Enable GPU for model inference (if available)
+                </div>
+              </div>
+              <div>
+                <button
+                  onClick={() =>
+                    setConfig({ ...config, gpu_enabled: !config.gpu_enabled })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.gpu_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.gpu_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Frame Skip</div>
+                <div className="text-xs text-gray-400">
+                  Skip N frames between inferences to save CPU
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={config.frame_skip ?? 0}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      frame_skip: parseInt(e.target.value || "0"),
+                    })
+                  }
+                  className="w-20 bg-ag-dark p-2 rounded"
+                />
+              </div>
+            </div>
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Loitering Detection</div>
+                <div className="text-xs text-gray-400">
+                  Detects persons loitering in an area
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={config.loitering_seconds}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      loitering_seconds: parseInt(e.target.value || "0"),
+                    })
+                  }
+                  className="w-20 bg-ag-dark p-2 rounded"
+                />
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      loitering_enabled: !config.loitering_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.loitering_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.loitering_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Crowd Density</div>
+                <div className="text-xs text-gray-400">
+                  Counts people and alerts on threshold
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={config.crowd_density_threshold}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      crowd_density_threshold: parseInt(e.target.value || "0"),
+                    })
+                  }
+                  className="w-20 bg-ag-dark p-2 rounded"
+                />
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      crowd_density_enabled: !config.crowd_density_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.crowd_density_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.crowd_density_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Abandoned Bag Detection</div>
+                <div className="text-xs text-gray-400">
+                  Detects ownerless bags
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={config.abandoned_bag_seconds}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      abandoned_bag_seconds: parseInt(e.target.value || "0"),
+                    })
+                  }
+                  className="w-20 bg-ag-dark p-2 rounded"
+                />
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      abandoned_bag_enabled: !config.abandoned_bag_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.abandoned_bag_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.abandoned_bag_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Wrong Direction</div>
+                <div className="text-xs text-gray-400">
+                  Alerts when people move against allowed direction
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  value={config.wrong_direction_angle_threshold}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      wrong_direction_angle_threshold: parseInt(
+                        e.target.value || "0",
+                      ),
+                    })
+                  }
+                  className="w-20 bg-ag-dark p-2 rounded"
+                />
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      wrong_direction_enabled: !config.wrong_direction_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.wrong_direction_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.wrong_direction_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Restricted Area</div>
+                <div className="text-xs text-gray-400">
+                  Named polygon zones with intrusion alerts
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      restricted_area_enabled: !config.restricted_area_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.restricted_area_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.restricted_area_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Fire Detection</div>
+                <div className="text-xs text-gray-400">
+                  Integrate pretrained fire model
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      fire_detection_enabled: !config.fire_detection_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.fire_detection_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.fire_detection_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
+              <div>
+                <div className="font-bold">Smoke Detection</div>
+                <div className="text-xs text-gray-400">
+                  Integrate pretrained smoke model
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      smoke_detection_enabled: !config.smoke_detection_enabled,
+                    })
+                  }
+                  className={`w-12 h-6 rounded-full relative transition-all ${config.smoke_detection_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.smoke_detection_enabled ? "right-1" : "left-1"}`}
+                  ></div>
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 

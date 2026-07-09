@@ -11,6 +11,9 @@ import Users from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import LanguageSwitcher from "./components/LanguageSwitcher";
+import AlertHistory from "./pages/AlertHistory";
+import ScreenshotModal from "./components/ScreenshotModal";
+import { aiService } from "./services/api";
 import {
   notificationService,
   type NotificationItem,
@@ -24,6 +27,10 @@ function App() {
     !!localStorage.getItem("ag_token"),
   );
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [screenshotModalEventId, setScreenshotModalEventId] = useState<
+    string | null
+  >(null);
+  const [screenshotCache] = useState(() => new Map<string, string>());
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0 });
@@ -129,6 +136,22 @@ function App() {
       socket?.close();
     };
   }, []);
+
+  const fetchAndCacheScreenshot = async (eventId?: string | null) => {
+    if (!eventId) return null;
+    if (screenshotCache.has(eventId))
+      return screenshotCache.get(eventId) as string;
+    try {
+      const resp = await aiService.downloadScreenshot(eventId);
+      const blob = resp.data as Blob;
+      const url = URL.createObjectURL(blob);
+      screenshotCache.set(eventId, url);
+      return url;
+    } catch (err) {
+      console.error("Failed to fetch screenshot", err);
+      return null;
+    }
+  };
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -359,8 +382,89 @@ function App() {
                                     <CheckCircle2 size={14} />
                                     Read
                                   </button>
+                                  {notification.eventId ||
+                                  notification.screenshot ? (
+                                    <>
+                                      <button
+                                        onClick={async () => {
+                                          if (notification.eventId) {
+                                            setScreenshotModalEventId(
+                                              notification.eventId,
+                                            );
+                                          } else if (notification.screenshot) {
+                                            window.open(
+                                              notification.screenshot as string,
+                                              "_blank",
+                                            );
+                                          }
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-white/10"
+                                      >
+                                        View
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            if (notification.eventId) {
+                                              const resp =
+                                                await aiService.downloadScreenshot(
+                                                  notification.eventId,
+                                                );
+                                              const blob = resp.data as Blob;
+                                              const a =
+                                                document.createElement("a");
+                                              a.href =
+                                                URL.createObjectURL(blob);
+                                              a.download = `ai_event_${notification.eventId}.jpg`;
+                                              document.body.appendChild(a);
+                                              a.click();
+                                              a.remove();
+                                            } else if (
+                                              notification.screenshot
+                                            ) {
+                                              const a =
+                                                document.createElement("a");
+                                              a.href =
+                                                notification.screenshot as string;
+                                              a.download = `ai_event_${notification.id}.jpg`;
+                                              a.click();
+                                            }
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-white/10"
+                                      >
+                                        Download
+                                      </button>
+                                    </>
+                                  ) : null}
                                 </div>
                               </div>
+                              {notification.eventId ? (
+                                <div className="mt-3">
+                                  {screenshotCache.has(notification.eventId) ? (
+                                    <img
+                                      src={screenshotCache.get(
+                                        notification.eventId,
+                                      )}
+                                      alt="thumb"
+                                      className="h-20 w-28 rounded-md object-cover"
+                                    />
+                                  ) : (
+                                    <div
+                                      onMouseEnter={() =>
+                                        fetchAndCacheScreenshot(
+                                          notification.eventId,
+                                        )
+                                      }
+                                      className="flex h-20 w-28 items-center justify-center rounded-md bg-white/5 text-xs text-gray-400"
+                                    >
+                                      Preview
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
                           ))
                         )}
@@ -377,9 +481,16 @@ function App() {
           {activePage === "dashboard" && <Dashboard />}
           {activePage === "cameras" && <Cameras />}
           {activePage === "reports" && <Analytics />}
+          {activePage === "alerts" && <AlertHistory />}
           {activePage === "users" && <Users />}
           {activePage === "settings" && <Settings />}
         </main>
+        {screenshotModalEventId && (
+          <ScreenshotModal
+            eventId={screenshotModalEventId}
+            onClose={() => setScreenshotModalEventId(null)}
+          />
+        )}
       </div>
     </div>
   );

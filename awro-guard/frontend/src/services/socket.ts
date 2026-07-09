@@ -6,28 +6,40 @@ export type AlertWSData = {
   type: string;
   priority: string;
   camera_id: string;
-  confidence: number;
+  confidence?: number;
+  event_id?: string;
+  screenshot?: string | null;
+};
+
+export type DashboardStats = {
+  fps: number;
+  objects: number;
+  persons: number;
+  bags: number;
+  cars: number;
+  camera_id?: string;
+};
+
+export type AIEventWSData = {
+  event_id: string;
+  camera_id: string;
+  detection_type: string;
+  severity: string;
+  confidence?: number;
+  created_at?: string;
+  screenshot?: string | null;
+};
+
+export type CameraStatusWSData = {
+  camera_id: string;
+  status: string;
 };
 
 export type WSMessage =
-  | {
-      event: "new_alert";
-      data: AlertWSData;
-    }
-  | {
-      event: "ai_status";
-      data: {
-        fps: number;
-        objects: number;
-      };
-    }
-  | {
-      event: "camera_status";
-      data: {
-        camera_id: string;
-        status: string;
-      };
-    };
+  | { event: "new_alert"; data: AlertWSData }
+  | { event: "ai_status"; data: DashboardStats }
+  | { event: "ai_event"; data: AIEventWSData }
+  | { event: "camera_status"; data: CameraStatusWSData };
 export const createSocket = (onMessage: (message: WSMessage) => void) => {
   const token = localStorage.getItem("ag_token");
   // استخدام المنفذ الافتراضي للباكيند

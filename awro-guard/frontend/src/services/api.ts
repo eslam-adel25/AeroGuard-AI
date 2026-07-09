@@ -54,6 +54,21 @@ export interface ISystemSettings {
   jpeg_quality: number;
   jwt_expiration: number;
   session_timeout: number;
+  // Performance / runtime
+  gpu_enabled?: boolean;
+  frame_skip?: number;
+  // Phase 7 AI module toggles and thresholds
+  loitering_enabled?: boolean;
+  loitering_seconds?: number;
+  crowd_density_enabled?: boolean;
+  crowd_density_threshold?: number;
+  abandoned_bag_enabled?: boolean;
+  abandoned_bag_seconds?: number;
+  wrong_direction_enabled?: boolean;
+  wrong_direction_angle_threshold?: number;
+  restricted_area_enabled?: boolean;
+  fire_detection_enabled?: boolean;
+  smoke_detection_enabled?: boolean;
 }
 
 export interface IUserProfile {
@@ -222,6 +237,17 @@ export const reportService = {
     }),
 
   deleteReport: (report_id: string) => api.delete(`/reports/${report_id}`),
+};
+
+export const aiService = {
+  listEvents: (params?: {
+    camera_id?: string;
+    limit?: number;
+    offset?: number;
+  }) => api.get(`/ai/events`, { params }),
+  getEvent: (event_id: string) => api.get(`/ai/events/${event_id}`),
+  downloadScreenshot: (event_id: string) =>
+    api.get(`/ai/events/${event_id}/screenshot`, { responseType: "blob" }),
 };
 
 export default api;

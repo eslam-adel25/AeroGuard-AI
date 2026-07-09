@@ -26,7 +26,9 @@ interface AlertData {
   camera_id: string;
   type: string;
   priority: string;
-  confidence: number;
+  confidence?: number;
+  event_id?: string;
+  screenshot?: string | null;
 }
 
 interface CameraData {
@@ -45,6 +47,9 @@ const Dashboard = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fps, setFps] = useState(0);
   const [detectionCount, setDetectionCount] = useState(0);
+  const [peopleCount, setPeopleCount] = useState(0);
+  const [carCount, setCarCount] = useState(0);
+  const [bagCount, setBagCount] = useState(0);
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLImageElement>(null);
@@ -82,6 +87,26 @@ const Dashboard = () => {
       if (message.event === "ai_status") {
         setFps(message.data.fps || 0);
         setDetectionCount(message.data.objects || 0);
+        setPeopleCount(message.data.persons || 0);
+        setBagCount(message.data.bags || 0);
+        setCarCount(message.data.cars || 0);
+      }
+
+      if (message.event === "ai_event") {
+        const ev = message.data;
+        setAlerts((prev) =>
+          [
+            {
+              camera_id: ev.camera_id,
+              type: ev.detection_type,
+              priority: ev.severity,
+              confidence: ev.confidence ?? 0,
+              event_id: ev.event_id,
+              screenshot: ev.screenshot ?? null,
+            },
+            ...prev,
+          ].slice(0, 3),
+        );
       }
     });
 
@@ -398,6 +423,30 @@ const Dashboard = () => {
                     {detectionCount}
                   </p>
                 </div>
+                <div className="min-w-[66px]">
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
+                    People
+                  </p>
+                  <p className="text-lg font-black text-white font-mono">
+                    {peopleCount}
+                  </p>
+                </div>
+                <div className="min-w-[66px]">
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
+                    Bags
+                  </p>
+                  <p className="text-lg font-black text-white font-mono">
+                    {bagCount}
+                  </p>
+                </div>
+                <div className="min-w-[66px]">
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
+                    Cars
+                  </p>
+                  <p className="text-lg font-black text-white font-mono">
+                    {carCount}
+                  </p>
+                </div>
                 <div className="flex items-center gap-2 rounded-full bg-black/30 px-3 py-2">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.4)]" />
                   <span className="text-[10px] uppercase tracking-[0.24em] text-white font-semibold">
@@ -426,6 +475,52 @@ const Dashboard = () => {
                     {alert.type} {t("dashboard.detectLabel")}
                   </h4>
                 </div>
+                {alert.event_id ? (
+                  <div className="ml-auto flex items-center gap-2 pointer-events-auto">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await (
+                            await import("../services/api")
+                          ).aiService.downloadScreenshot(
+                            alert.event_id as string,
+                          );
+                          const blob = res.data as Blob;
+                          const url = window.URL.createObjectURL(blob);
+                          window.open(url, "_blank");
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="rounded-full bg-white/6 px-3 py-2 text-xs text-white"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await (
+                            await import("../services/api")
+                          ).aiService.downloadScreenshot(
+                            alert.event_id as string,
+                          );
+                          const blob = res.data as Blob;
+                          const url = window.URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `ai_event_${alert.event_id}.jpg`;
+                          a.click();
+                          window.URL.revokeObjectURL(url);
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="rounded-full bg-white/6 px-3 py-2 text-xs text-white"
+                    >
+                      Download
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ from sqlalchemy.types import String
 from datetime import date
 
 from ..models.models import Detection, Camera, Report
+from ..models.models import AIEvent
 
 
 class ReportRepository:
@@ -180,6 +181,16 @@ class ReportRepository:
             .all()
         )
 
+        # include AI events distribution (fires, smoke, loitering, etc.)
+        ai_distribution = (
+            self.db.query(
+                AIEvent.detection_type,
+                func.count(AIEvent.event_id).label("count"),
+            )
+            .group_by(AIEvent.detection_type)
+            .all()
+        )
+
         return {
             "summary": {
                 "total_detections": total_detections,
@@ -208,6 +219,13 @@ class ReportRepository:
                         "count": t.count,
                     }
                     for t in threat_distribution
+                ],
+                "ai_events": [
+                    {
+                        "type": a.detection_type,
+                        "count": a.count,
+                    }
+                    for a in ai_distribution
                 ],
             },
             "latest_alerts": [
