@@ -183,3 +183,19 @@ class UserSettings(Base):
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now(), nullable=True)
 
     
+
+class Report(Base):
+    __tablename__ = "reports"
+    report_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    generated_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    generated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    title = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    report_type = Column(String(50), default="custom")
+    filters = Column(JSONB, nullable=True)
+    summary = Column(JSONB, nullable=True)
+    charts = Column(JSONB, nullable=True)
+    details = Column(JSONB, nullable=True)
+    export_history = Column(JSONB, nullable=True)  # list of exports with metadata
+

@@ -33,16 +33,35 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
 
 class ReportService:
     @staticmethod
-    def get_report_stats(db: Session, start_date: date, end_date: date, camera_id: str = None, owner_id: str = None, is_admin: bool = False):
+    def get_report_stats(
+        db: Session,
+        start_date: date,
+        end_date: date,
+        camera_id: str = None,
+        owner_id: str = None,
+        is_admin: bool = False,
+        detection_type: str | None = None,
+        severity: str | None = None,
+        confidence_min: float | None = None,
+        confidence_max: float | None = None,
+    ):
         """منطق استخراج الإحصائيات من قاعدة البيانات (Section 4)."""
         filters = [
             func.date(Detection.detected_at) >= start_date,
-            func.date(Detection.detected_at) <= end_date
+            func.date(Detection.detected_at) <= end_date,
         ]
         if camera_id:
             filters.append(Detection.camera_id == camera_id)
         if owner_id and not is_admin:
             filters.append(Detection.owner_id == owner_id)
+        if detection_type:
+            filters.append(Detection.detection_type.ilike(f"%{detection_type}%"))
+        if severity:
+            filters.append(Detection.priority.ilike(f"%{severity}%"))
+        if confidence_min is not None:
+            filters.append(Detection.confidence >= confidence_min)
+        if confidence_max is not None:
+            filters.append(Detection.confidence <= confidence_max)
 
         # 1. إجمالي الاكتشافات
         total = db.query(func.count(Detection.detection_id)).filter(and_(*filters)).scalar() or 0
@@ -75,12 +94,19 @@ class ReportService:
         for priority, count in severity_rows:
             severity_counts[_normalize_severity(priority)] += int(count or 0)
 
-        # 6. تجميع الأنواع التشغيلية المطلوبة في الـ KPI
+        # 6. تجميع أنواع التفتيش التشغيلية المطلوبة
         categorized_counts = {
-            "weapons": 0,
             "fire": 0,
+            "smoke": 0,
+            "weapons": 0,
             "persons": 0,
             "vehicles": 0,
+            "restricted_area_violations": 0,
+            "wrong_direction": 0,
+            "loitering": 0,
+            "crowd_density": 0,
+            "abandoned_bag": 0,
+            "unknown_persons": 0,
         }
 
         details = []
@@ -91,6 +117,33 @@ class ReportService:
             bucket = _category_from_detection_type(detection_type)
             if bucket:
                 categorized_counts[bucket] += c
+
+            lower_type = (detection_type or "").lower()
+            if "smoke" in lower_type:
+                categorized_counts["smoke"] += c
+            if "abandoned" in lower_type or "bag" in lower_type:
+                categorized_counts["abandoned_bag"] += c
+            if "loiter" in lower_type:
+                categorized_counts["loitering"] += c
+            if "crowd" in lower_type or "density" in lower_type:
+                categorized_counts["crowd_density"] += c
+            if "unknown" in lower_type and "person" in lower_type:
+                categorized_counts["unknown_persons"] += c
+
+        violation_counts = db.query(
+            Detection.violation_type,
+            func.count(Detection.detection_id),
+        ).filter(and_(*filters, Detection.is_violation.is_(True))).group_by(Detection.violation_type).all()
+
+        for violation_type, count in violation_counts:
+            lower = (violation_type or "").lower()
+            if "restricted" in lower:
+                categorized_counts["restricted_area_violations"] += int(count or 0)
+            elif "wrong" in lower or "direction" in lower:
+                categorized_counts["wrong_direction"] += int(count or 0)
+
+        max_conf = db.query(func.max(Detection.confidence)).filter(and_(*filters)).scalar() or 0
+        min_conf = db.query(func.min(Detection.confidence)).filter(and_(*filters)).scalar() or 0
 
         # 7. قائمة الكاميرات (للفلترة + الإحصاء)
         camera_query = db.query(
@@ -148,7 +201,22 @@ class ReportService:
             for row in top_camera_rows
         ]
 
-        # 9. التنبيهات الأخيرة
+        # 9. أكثر أنواع الاكتشاف نشاطاً
+        top_types_rows = db.query(
+            Detection.detection_type,
+            func.count(Detection.detection_id).label("count"),
+        ).filter(
+            and_(*filters),
+        ).group_by(
+            Detection.detection_type,
+        ).order_by(func.count(Detection.detection_id).desc()).limit(10).all()
+
+        top_detection_types = [
+            {"detection_type": row.detection_type, "count": int(row.count or 0)}
+            for row in top_types_rows
+        ]
+
+        # 10. التنبيهات الأخيرة
         recent_rows = db.query(
             Detection.detected_at,
             Detection.detection_type,
@@ -177,32 +245,28 @@ class ReportService:
             for row in recent_rows
         ]
 
-        # 10. مخطط زمني حسب اليوم/الساعة
+        # 11. مخطط زمني حسب اليوم
         timeline_rows = db.query(
             func.date(Detection.detected_at).label("day"),
-            func.extract("hour", Detection.detected_at).label("hour"),
             func.count(Detection.detection_id).label("count"),
         ).filter(
             and_(*filters),
         ).group_by(
             func.date(Detection.detected_at),
-            func.extract("hour", Detection.detected_at),
         ).order_by(
             func.date(Detection.detected_at),
-            func.extract("hour", Detection.detected_at),
         ).all()
 
         timeline = [
             {
-                "label": f"{row.day} {int(row.hour):02d}:00",
-                "day": str(row.day),
-                "hour": int(row.hour),
+                "label": str(row.day),
+                "date": str(row.day),
                 "count": int(row.count or 0),
             }
             for row in timeline_rows
         ]
 
-        # 11. Heatmap: كثافة حسب الساعة
+        # 12. Heatmap: كثافة حسب الساعة
         heatmap_rows = db.query(
             func.extract("hour", Detection.detected_at).label("hour"),
             func.count(Detection.detection_id).label("count"),
@@ -223,7 +287,7 @@ class ReportService:
             for row in heatmap_rows
         ]
 
-        # 12. توزيع الشدة بالنسبة المئوية
+        # 13. توزيع الشدة بالنسبة المئوية
         severity_distribution = []
         for key in ["Critical", "High", "Medium", "Low"]:
             count = severity_counts[key]
@@ -243,7 +307,7 @@ class ReportService:
                 # Backward-compatible keys (existing Reports page)
                 "total": total,
                 "violations": violations,
-                "unknown_persons": 0,
+                "unknown_persons": categorized_counts["unknown_persons"],
                 "average_confidence": round(float(avg_conf), 2),
 
                 # Extended dashboard keys
@@ -252,10 +316,19 @@ class ReportService:
                 "high_alerts": severity_counts["High"],
                 "medium_alerts": severity_counts["Medium"],
                 "low_alerts": severity_counts["Low"],
-                "weapons": categorized_counts["weapons"],
-                "fire": categorized_counts["fire"],
-                "persons": categorized_counts["persons"],
-                "vehicles": categorized_counts["vehicles"],
+                "fire_detections": categorized_counts["fire"],
+                "smoke_detections": categorized_counts["smoke"],
+                "weapon_detections": categorized_counts["weapons"],
+                "person_detections": categorized_counts["persons"],
+                "vehicle_detections": categorized_counts["vehicles"],
+                "restricted_area_violations": categorized_counts["restricted_area_violations"],
+                "wrong_direction_events": categorized_counts["wrong_direction"],
+                "loitering_events": categorized_counts["loitering"],
+                "crowd_density_alerts": categorized_counts["crowd_density"],
+                "abandoned_bag_events": categorized_counts["abandoned_bag"],
+                "max_confidence": float(max_conf),
+                "min_confidence": float(min_conf),
+                "average_confidence": round(float(avg_conf), 2),
                 "active_cameras": active_cameras,
                 "ai_accuracy": None,
             },
@@ -265,8 +338,47 @@ class ReportService:
                 "threat_distribution": details,
                 "severity_distribution": severity_distribution,
                 "top_cameras": top_cameras,
+                "top_detection_types": top_detection_types,
                 "heatmap": heatmap,
             },
             "recent_alerts": recent_alerts,
             "cameras": cameras,
         }
+
+    @staticmethod
+    def generate_report(
+        db: Session,
+        start_date: date,
+        end_date: date,
+        camera_id: str | None,
+        owner_id: str,
+        generated_by: str,
+        title: str | None = None,
+        report_type: str = "custom",
+        extra_filters: dict | None = None,
+        is_admin: bool = False,
+    ):
+        # reuse get_report_stats to produce payload
+        payload = ReportService.get_report_stats(
+            db,
+            start_date,
+            end_date,
+            camera_id=camera_id,
+            owner_id=owner_id,
+            is_admin=is_admin,
+        )
+
+        # persist report
+        from ..repositories.report_repository import ReportRepository
+
+        repo = ReportRepository(db)
+        filters = {
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "camera_id": camera_id,
+        }
+        if extra_filters:
+            filters.update(extra_filters)
+
+        report = repo.create_report_record(owner_id=owner_id, generated_by=generated_by, title=title, report_type=report_type, filters=filters, payload=payload)
+        return report

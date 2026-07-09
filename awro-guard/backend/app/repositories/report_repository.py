@@ -1,13 +1,91 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, desc, or_, cast
+from sqlalchemy.types import String
 from datetime import date
 
-from ..models.models import Detection, Camera
+from ..models.models import Detection, Camera, Report
 
 
 class ReportRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    # Persistent reports storage
+    def create_report_record(self, owner_id: str, generated_by: str, title: str | None, report_type: str, filters: dict, payload: dict):
+        report = Report(
+            owner_id=owner_id,
+            generated_by=generated_by,
+            title=title,
+            report_type=report_type,
+            filters=filters,
+            summary=payload.get("summary") if payload else None,
+            charts=payload.get("charts") if payload else None,
+            details=payload.get("details") if payload else None,
+            export_history=[],
+        )
+        self.db.add(report)
+        self.db.commit()
+        self.db.refresh(report)
+        return report
+
+    def get_report(self, report_id: str, owner_id: str | None = None, is_admin: bool = False):
+        q = self.db.query(Report).filter(Report.report_id == report_id)
+        if owner_id and not is_admin:
+            q = q.filter(Report.owner_id == owner_id)
+        return q.first()
+
+    def list_reports(
+        self,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+        query: str | None = None,
+        camera_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ):
+        q = self.db.query(Report)
+        if owner_id and not is_admin:
+            q = q.filter(Report.owner_id == owner_id)
+        if query:
+            q = q.filter(
+                or_(
+                    Report.report_id.ilike(f"%{query}%"),
+                    Report.title.ilike(f"%{query}%"),
+                    cast(Report.details, String).ilike(f"%{query}%"),
+                )
+            )
+        if camera_id:
+            q = q.filter(Report.filters["camera_id"].astext == camera_id)
+        if start_date:
+            q = q.filter(Report.generated_at >= start_date)
+        if end_date:
+            q = q.filter(Report.generated_at <= end_date)
+        total = q.count()
+        rows = q.order_by(desc(Report.generated_at)).limit(limit).offset(offset).all()
+        return {
+            "total": total,
+            "items": rows,
+        }
+
+    def delete_report(self, report_id: str, owner_id: str | None = None, is_admin: bool = False):
+        report = self.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+        if not report:
+            return False
+        self.db.delete(report)
+        self.db.commit()
+        return True
+
+    def append_export_history(self, report: Report, export_entry: dict):
+        history = report.export_history or []
+        history.append(export_entry)
+        report.export_history = history
+        self.db.add(report)
+        self.db.commit()
+        self.db.refresh(report)
+        return report
+
 
     def get_dashboard_data(
         self,

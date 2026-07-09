@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { reportService, cameraService } from "../services/api";
 import { Loader2, BarChart3, TriangleAlert, ShieldCheck } from "lucide-react";
+import ReportManager from "../components/ReportManager";
 
 type CameraItem = {
   camera_id: string;
@@ -139,6 +140,8 @@ const Reports = () => {
           </button>
         </div>
       </div>
+
+      <ReportManager />
 
       {loading ? (
         <div className="h-56 flex items-center justify-center bg-ag-card rounded-3xl border border-white/5">

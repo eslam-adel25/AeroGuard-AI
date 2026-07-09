@@ -186,19 +186,36 @@ export const reportService = {
       params: filters,
     }),
 
-  exportPdf: (filters: {
+  generateReport: (payload: {
     start_date: string;
     end_date: string;
     camera_id?: string;
-  }) =>
+    title?: string;
+    report_type?: string;
+  }) => api.post("/reports/generate", payload),
+
+  getAllReports: (params?: { limit?: number; offset?: number }) =>
+    api.get("/reports/", { params }),
+
+  getReport: (report_id: string) => api.get(`/reports/${report_id}`),
+
+  exportCsv: (report_id: string) =>
+    api.get("/reports/export/csv", {
+      params: { report_id },
+      responseType: "blob",
+    }),
+  exportExcel: (report_id: string) =>
+    api.get("/reports/export/excel", {
+      params: { report_id },
+      responseType: "blob",
+    }),
+  exportPdf: (report_id: string) =>
     api.get("/reports/export/pdf", {
-      params: filters,
+      params: { report_id },
+      responseType: "blob",
     }),
 
-  generateReport: (type: string) =>
-    api.post("/reports/", { report_type: type }),
-
-  getAllReports: () => api.get("/reports/"),
+  deleteReport: (report_id: string) => api.delete(`/reports/${report_id}`),
 };
 
 export default api;
