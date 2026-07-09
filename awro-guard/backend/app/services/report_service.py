@@ -355,6 +355,10 @@ class ReportService:
         generated_by: str,
         title: str | None = None,
         report_type: str = "custom",
+        detection_type: str | None = None,
+        severity: str | None = None,
+        confidence_min: float | None = None,
+        confidence_max: float | None = None,
         extra_filters: dict | None = None,
         is_admin: bool = False,
     ):
@@ -366,6 +370,10 @@ class ReportService:
             camera_id=camera_id,
             owner_id=owner_id,
             is_admin=is_admin,
+            detection_type=detection_type,
+            severity=severity,
+            confidence_min=confidence_min,
+            confidence_max=confidence_max,
         )
 
         # persist report
@@ -376,6 +384,10 @@ class ReportService:
             "start_date": str(start_date),
             "end_date": str(end_date),
             "camera_id": camera_id,
+            "detection_type": detection_type,
+            "severity": severity,
+            "confidence_min": confidence_min,
+            "confidence_max": confidence_max,
         }
         if extra_filters:
             filters.update(extra_filters)

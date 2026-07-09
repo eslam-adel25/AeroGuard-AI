@@ -16,14 +16,29 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 async def get_report_summary(
     start_date: date = Query(...),
     end_date: date = Query(...),
-    camera_id: str = Query(None),
+    camera_id: str | None = Query(None),
+    detection_type: str | None = Query(None),
+    severity: str | None = Query(None),
+    confidence_min: float | None = Query(None),
+    confidence_max: float | None = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """رابط جلب ملخص التقارير (Section 4)"""
     owner_id = current_user.get("user_id")
     is_admin = current_user.get("role") == "Administrator"
-    return ReportService.get_report_stats(db, start_date, end_date, camera_id, owner_id=owner_id, is_admin=is_admin)
+    return ReportService.get_report_stats(
+        db,
+        start_date,
+        end_date,
+        camera_id=camera_id,
+        owner_id=owner_id,
+        is_admin=is_admin,
+        detection_type=detection_type,
+        severity=severity,
+        confidence_min=confidence_min,
+        confidence_max=confidence_max,
+    )
 
 # ==========================================
 # Dashboard Analytics API
@@ -34,6 +49,10 @@ async def get_dashboard(
     start_date: date = Query(...),
     end_date: date = Query(...),
     camera_id: str | None = Query(None),
+    detection_type: str | None = Query(None),
+    severity: str | None = Query(None),
+    confidence_min: float | None = Query(None),
+    confidence_max: float | None = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -48,8 +67,11 @@ async def get_dashboard(
         camera_id=camera_id,
         owner_id=current_user.get("user_id"),
         is_admin=(current_user.get("role") == "Administrator"),
+        detection_type=detection_type,
+        severity=severity,
+        confidence_min=confidence_min,
+        confidence_max=confidence_max,
     )
-
 
 
 @router.post("/generate")
@@ -59,16 +81,34 @@ async def generate_report(
     camera_id: str | None = Body(None),
     title: str | None = Body(None),
     report_type: str = Body("custom"),
+    detection_type: str | None = Body(None),
+    severity: str | None = Body(None),
+    confidence_min: float | None = Body(None),
+    confidence_max: float | None = Body(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     owner_id = current_user.get("user_id")
     is_admin = (current_user.get("role") == "Administrator")
-    report = ReportService.generate_report(db=db, start_date=start_date, end_date=end_date, camera_id=camera_id, owner_id=owner_id, generated_by=owner_id, title=title, report_type=report_type)
+    report = ReportService.generate_report(
+        db=db,
+        start_date=start_date,
+        end_date=end_date,
+        camera_id=camera_id,
+        owner_id=owner_id,
+        generated_by=owner_id,
+        title=title,
+        report_type=report_type,
+        detection_type=detection_type,
+        severity=severity,
+        confidence_min=confidence_min,
+        confidence_max=confidence_max,
+    )
     return {
         "report_id": str(report.report_id),
         "generated_at": report.generated_at,
         "title": report.title,
+        "report_type": report.report_type,
     }
 
 
@@ -76,13 +116,26 @@ async def generate_report(
 async def list_reports(
     limit: int = Query(50),
     offset: int = Query(0),
+    query: str | None = Query(None),
+    camera_id: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     owner_id = current_user.get("user_id")
     is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    result = repo.list_reports(owner_id=owner_id, is_admin=is_admin, limit=limit, offset=offset)
+    result = repo.list_reports(
+        owner_id=owner_id,
+        is_admin=is_admin,
+        limit=limit,
+        offset=offset,
+        query=query,
+        camera_id=camera_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
     # serialize UUIDs/datetimes to strings
     items = []
     for r in result["items"]:
@@ -93,6 +146,7 @@ async def list_reports(
             "generated_by": str(r.generated_by),
             "report_type": r.report_type,
             "filters": r.filters,
+            "export_history": r.export_history or [],
         })
     return {"total": result["total"], "items": items}
 
@@ -113,6 +167,7 @@ async def get_report(report_id: str, db: Session = Depends(get_db), current_user
         "summary": report.summary,
         "charts": report.charts,
         "details": report.details,
+        "export_history": report.export_history or [],
     }
 
 

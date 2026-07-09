@@ -194,8 +194,14 @@ export const reportService = {
     report_type?: string;
   }) => api.post("/reports/generate", payload),
 
-  getAllReports: (params?: { limit?: number; offset?: number }) =>
-    api.get("/reports/", { params }),
+  getAllReports: (params?: {
+    limit?: number;
+    offset?: number;
+    query?: string;
+    camera_id?: string;
+    start_date?: string;
+    end_date?: string;
+  }) => api.get("/reports/", { params }),
 
   getReport: (report_id: string) => api.get(`/reports/${report_id}`),
 

@@ -1,11 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { reportService, cameraService } from "../services/api";
-import { Loader2 } from "lucide-react";
+import {
+  Loader2,
+  FileText,
+  FileSpreadsheet,
+  Trash2,
+  Search,
+} from "lucide-react";
 
 interface ReportItem {
   report_id: string;
   title?: string;
   generated_at: string;
+  report_type?: string;
+  filters?: Record<string, unknown>;
+  export_history?: Array<{ type: string; timestamp: string }>;
 }
 
 const ReportManager: React.FC = () => {
@@ -18,7 +27,30 @@ const ReportManager: React.FC = () => {
     start_date: "",
     end_date: "",
     camera_id: "",
+    query: "",
   });
+  const [title, setTitle] = useState("");
+  const [reportType, setReportType] = useState("custom");
+
+  const loadReports = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await reportService.getAllReports({
+        limit: 100,
+        offset: 0,
+        query: filters.query || undefined,
+        camera_id: filters.camera_id || undefined,
+        start_date: filters.start_date || undefined,
+        end_date: filters.end_date || undefined,
+      });
+      setReports(res.data.items || []);
+    } catch (err) {
+      console.warn("Failed to load reports", err);
+      setReports([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
 
   useEffect(() => {
     (async () => {
@@ -30,16 +62,52 @@ const ReportManager: React.FC = () => {
       }
       await loadReports();
     })();
-  }, []);
+  }, [loadReports]);
 
-  const loadReports = async () => {
+  const handleFilterSearch = async () => {
+    await loadReports();
+  };
+
+  const downloadFile = (blob: Blob, filename: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleExport = async (id: string, type: "csv" | "excel" | "pdf") => {
+    try {
+      let res;
+      if (type === "csv") {
+        res = await reportService.exportCsv(id);
+        downloadFile(res.data, `report-${id}.csv`);
+      } else if (type === "excel") {
+        res = await reportService.exportExcel(id);
+        downloadFile(res.data, `report-${id}.xlsx`);
+      } else {
+        res = await reportService.exportPdf(id);
+        downloadFile(res.data, `report-${id}.pdf`);
+      }
+      await loadReports();
+    } catch (err) {
+      console.warn(err);
+      alert(`Failed to export ${type.toUpperCase()}`);
+    }
+  };
+
+  const handleDeleteReport = async (id: string) => {
+    if (!window.confirm("Are you sure you want to delete this report?")) {
+      return;
+    }
     setLoading(true);
     try {
-      const res = await reportService.getAllReports();
-      setReports(res.data.items || []);
+      await reportService.deleteReport(id);
+      await loadReports();
     } catch (err) {
-      console.warn("Failed to load reports", err);
-      setReports([]);
+      console.warn(err);
+      alert("Failed to delete report");
     } finally {
       setLoading(false);
     }
@@ -54,6 +122,8 @@ const ReportManager: React.FC = () => {
         start_date: filters.start_date,
         end_date: filters.end_date,
         camera_id: filters.camera_id || undefined,
+        title: title || undefined,
+        report_type: reportType || undefined,
       };
       const res = await reportService.generateReport(payload);
       alert("Report generated: " + (res.data.report_id || ""));
@@ -66,26 +136,26 @@ const ReportManager: React.FC = () => {
     }
   };
 
-  const handleExportCsv = async (id: string) => {
-    try {
-      const res = await reportService.exportCsv(id);
-      const blob = new Blob([res.data], { type: "text/csv" });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `report-${id}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.warn(err);
-      alert("Failed to export CSV");
-    }
-  };
-
   return (
     <div className="bg-ag-card p-6 rounded-2xl border border-white/5 space-y-4">
       <h3 className="text-lg font-black">Reports Manager</h3>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Report title (optional)"
+          className="col-span-2 bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
+        />
+        <select
+          value={reportType}
+          onChange={(e) => setReportType(e.target.value)}
+          className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
+        >
+          <option value="custom">Custom</option>
+          <option value="summary">Summary</option>
+          <option value="compliance">Compliance</option>
+        </select>
         <input
           type="date"
           value={filters.start_date}
@@ -116,11 +186,31 @@ const ReportManager: React.FC = () => {
             </option>
           ))}
         </select>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={handleGenerate}
-          className="bg-ag-success text-white rounded-xl px-4 py-2 font-bold text-sm"
+          className="inline-flex items-center justify-center gap-2 bg-ag-success text-white rounded-xl px-4 py-2 font-bold text-sm"
         >
-          {loading ? <Loader2 className="animate-spin" /> : "Generate"}
+          {loading ? <Loader2 className="animate-spin" /> : "Generate Report"}
+        </button>
+        <div className="relative w-full sm:w-auto">
+          <input
+            type="text"
+            value={filters.query}
+            onChange={(e) =>
+              setFilters((p) => ({ ...p, query: e.target.value }))
+            }
+            placeholder="Search saved reports"
+            className="w-full rounded-xl border border-white/10 bg-ag-dark px-10 py-2 text-sm"
+          />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        </div>
+        <button
+          onClick={handleFilterSearch}
+          className="inline-flex items-center justify-center gap-2 bg-ag-primary text-white rounded-xl px-4 py-2 font-bold text-sm"
+        >
+          Search
         </button>
       </div>
 
@@ -131,30 +221,70 @@ const ReportManager: React.FC = () => {
             <Loader2 className="animate-spin" />
           </div>
         ) : (
-          <div className="space-y-2 max-h-48 overflow-auto">
+          <div className="space-y-2 max-h-96 overflow-auto">
             {reports.length === 0 && (
               <div className="text-sm text-gray-400">No reports yet</div>
             )}
             {reports.map((r) => (
               <div
                 key={r.report_id}
-                className="flex items-center justify-between"
+                className="rounded-2xl border border-white/10 bg-black/10 p-3"
               >
-                <div>
-                  <div className="font-mono text-sm">{r.report_id}</div>
-                  <div className="text-xs text-gray-400">
-                    {r.title || "Report"} —{" "}
-                    {new Date(r.generated_at).toLocaleString()}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-mono text-sm text-gray-100">
+                      {r.report_id}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {r.title || "Report"} —{" "}
+                      {new Date(r.generated_at).toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {r.report_type ?? "custom"} •{" "}
+                      {r.filters?.camera_id
+                        ? `Camera: ${r.filters.camera_id}`
+                        : "All cameras"}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleExport(r.report_id, "csv")}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <FileText size={14} /> CSV
+                    </button>
+                    <button
+                      onClick={() => handleExport(r.report_id, "excel")}
+                      className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <FileSpreadsheet size={14} /> XLSX
+                    </button>
+                    <button
+                      onClick={() => handleExport(r.report_id, "pdf")}
+                      className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <FileText size={14} /> PDF
+                    </button>
+                    <button
+                      onClick={() => handleDeleteReport(r.report_id)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleExportCsv(r.report_id)}
-                    className="text-sm bg-ag-primary text-white px-3 py-1 rounded"
-                  >
-                    CSV
-                  </button>
-                </div>
+                {r.export_history?.length ? (
+                  <div className="mt-3 text-xs text-gray-400">
+                    Exported:{" "}
+                    {r.export_history
+                      .map(
+                        (entry) =>
+                          `${entry.type.toUpperCase()} @ ${new Date(entry.timestamp).toLocaleString()}`,
+                      )
+                      .join(" • ")}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

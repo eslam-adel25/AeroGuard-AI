@@ -1,11 +1,51 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { reportService, cameraService } from "../services/api";
 import { Loader2, BarChart3, TriangleAlert, ShieldCheck } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import ReportManager from "../components/ReportManager";
 
 type CameraItem = {
   camera_id: string;
   camera_name: string;
+};
+
+type TimelinePoint = {
+  label: string;
+  date: string;
+  count: number;
+};
+
+type DetectionTypeItem = {
+  type: string;
+  count: number;
+};
+
+type TopCameraItem = {
+  camera_id: string;
+  camera_name: string;
+  location: string;
+  status: string;
+  count: number;
+};
+
+type SeverityItem = {
+  severity: string;
+  count: number;
+  percentage: number;
 };
 
 type ReportResponse = {
@@ -14,8 +54,35 @@ type ReportResponse = {
     violations: number;
     unknown_persons: number;
     average_confidence: number;
+    total_detections?: number;
+    critical_alerts?: number;
+    high_alerts?: number;
+    medium_alerts?: number;
+    low_alerts?: number;
+    fire_detections?: number;
+    smoke_detections?: number;
+    weapon_detections?: number;
+    person_detections?: number;
+    vehicle_detections?: number;
+    active_cameras?: number;
+    ai_accuracy?: number | null;
   };
-  details: Array<{ type: string; count: number }>;
+  details: DetectionTypeItem[];
+  charts?: {
+    timeline?: TimelinePoint[];
+    threat_distribution?: DetectionTypeItem[];
+    severity_distribution?: SeverityItem[];
+    top_cameras?: TopCameraItem[];
+    heatmap?: Array<{ hour: number; label: string; count: number }>;
+  };
+  recent_alerts?: Array<{
+    time: string;
+    camera_id: string;
+    camera_name: string;
+    detection_type: string;
+    confidence: number;
+    severity: string;
+  }>;
 };
 
 const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
@@ -46,6 +113,22 @@ const Reports = () => {
       setLoading(false);
     }
   };
+
+  const timeline = useMemo(() => data?.charts?.timeline ?? [], [data]);
+
+  const threatDistribution = useMemo(
+    () => data?.charts?.threat_distribution ?? data?.details ?? [],
+    [data],
+  );
+
+  const severityDistribution = useMemo(
+    () => data?.charts?.severity_distribution ?? [],
+    [data],
+  );
+
+  const topCameras = useMemo(() => data?.charts?.top_cameras ?? [], [data]);
+
+  // hasData not currently used in UI
 
   useEffect(() => {
     const now = new Date();
@@ -174,30 +257,149 @@ const Reports = () => {
             </div>
           </div>
 
-          <div className="bg-ag-card p-6 rounded-3xl border border-white/5">
-            <h3 className="text-xl font-bold mb-4">Detection Types</h3>
-            {data?.details?.length ? (
-              <div className="space-y-3">
-                {data.details.map((item, idx) => (
-                  <div
-                    key={`${item.type}-${idx}`}
-                    className="flex items-center justify-between bg-black/20 rounded-xl px-4 py-3"
-                  >
-                    <span className="text-sm font-semibold text-gray-300">
-                      {item.type}
-                    </span>
-                    <span className="text-sm font-black text-white">
-                      {item.count}
-                    </span>
-                  </div>
-                ))}
+          <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
+              <h3 className="text-xl font-bold mb-4">Detection Volume</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={timeline}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#94a3b8"
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis stroke="#94a3b8" allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#10151f",
+                        border: "1px solid #ffffff22",
+                        borderRadius: "12px",
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#3b82f6"
+                      fill="#3b82f6"
+                      fillOpacity={0.18}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-            ) : (
-              <p className="text-gray-500 text-sm">
-                No data in selected range.
-              </p>
-            )}
-          </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
+              <h3 className="text-xl font-bold mb-4">Top Detection Types</h3>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={threatDistribution}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
+                    <XAxis
+                      dataKey="type"
+                      stroke="#94a3b8"
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis stroke="#94a3b8" allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#10151f",
+                        border: "1px solid #ffffff22",
+                        borderRadius: "12px",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div className="xl:col-span-2 rounded-2xl border border-white/5 bg-ag-card p-5">
+              <h3 className="text-xl font-bold mb-4">Top Cameras</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-400 border-b border-white/10">
+                      <th className="py-2">Camera</th>
+                      <th className="py-2">Location</th>
+                      <th className="py-2">Detections</th>
+                      <th className="py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topCameras.map((cam) => (
+                      <tr
+                        key={cam.camera_id}
+                        className="border-b border-white/5"
+                      >
+                        <td className="py-2 font-semibold text-white">
+                          {cam.camera_name}
+                        </td>
+                        <td className="py-2 text-gray-300">{cam.location}</td>
+                        <td className="py-2 text-gray-300">{cam.count}</td>
+                        <td className="py-2">
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-bold ${
+                              cam.status.toLowerCase() === "online"
+                                ? "bg-green-500/20 text-green-300"
+                                : "bg-gray-500/20 text-gray-300"
+                            }`}
+                          >
+                            {cam.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
+              <h3 className="text-xl font-bold mb-4">Detection Breakdown</h3>
+              {severityDistribution.length ? (
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#10151f",
+                          border: "1px solid #ffffff22",
+                          borderRadius: "12px",
+                        }}
+                      />
+                      <Legend />
+                      <Pie
+                        data={severityDistribution}
+                        dataKey="percentage"
+                        nameKey="severity"
+                        innerRadius={42}
+                        outerRadius={88}
+                        paddingAngle={4}
+                      >
+                        {severityDistribution.map((entry, index) => (
+                          <Cell
+                            key={`${entry.severity}-${index}`}
+                            fill={
+                              ["#ef4444", "#f59e0b", "#3b82f6", "#22c55e"][
+                                index % 4
+                              ]
+                            }
+                          />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="text-gray-400 text-sm">
+                  No severity chart available.
+                </p>
+              )}
+            </div>
+          </section>
         </>
       )}
     </div>
