@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cameraService, reportService } from "../services/api";
 import {
   AlertTriangle,
@@ -144,40 +145,46 @@ const SkeletonCard = memo(() => (
   </div>
 ));
 
-const EmptyState = memo(() => (
-  <div className="rounded-3xl border border-white/10 bg-ag-card p-10 text-center">
-    <Radar className="mx-auto mb-4 text-gray-500" size={38} />
-    <h3 className="text-xl font-black text-white mb-2">No Analytics Data</h3>
-    <p className="text-gray-400 text-sm">
-      No detections found for the selected date range and camera.
-    </p>
-  </div>
-));
-
-const ErrorCard = memo(({ onRetry }: { onRetry: () => void }) => (
-  <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-8">
-    <div className="flex items-start gap-4">
-      <AlertTriangle className="text-red-400 mt-1" size={24} />
-      <div className="flex-1">
-        <h3 className="text-lg font-black text-white">
-          Failed to Load Analytics
-        </h3>
-        <p className="text-red-200/80 text-sm mt-1">
-          The dashboard API request failed. Please verify backend service and
-          try again.
-        </p>
-      </div>
-      <button
-        onClick={onRetry}
-        className="rounded-xl bg-red-600 hover:bg-red-700 px-4 py-2 text-sm font-bold text-white"
-      >
-        Retry
-      </button>
+const EmptyState = memo(() => {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-3xl border border-white/10 bg-ag-card p-10 text-center">
+      <Radar className="mx-auto mb-4 text-gray-500" size={38} />
+      <h3 className="text-xl font-black text-white mb-2">
+        {t("analytics.noDataTitle")}
+      </h3>
+      <p className="text-gray-400 text-sm">{t("analytics.noDataSubtitle")}</p>
     </div>
-  </div>
-));
+  );
+});
+
+const ErrorCard = memo(({ onRetry }: { onRetry: () => void }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-8">
+      <div className="flex items-start gap-4">
+        <AlertTriangle className="text-red-400 mt-1" size={24} />
+        <div className="flex-1">
+          <h3 className="text-lg font-black text-white">
+            {t("analytics.errorTitle")}
+          </h3>
+          <p className="text-red-200/80 text-sm mt-1">
+            {t("analytics.errorSubtitle")}
+          </p>
+        </div>
+        <button
+          onClick={onRetry}
+          className="rounded-xl bg-red-600 hover:bg-red-700 px-4 py-2 text-sm font-bold text-white"
+        >
+          {t("common.retry")}
+        </button>
+      </div>
+    </div>
+  );
+});
 
 const Analytics = () => {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<FiltersState>({
     start_date: "",
     end_date: "",
@@ -309,91 +316,91 @@ const Analytics = () => {
     return [
       {
         key: "total",
-        title: "Total Detections",
+        title: t("analytics.kpis.totalDetections"),
         value: total.toLocaleString(),
         icon: Radar,
         tone: "text-red-300",
       },
       {
         key: "critical",
-        title: "Critical Alerts",
+        title: t("analytics.kpis.criticalAlerts"),
         value: critical.toLocaleString(),
         icon: Siren,
         tone: "text-red-400",
       },
       {
         key: "high",
-        title: "High Alerts",
+        title: t("analytics.kpis.highAlerts"),
         value: high.toLocaleString(),
         icon: ShieldAlert,
         tone: "text-orange-300",
       },
       {
         key: "medium",
-        title: "Medium Alerts",
+        title: t("analytics.kpis.mediumAlerts"),
         value: medium.toLocaleString(),
         icon: AlertTriangle,
         tone: "text-amber-300",
       },
       {
         key: "low",
-        title: "Low Alerts",
+        title: t("analytics.kpis.lowAlerts"),
         value: low.toLocaleString(),
         icon: ShieldCheck,
         tone: "text-emerald-300",
       },
       {
         key: "weapons",
-        title: "Weapons",
+        title: t("analytics.kpis.weapons"),
         value: weapons.toLocaleString(),
         icon: Shield,
         tone: "text-red-300",
       },
       {
         key: "fire",
-        title: "Fire",
+        title: t("analytics.kpis.fire"),
         value: fire.toLocaleString(),
         icon: Flame,
         tone: "text-orange-300",
       },
       {
         key: "persons",
-        title: "Persons",
+        title: t("analytics.kpis.persons"),
         value: persons.toLocaleString(),
         icon: Users,
         tone: "text-blue-300",
       },
       {
         key: "vehicles",
-        title: "Vehicles",
+        title: t("analytics.kpis.vehicles"),
         value: vehicles.toLocaleString(),
         icon: Car,
         tone: "text-cyan-300",
       },
       {
         key: "avg",
-        title: "Average Confidence",
+        title: t("analytics.kpis.averageConfidence"),
         value: `${avgConf.toFixed(2)}%`,
         icon: Crosshair,
         tone: "text-violet-300",
       },
       {
         key: "active",
-        title: "Active Cameras",
+        title: t("analytics.kpis.activeCameras"),
         value: active.toLocaleString(),
         icon: Video,
         tone: "text-green-300",
       },
       {
         key: "accuracy",
-        title: "AI Accuracy",
+        title: t("analytics.kpis.aiAccuracy"),
         value:
           accuracy === null || accuracy === undefined ? "N/A" : `${accuracy}%`,
         icon: Brain,
         tone: "text-sky-300",
       },
     ];
-  }, [summary]);
+  }, [summary, t]);
 
   const severityPieData = useMemo(
     () =>
@@ -415,10 +422,10 @@ const Analytics = () => {
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6">
           <div>
             <h2 className="text-3xl md:text-4xl font-black tracking-tight text-white">
-              System Intelligence Analytics
+              {t("analytics.pageTitle")}
             </h2>
             <p className="text-gray-400 mt-2 text-sm md:text-base">
-              Real-time AI Detection Statistics
+              {t("analytics.pageSubtitle")}
             </p>
           </div>
 
@@ -446,7 +453,7 @@ const Analytics = () => {
               }
               className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
             >
-              <option value="">All Cameras</option>
+              <option value="">{t("analytics.allCameras")}</option>
               {cameraOptions.map((cam) => (
                 <option key={cam.camera_id} value={cam.camera_id}>
                   {cam.camera_name}
@@ -462,7 +469,7 @@ const Analytics = () => {
                 size={16}
                 className={refreshing ? "animate-spin" : ""}
               />
-              Refresh
+              {t("common.refresh")}
             </button>
           </div>
         </div>
@@ -496,7 +503,7 @@ const Analytics = () => {
                   {kpi.value}
                 </div>
                 <div className="text-[11px] text-gray-500 mt-2">
-                  {kpi.trend ?? "Live dataset"}
+                  {kpi.trend ?? t("analytics.liveDataset")}
                 </div>
               </article>
             ))}
@@ -504,7 +511,9 @@ const Analytics = () => {
 
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">Detection Timeline</h3>
+              <h3 className="text-lg font-black mb-4">
+                {t("analytics.chartTitles.timeline")}
+              </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={timeline}>
@@ -555,7 +564,9 @@ const Analytics = () => {
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">Threat Distribution</h3>
+              <h3 className="text-lg font-black mb-4">
+                {t("analytics.chartTitles.distribution")}
+              </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={threatBarData}>
@@ -583,7 +594,7 @@ const Analytics = () => {
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div className="xl:col-span-2 rounded-2xl border border-white/5 bg-ag-card p-5">
               <h3 className="text-lg font-black mb-4">
-                Detection Frequency Over Time
+                {t("analytics.chartTitles.frequency")}
               </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
@@ -615,7 +626,9 @@ const Analytics = () => {
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">Severity Distribution</h3>
+              <h3 className="text-lg font-black mb-4">
+                {t("analytics.chartTitles.severity")}
+              </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -650,15 +663,25 @@ const Analytics = () => {
 
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">Top Cameras</h3>
+              <h3 className="text-lg font-black mb-4">
+                {t("analytics.chartTitles.topCameras")}
+              </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-gray-400 border-b border-white/10">
-                      <th className="py-2">Camera</th>
-                      <th className="py-2">Location</th>
-                      <th className="py-2">Detections</th>
-                      <th className="py-2">Status</th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.camera")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.location")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.detections")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.status")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -691,7 +714,9 @@ const Analytics = () => {
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">Recent Alerts</h3>
+              <h3 className="text-lg font-black mb-4">
+                {t("analytics.chartTitles.recentAlerts")}
+              </h3>
               <div className="space-y-3 max-h-[340px] overflow-auto pr-1">
                 {recentAlerts.map((alert, idx) => (
                   <div
@@ -719,7 +744,7 @@ const Analytics = () => {
 
           <section className="rounded-2xl border border-white/5 bg-ag-card p-5">
             <h3 className="text-lg font-black mb-4">
-              Detection Heatmap (Hourly Density)
+              {t("analytics.chartTitles.heatmap")}
             </h3>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -744,9 +769,7 @@ const Analytics = () => {
 
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <Gauge size={14} />
-        <span>
-          Dashboard is powered by /api/v1/reports/dashboard via reportService.
-        </span>
+        <span>{t("analytics.poweredBy")}</span>
       </div>
     </div>
   );

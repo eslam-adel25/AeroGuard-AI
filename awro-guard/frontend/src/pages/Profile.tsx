@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { userService } from "../services/api";
 import type { IUserProfile } from "../services/api";
 import {
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 
 const Profile: React.FC = () => {
+  const { t } = useTranslation();
   // --- States ---
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -49,7 +51,6 @@ const Profile: React.FC = () => {
     }
   }, []);
 
-  
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
@@ -129,10 +130,10 @@ const Profile: React.FC = () => {
           </div>
           <div>
             <h2 className="text-3xl font-black text-white tracking-tight uppercase">
-              Security Profile
+              {t("profile.title")}
             </h2>
             <p className="text-gray-500 text-sm font-medium">
-              Clearance Level: {profile?.role?.role_name}
+              {t("profile.subtitle")}: {profile?.role?.role_name}
             </p>
           </div>
         </div>
@@ -190,7 +191,7 @@ const Profile: React.FC = () => {
             <div className="w-full mt-8 pt-8 border-t border-white/5 space-y-4">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-gray-500 font-bold uppercase tracking-tighter">
-                  Account Status
+                  {t("profile.accountStatus")}
                 </span>
                 <span className="text-ag-success font-black flex items-center gap-1">
                   ● {profile?.status}
@@ -198,7 +199,7 @@ const Profile: React.FC = () => {
               </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-gray-500 font-bold uppercase tracking-tighter">
-                  System ID
+                  {t("profile.systemId")}
                 </span>
                 <span className="text-white font-mono">
                   {profile?.user_id?.slice(0, 13)}
@@ -210,7 +211,7 @@ const Profile: React.FC = () => {
           {/* سجل الدخول (Access Logs) */}
           <div className="bg-ag-card/50 rounded-[2.5rem] p-6 border border-white/5 space-y-4 backdrop-blur-md">
             <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 ml-2">
-              Node Access History
+              {t("profile.accessHistory")}
             </h4>
             <div className="flex items-start gap-4">
               <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
@@ -218,7 +219,7 @@ const Profile: React.FC = () => {
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 font-bold">
-                  Commissioned On
+                  {t("profile.commissionedOn")}
                 </p>
                 <p className="text-xs text-white font-mono">
                   {new Date(profile?.created_at || "").toLocaleDateString()}
@@ -231,7 +232,7 @@ const Profile: React.FC = () => {
               </div>
               <div>
                 <p className="text-[10px] text-gray-400 font-bold">
-                  Last System Login
+                  {t("profile.lastLogin")}
                 </p>
                 <p className="text-xs text-white font-mono">
                   {profile?.last_login
@@ -254,7 +255,7 @@ const Profile: React.FC = () => {
               <div className="flex items-center gap-3 text-ag-primary">
                 <UsersIcon size={20} className="text-ag-danger" />
                 <h3 className="text-xl font-black uppercase tracking-tighter">
-                  Registry Data
+                  {t("profile.registryData")}
                 </h3>
               </div>
               <button
@@ -262,14 +263,16 @@ const Profile: React.FC = () => {
                 onClick={() => setIsEditing(!isEditing)}
                 className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${isEditing ? "bg-ag-danger text-white" : "text-ag-danger border border-ag-danger/30 hover:bg-ag-danger/10"}`}
               >
-                {isEditing ? "Discard Changes" : "Modify Record"}
+                {isEditing
+                  ? t("profile.discardChanges")
+                  : t("profile.modifyRecord")}
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-500 font-black uppercase ml-4">
-                  Full Identity Name
+                  {t("profile.fullIdentityName")}
                 </label>
                 <input
                   disabled={!isEditing}
@@ -282,7 +285,7 @@ const Profile: React.FC = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-500 font-black uppercase ml-4">
-                  Corporate Email
+                  {t("profile.corporateEmail")}
                 </label>
                 <input
                   disabled={!isEditing}
@@ -346,7 +349,7 @@ const Profile: React.FC = () => {
             <div className="flex items-center gap-3 text-ag-primary">
               <Key size={20} className="text-ag-warning" />
               <h3 className="text-xl font-black uppercase tracking-tighter">
-                Credential Rotation
+                {t("profile.credentialRotation")}
               </h3>
             </div>
 
@@ -354,7 +357,7 @@ const Profile: React.FC = () => {
               <input
                 type="password"
                 required
-                placeholder="Current System Password"
+                placeholder={t("profile.currentSystemPassword")}
                 value={passwords.old_password}
                 onChange={(e) =>
                   setPasswords({ ...passwords, old_password: e.target.value })
@@ -365,7 +368,7 @@ const Profile: React.FC = () => {
                 <input
                   type="password"
                   required
-                  placeholder="New Secure Password"
+                  placeholder={t("profile.newSecurePassword")}
                   value={passwords.new_password}
                   onChange={(e) =>
                     setPasswords({ ...passwords, new_password: e.target.value })
@@ -375,7 +378,7 @@ const Profile: React.FC = () => {
                 <input
                   type="password"
                   required
-                  placeholder="Confirm New Password"
+                  placeholder={t("profile.confirmNewPassword")}
                   value={passwords.confirm_password}
                   onChange={(e) =>
                     setPasswords({
@@ -390,7 +393,7 @@ const Profile: React.FC = () => {
                 type="submit"
                 className="bg-white/5 text-ag-warning hover:bg-ag-warning/10 border border-ag-warning/20 px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95"
               >
-                Rotate Credentials
+                {t("profile.rotateCredentials")}
               </button>
             </div>
           </form>
@@ -400,7 +403,7 @@ const Profile: React.FC = () => {
             <div className="bg-gradient-to-r from-ag-danger to-red-900 rounded-[2.5rem] p-10 flex justify-between items-center shadow-2xl ring-1 ring-white/10">
               <div>
                 <h4 className="text-2xl font-black text-white tracking-tight">
-                  Personnel Directory
+                  {t("profile.personnelDirectory")}
                 </h4>
                 <p className="text-white/60 text-xs mt-1 font-medium">
                   Authorized to manage all system nodes and operator access
@@ -416,6 +419,6 @@ const Profile: React.FC = () => {
       </div>
     </div>
   );
-};;
+};
 
 export default Profile;

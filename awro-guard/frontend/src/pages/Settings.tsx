@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
-  
   Bell,
   Save,
   RotateCcw,
-  
   Globe,
   Loader2,
   Zap,
@@ -41,6 +40,7 @@ const DEFAULT_SETTINGS: ISystemSettings = {
 };
 
 const Settings = () => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<ISystemSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -64,19 +64,17 @@ const Settings = () => {
     setIsSaving(true);
     try {
       await settingsService.update(config);
-      alert("✅ System configuration deployed successfully!");
+      alert(t("settings.saveSuccess"));
     } catch {
       // تم حذف (error) لحل خطأ no-unused-vars
-      alert("❌ Critical Error: Could not sync settings with the AI Engine.");
+      alert(t("settings.saveFailed"));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleLoadDefaults = () => {
-    if (
-      window.confirm("Restore factory defaults? Current changes will be lost.")
-    ) {
+    if (window.confirm(t("settings.factoryDefaultsConfirm"))) {
       setConfig(DEFAULT_SETTINGS);
     }
   };
@@ -94,18 +92,16 @@ const Settings = () => {
       <div className="flex justify-between items-end sticky top-0 z-50 bg-ag-dark/80 backdrop-blur-xl py-4 border-b border-white/5">
         <div>
           <h2 className="text-4xl font-black tracking-tighter uppercase">
-            System Settings
+            {t("settings.title")}
           </h2>
-          <p className="text-gray-500 font-medium">
-            Core Intelligence & Infrastructure Parameters
-          </p>
+          <p className="text-gray-500 font-medium">{t("settings.subtitle")}</p>
         </div>
         <div className="flex gap-4">
           <button
             onClick={handleLoadDefaults}
             className="px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 font-bold text-xs flex items-center gap-2 border border-white/10 transition-all"
           >
-            <RotateCcw size={16} /> Load Defaults
+            <RotateCcw size={16} /> {t("settings.loadDefaults")}
           </button>
           <button
             onClick={handleSave}
@@ -116,7 +112,7 @@ const Settings = () => {
               <Loader2 className="animate-spin" />
             ) : (
               <>
-                <Save size={20} /> SAVE & DEPLOY
+                <Save size={20} /> {t("settings.saveDeploy")}
               </>
             )}
           </button>
@@ -129,13 +125,13 @@ const Settings = () => {
           <div className="flex items-center gap-3 text-ag-success mb-2">
             <Globe size={24} />
             <h3 className="text-xl font-black uppercase tracking-widest">
-              Environment
+              {t("settings.environment")}
             </h3>
           </div>
           <div className="grid grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-                Airport Name
+                {t("settings.airportName")}
               </label>
               <input
                 value={config.airport_name}
@@ -147,7 +143,7 @@ const Settings = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-                Time Zone
+                {t("settings.timeZone")}
               </label>
               <input
                 value={config.timezone}
@@ -165,14 +161,14 @@ const Settings = () => {
           <div className="flex items-center gap-3 text-ag-warning mb-2">
             <Zap size={24} />
             <h3 className="text-xl font-black uppercase tracking-widest">
-              AI Core
+              {t("settings.aiCore")}
             </h3>
           </div>
           <div className="space-y-6">
             <div>
               <div className="flex justify-between mb-2">
                 <label className="text-xs font-bold text-gray-400">
-                  Object Confidence Threshold
+                  {t("settings.objectConfidenceThreshold")}
                 </label>
                 <span className="text-ag-warning font-mono font-bold">
                   {Math.round(config.detection_confidence * 100)}%
@@ -195,7 +191,9 @@ const Settings = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-                <span className="text-xs font-bold">Face Recognition</span>
+                <span className="text-xs font-bold">
+                  {t("settings.faceRecognition")}
+                </span>
                 <button
                   onClick={() =>
                     setConfig({
@@ -212,7 +210,9 @@ const Settings = () => {
                 </button>
               </div>
               <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-                <span className="text-xs font-bold">Motion Tracking</span>
+                <span className="text-xs font-bold">
+                  {t("settings.motionTracking")}
+                </span>
                 <button
                   onClick={() =>
                     setConfig({
@@ -236,13 +236,15 @@ const Settings = () => {
           <div className="flex items-center gap-3 text-ag-danger mb-2">
             <Bell size={24} />
             <h3 className="text-xl font-black uppercase tracking-widest">
-              Notification Engine
+              {t("settings.notificationEngine")}
             </h3>
           </div>
           <div className="flex justify-between items-center p-5 bg-ag-dark/40 rounded-2xl border border-white/5">
             <div className="flex items-center gap-3">
               <Activity className="text-ag-danger" size={20} />
-              <span className="font-bold">Dashboard Audio Siren</span>
+              <span className="font-bold">
+                {t("settings.dashboardAudioSiren")}
+              </span>
             </div>
             <button
               onClick={() =>
@@ -265,12 +267,12 @@ const Settings = () => {
           <div className="flex items-center gap-3 text-blue-400 mb-2">
             <Clock size={24} />
             <h3 className="text-xl font-black uppercase tracking-widest">
-              Security Lifecycle
+              {t("settings.securityLifecycle")}
             </h3>
           </div>
           <div className="space-y-2">
             <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-              Session Expiration (Minutes)
+              {t("settings.sessionExpiration")}
             </label>
             <input
               type="number"

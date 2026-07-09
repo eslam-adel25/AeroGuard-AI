@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cameraService } from "../services/api";
 import { Plus, Play, Upload, Radio, X, Loader2, Video } from "lucide-react";
 
@@ -12,6 +13,7 @@ interface Camera {
 }
 
 const Cameras = () => {
+  const { t } = useTranslation();
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -71,9 +73,9 @@ const Cameras = () => {
       await cameraService.start(res.data.camera_id);
       setShowModal(false);
       fetchCameras();
-      alert("✅ Node Provisioned Successfully!");
+      alert(t("cameras.provisionSuccess"));
     } catch {
-      alert("❌ Failed to add camera. Check connection.");
+      alert(t("cameras.provisionFailed"));
     } finally {
       setLoading(false);
     }
@@ -84,17 +86,15 @@ const Cameras = () => {
       <div className="flex justify-between items-center mb-10 bg-ag-card/30 p-8 rounded-[2rem] border border-white/5 backdrop-blur-md">
         <div>
           <h2 className="text-3xl font-black text-white tracking-tighter">
-            Infrastructure Nodes
+            {t("cameras.title")}
           </h2>
-          <p className="text-gray-500 text-sm mt-1">
-            Manage live RTSP streams and historical video archives
-          </p>
+          <p className="text-gray-500 text-sm mt-1">{t("cameras.subtitle")}</p>
         </div>
         <button
           onClick={() => setShowModal(true)}
           className="bg-ag-success text-white px-8 py-4 rounded-2xl flex items-center gap-3 font-black shadow-xl shadow-green-900/20 hover:scale-105 transition-all"
         >
-          <Plus size={22} /> Add Infrastructure
+          <Plus size={22} /> {t("cameras.addButton")}
         </button>
       </div>
 
@@ -149,7 +149,7 @@ const Cameras = () => {
           >
             <div className="flex justify-between items-center mb-10">
               <h3 className="text-3xl font-black text-white tracking-tighter">
-                Register New Node
+                {t("cameras.modalTitle")}
               </h3>
               <button
                 type="button"
@@ -171,7 +171,7 @@ const Cameras = () => {
                     : "text-gray-500"
                 }`}
               >
-                Live RTSP/IP
+                {t("cameras.types.live")}
               </button>
 
               <button
@@ -183,7 +183,7 @@ const Cameras = () => {
                     : "text-gray-500"
                 }`}
               >
-                Video Archive
+                {t("cameras.types.upload")}
               </button>
 
               <button
@@ -202,7 +202,7 @@ const Cameras = () => {
             <div className="space-y-5">
               <input
                 className="w-full bg-ag-dark border border-white/10 p-5 rounded-2xl text-white outline-none focus:border-ag-success font-bold"
-                placeholder="Node Alias (e.g. Gate 04)"
+                placeholder={t("cameras.cameraAliasPlaceholder")}
                 onChange={(e) =>
                   setFormData({ ...formData, camera_name: e.target.value })
                 }
@@ -210,7 +210,7 @@ const Cameras = () => {
               />
               <input
                 className="w-full bg-ag-dark border border-white/10 p-5 rounded-2xl text-white outline-none focus:border-ag-success font-bold"
-                placeholder="Physical Location"
+                placeholder={t("cameras.locationPlaceholder")}
                 onChange={(e) =>
                   setFormData({ ...formData, location: e.target.value })
                 }
@@ -220,7 +220,7 @@ const Cameras = () => {
               {uploadType === "LIVE" ? (
                 <input
                   className="w-full bg-ag-dark border border-white/10 p-5 rounded-2xl text-white font-mono text-sm outline-none focus:border-ag-danger"
-                  placeholder="rtsp://admin:password@ip:port"
+                  placeholder={t("cameras.streamPlaceholder")}
                   onChange={(e) =>
                     setFormData({ ...formData, stream_url: e.target.value })
                   }
@@ -246,7 +246,9 @@ const Cameras = () => {
                       size={32}
                     />
                     <span className="text-gray-500 font-bold">
-                      {selectedFile ? selectedFile.name : "Select Video File"}
+                      {selectedFile
+                        ? selectedFile.name
+                        : t("cameras.uploadLabel")}
                     </span>
                   </label>
                 </div>
@@ -254,10 +256,10 @@ const Cameras = () => {
                 <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-6 text-center">
                   <Radio className="mx-auto mb-3 text-green-500" size={32} />
                   <p className="text-green-400 font-bold">
-                    Laptop Camera will be used
+                    {t("cameras.cameraUsedMessage")}
                   </p>
                   <p className="text-gray-500 text-sm mt-2">
-                    OpenCV will connect to Camera 0 automatically.
+                    {t("cameras.cameraUsedDetail")}
                   </p>
                 </div>
               )}
@@ -271,7 +273,7 @@ const Cameras = () => {
               {loading ? (
                 <Loader2 className="animate-spin" />
               ) : (
-                "PROVISION NODE"
+                t("cameras.provisionButton")
               )}
             </button>
           </form>

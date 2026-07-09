@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Video,
@@ -18,7 +19,7 @@ interface SidebarProps {
 }
 
 const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
-  // تذكر حالة القائمة (Section 8)
+  const { t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem("sidebar_state") === "collapsed";
   });
@@ -31,11 +32,11 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
   }, [isCollapsed]);
 
   const menuItems = [
-    { id: "dashboard", label: "Monitoring", icon: LayoutDashboard },
-    { id: "cameras", label: "Cameras", icon: Video },
-    { id: "reports", label: "Analytics", icon: FileText },
-    { id: "users", label: "Profile", icon: User },
-    { id: "settings", label: "Control", icon: Settings },
+    { id: "dashboard", label: t("sidebar.monitoring"), icon: LayoutDashboard },
+    { id: "cameras", label: t("sidebar.cameras"), icon: Video },
+    { id: "reports", label: t("sidebar.analytics"), icon: FileText },
+    { id: "users", label: t("sidebar.profile"), icon: User },
+    { id: "settings", label: t("sidebar.control"), icon: Settings },
   ];
 
   return (
@@ -47,7 +48,7 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="absolute -right-3 top-16 bg-ag-danger text-white rounded-full p-1.5 border-4 border-ag-dark shadow-md hover:scale-105 transition-transform"
-        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={isCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
       >
         {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
       </button>
@@ -98,14 +99,14 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
       <div className="p-3">
         <button
           onClick={onLogout}
-          title={isCollapsed ? "Logout" : undefined}
+          title={isCollapsed ? t("sidebar.logout") : undefined}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-ag-danger bg-ag-danger/6 hover:bg-ag-danger hover:text-white font-bold border border-transparent hover:border-ag-danger/30
             ${isCollapsed ? "justify-center" : ""}`}
         >
           <LogOut size={18} />
           {!isCollapsed && (
             <span className="text-[11px] tracking-[0.18em] uppercase">
-              Logout
+              {t("sidebar.logout")}
             </span>
           )}
         </button>

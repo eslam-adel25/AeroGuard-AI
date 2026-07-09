@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Shield, Lock, User, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import axios from "axios";
 
 interface LoginProps {
@@ -7,6 +8,7 @@ interface LoginProps {
 }
 
 const Login = ({ onLoginSuccess }: LoginProps) => {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,8 +31,8 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
       if (response.data.access_token) {
         onLoginSuccess(response.data.access_token);
       }
-    } catch  {
-      setError("Invalid credentials. Please try again.");
+    } catch {
+      setError(t("auth.invalidCredentials"));
     } finally {
       setLoading(false);
     }
@@ -45,9 +47,9 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
             <Shield className="text-ag-danger" size={48} />
           </div>
           <h1 className="text-3xl font-bold text-white tracking-tight">
-            AeroGuard AI
+            {t("auth.loginTitle")}
           </h1>
-          <p className="text-gray-500 mt-2">Smart Surveillance Platform</p>
+          <p className="text-gray-500 mt-2">{t("auth.loginSubtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -59,7 +61,7 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
 
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">
-              Username
+              {t("auth.username")}
             </label>
             <div className="relative">
               <User
@@ -69,7 +71,7 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
               <input
                 type="text"
                 className="w-full bg-black/20 border border-white/10 rounded-xl py-3 px-10 text-white focus:border-ag-danger outline-none transition-all"
-                placeholder="Enter your username"
+                placeholder={t("auth.enterUsername")}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -79,7 +81,7 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
 
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">
-              Password
+              {t("auth.password")}
             </label>
             <div className="relative">
               <Lock
@@ -89,7 +91,7 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
               <input
                 type="password"
                 className="w-full bg-black/20 border border-white/10 rounded-xl py-3 px-10 text-white focus:border-ag-danger outline-none transition-all"
-                placeholder="••••••••"
+                placeholder={t("auth.enterPassword")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -105,13 +107,13 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
             {loading ? (
               <Loader2 className="animate-spin" size={20} />
             ) : (
-              "Authorize Access"
+              t("auth.authorizeAccess")
             )}
           </button>
         </form>
 
         <p className="text-center text-gray-600 text-xs mt-8 uppercase tracking-widest">
-          Secure Infrastructure Node
+          {t("auth.secureInfrastructureNode")}
         </p>
       </div>
     </div>

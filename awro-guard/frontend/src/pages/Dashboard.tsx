@@ -10,6 +10,7 @@ import { cameraService } from "../services/api";
 
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
+import { useTranslation } from "react-i18next";
 import {
   Bell,
   Maximize,
@@ -36,6 +37,7 @@ interface CameraData {
 }
 
 const Dashboard = () => {
+  const { t } = useTranslation();
   // --- States ---
   const [alerts, setAlerts] = useState<AlertData[]>([]);
   const [cameras, setCameras] = useState<CameraData[]>([]);
@@ -243,10 +245,8 @@ const Dashboard = () => {
     setDrawingPoints([]);
     setDrawingMode("restricted");
     setIsDrawing(true);
-    setDrawingInstructions(
-      "Click to place points. Double click to finish polygon.",
-    );
-  }, []);
+    setDrawingInstructions(t("dashboard.drawingInstructions.initial"));
+  }, [t]);
 
   const exitDrawingMode = useCallback(() => {
     setIsDrawing(false);
@@ -256,28 +256,25 @@ const Dashboard = () => {
 
   const undoLastPoint = useCallback(() => {
     setDrawingPoints((prev) => prev.slice(0, -1));
-    setDrawingInstructions("Last point removed.");
+    setDrawingInstructions(t("dashboard.drawingInstructions.removed"));
     setTimeout(
-      () =>
-        setDrawingInstructions(
-          "Click to place points. Double click to finish polygon.",
-        ),
+      () => setDrawingInstructions(t("dashboard.drawingInstructions.initial")),
       1800,
     );
-  }, []);
+  }, [t]);
 
   const clearDrawing = useCallback(() => {
     setDrawingPoints([]);
-    setDrawingInstructions("Drawing cleared.");
+    setDrawingInstructions(t("dashboard.drawingInstructions.cleared"));
     setTimeout(() => setDrawingInstructions(""), 1800);
-  }, []);
+  }, [t]);
 
   const saveDrawing = useCallback(() => {
     setIsDrawing(false);
-    setDrawingInstructions("Drawing saved.");
+    setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
     setHoverPoint(null);
     setTimeout(() => setDrawingInstructions(""), 2200);
-  }, []);
+  }, [t]);
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
@@ -343,12 +340,12 @@ const Dashboard = () => {
         <div className="flex items-center gap-3 md:gap-4 min-w-0">
           <div className="min-w-0 flex items-center gap-3">
             <h1 className="text-sm md:text-base font-bold tracking-tight text-white leading-none">
-              LIVE MONITORING
+              {t("dashboard.monitoringTitle")}
             </h1>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 bg-ag-success rounded-full animate-pulse" />
               <p className="text-[10px] text-ag-success font-semibold uppercase truncate">
-                Secure Node 01 • Active
+                {t("dashboard.secureNodeActive")}
               </p>
             </div>
           </div>
@@ -370,20 +367,20 @@ const Dashboard = () => {
             <div className="rounded-2xl border border-white/10 bg-black/50 backdrop-blur-xl px-3 py-3 shadow-xl shadow-black/20">
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.32em] text-white/75 mb-2">
                 <span className="w-2 h-2 rounded-full bg-ag-success animate-pulse" />
-                Live Monitoring
+                {t("dashboard.liveMonitoring")}
               </div>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.22em] text-gray-300">
-                    Camera
+                    {t("dashboard.camera")}
                   </p>
                   <p className="text-sm font-bold text-white truncate">
                     {cameras.find((c) => c.camera_id === selectedCamera)
-                      ?.camera_name || "PROVISIONING..."}
+                      ?.camera_name || t("dashboard.provisioning")}
                   </p>
                 </div>
                 <div className="rounded-full bg-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.22em] text-ag-success font-black">
-                  Active
+                  {t("common.active")}
                 </div>
               </div>
             </div>
@@ -392,7 +389,7 @@ const Dashboard = () => {
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-[52px]">
                   <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    FPS
+                    {t("common.fps")}
                   </p>
                   <p className="text-lg font-black text-ag-success font-mono">
                     {fps || 30}
@@ -400,7 +397,7 @@ const Dashboard = () => {
                 </div>
                 <div className="min-w-[66px]">
                   <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    Objects
+                    {t("common.objects")}
                   </p>
                   <p className="text-lg font-black text-white font-mono">
                     {detectionCount}
@@ -409,7 +406,7 @@ const Dashboard = () => {
                 <div className="flex items-center gap-2 rounded-full bg-black/30 px-3 py-2">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.4)]" />
                   <span className="text-[10px] uppercase tracking-[0.24em] text-white font-semibold">
-                    REC
+                    {t("common.recording")}
                   </span>
                 </div>
               </div>
@@ -428,10 +425,10 @@ const Dashboard = () => {
                 </div>
                 <div>
                   <p className="text-[9px] font-black text-ag-danger uppercase tracking-[0.3em]">
-                    Critical Alert
+                    {t("dashboard.criticalAlert")}
                   </p>
                   <h4 className="text-base md:text-lg font-black text-white uppercase tracking-tighter">
-                    {alert.type} DETECTED
+                    {alert.type} {t("dashboard.detectLabel")}
                   </h4>
                 </div>
               </div>
@@ -468,7 +465,7 @@ const Dashboard = () => {
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-ag-dark">
               <Loader2 className="animate-spin text-ag-danger mb-4" size={52} />
               <p className="text-gray-500 font-black uppercase tracking-[0.35em] text-[11px]">
-                Awaiting Encrypted Link
+                {t("dashboard.controls.awaitingLink")}
               </p>
             </div>
           )}
@@ -489,14 +486,14 @@ const Dashboard = () => {
             <button
               onClick={takeSnapshot}
               className="p-2.5 bg-white/6 hover:bg-ag-success rounded-full text-white transition-transform hover:scale-105"
-              title="Capture Incident"
+              title={t("dashboard.captureIncident")}
             >
               <SnapshotIcon size={18} />
             </button>
             <button
               onClick={enterDrawingMode}
               className="p-2.5 bg-white/6 hover:bg-blue-600 rounded-full text-white transition-transform hover:scale-105"
-              title="Enter Drawing Mode"
+              title={t("dashboard.controls.enterDrawing")}
             >
               <Box size={18} />
             </button>
@@ -514,17 +511,17 @@ const Dashboard = () => {
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.32em] text-gray-400">
-                    Drawing Mode
+                    {t("dashboard.drawingMode")}
                   </p>
                   <h3 className="text-sm font-bold uppercase tracking-[0.14em]">
-                    In-Camera Annotation
+                    {t("dashboard.inCameraAnnotation")}
                   </h3>
                 </div>
                 <button
                   onClick={exitDrawingMode}
                   className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               </div>
               <p className="text-[12px] leading-5 text-gray-300 mb-3">
@@ -539,10 +536,10 @@ const Dashboard = () => {
                         setDrawingMode(mode);
                         setDrawingInstructions(
                           mode === "restricted"
-                            ? "Restricted zone: draw a polygon and double-click to finish."
+                            ? t("dashboard.drawingInstructions.restricted")
                             : mode === "direction"
-                              ? "Direction line: create an arrow line and double-click to save."
-                              : "Tripwire: draw a line and double-click to finalize.",
+                              ? t("dashboard.drawingInstructions.direction")
+                              : t("dashboard.drawingInstructions.tripwire"),
                         );
                       }}
                       className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
@@ -558,7 +555,7 @@ const Dashboard = () => {
               </div>
               <div className="flex flex-wrap gap-2 items-center justify-between">
                 <div className="text-[11px] text-gray-400">
-                  Points:{" "}
+                  {t("common.points")}:{" "}
                   <span className="text-white">{drawingPoints.length}</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -566,24 +563,24 @@ const Dashboard = () => {
                     onClick={undoLastPoint}
                     className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
                   >
-                    Undo
+                    {t("common.undo")}
                   </button>
                   <button
                     onClick={clearDrawing}
                     className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
                   >
-                    Clear
+                    {t("common.clear")}
                   </button>
                   <button
                     onClick={saveDrawing}
                     className="rounded-full bg-ag-success px-3 py-1 text-[11px] font-semibold text-black hover:bg-lime-400"
                   >
-                    Save
+                    {t("common.save")}
                   </button>
                 </div>
               </div>
               <p className="mt-3 text-[10px] uppercase tracking-[0.28em] text-gray-500">
-                Double click to finish • Right click to undo • ESC to cancel
+                {t("dashboard.controls.doubleClickHint")}
               </p>
             </div>
           )}
@@ -592,7 +589,7 @@ const Dashboard = () => {
           <div className="absolute top-4 right-4 z-30 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-xl">
             <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.3)]"></div>
             <span className="text-[10px] font-semibold text-white uppercase tracking-[0.22em]">
-              REC
+              {t("common.recording")}
             </span>
           </div>
         </div>

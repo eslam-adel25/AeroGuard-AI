@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { authService } from "../services/api";
 import {
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 
 const Register = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -35,25 +37,22 @@ const Register = () => {
 
     // 1. التحقق من تطابق كلمات السر (Section 1)
     if (form.password !== form.confirm_password) {
-      return setError("Passwords do not match");
+      return setError(t("auth.passwordsDoNotMatch"));
     }
 
     setLoading(true);
     try {
       // 2. إرسال البيانات للباكيند
       await authService.register(form);
-      alert("✅ Registration Successful! Please login with your credentials.");
+      alert(t("auth.registrationSuccess"));
       navigate("/login");
-    }  catch (err) {
-  if (axios.isAxiosError(err)) {
-    setError(
-      err.response?.data?.detail ??
-      "Registration failed. Username or Email may be taken."
-    );
-  } else {
-    setError("Registration failed.");
-  }
-}
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.detail ?? t("auth.usernameOrEmailTaken"));
+      } else {
+        setError(t("auth.registrationFailed"));
+      }
+    }
   };
 
   return (
@@ -69,10 +68,10 @@ const Register = () => {
             <ShieldCheck className="text-ag-danger" size={40} />
           </div>
           <h2 className="text-4xl font-black text-white tracking-tighter uppercase">
-            Operator Registry
+            {t("auth.registerTitle")}
           </h2>
           <p className="text-gray-500 mt-2 font-medium">
-            Provision a new node administrator account
+            {t("auth.registerSubtitle")}
           </p>
         </div>
 
@@ -86,7 +85,7 @@ const Register = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                Full Identity Name
+                {t("auth.fullIdentityName")}
               </label>
               <div className="relative group">
                 <User
@@ -105,7 +104,7 @@ const Register = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                System Username
+                {t("auth.systemUsername")}
               </label>
               <div className="relative group">
                 <User
@@ -127,7 +126,7 @@ const Register = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                Corporate Email
+                {t("auth.corporateEmail")}
               </label>
               <div className="relative group">
                 <Mail
@@ -145,7 +144,7 @@ const Register = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                Secure Phone Line
+                {t("auth.securePhoneLine")}
               </label>
               <div className="relative group">
                 <Phone
@@ -165,7 +164,7 @@ const Register = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                Master Password
+                {t("auth.masterPassword")}
               </label>
               <div className="relative group">
                 <Lock
@@ -185,7 +184,7 @@ const Register = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-                Confirm Encryption
+                {t("auth.confirmEncryption")}
               </label>
               <div className="relative group">
                 <Lock
@@ -207,7 +206,7 @@ const Register = () => {
 
           <div className="space-y-2">
             <label className="text-[10px] font-black text-gray-500 uppercase ml-4">
-              Organization (Optional)
+              {t("auth.organizationOptional")}
             </label>
             <div className="relative group">
               <Building
@@ -233,16 +232,16 @@ const Register = () => {
               <Loader2 className="animate-spin" />
             ) : (
               <>
-                Request Authorization <ArrowRight size={20} />
+                {t("auth.requestAuthorization")} <ArrowRight size={20} />
               </>
             )}
           </button>
         </form>
 
         <p className="text-center text-gray-600 text-xs mt-10 font-bold uppercase tracking-widest">
-          Already authorized?{" "}
+          {t("auth.existingAccount")}{" "}
           <Link to="/login" className="text-ag-danger hover:underline">
-            Establish Connection
+            {t("auth.establishConnection")}
           </Link>
         </p>
       </div>
