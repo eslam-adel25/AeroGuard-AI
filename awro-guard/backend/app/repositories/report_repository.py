@@ -14,6 +14,8 @@ class ReportRepository:
         start_date: date,
         end_date: date,
         camera_id: str | None = None,
+        owner_id: str | None = None,
+        is_admin: bool = False,
     ):
         query = self.db.query(Detection)
 
@@ -26,6 +28,8 @@ class ReportRepository:
             query = query.filter(
                 Detection.camera_id == camera_id
             )
+        if owner_id and not is_admin:
+            query = query.filter(Detection.owner_id == owner_id)
 
         total_detections = query.count()
 
@@ -65,7 +69,7 @@ class ReportRepository:
         )
 
         # توزيع الكاميرات
-        camera_distribution = (
+        camera_distribution_query = (
             self.db.query(
                 Camera.camera_name,
                 func.count(
@@ -77,8 +81,12 @@ class ReportRepository:
                 Camera.camera_id == Detection.camera_id,
             )
             .group_by(Camera.camera_name)
-            .all()
         )
+
+        if owner_id and not is_admin:
+            camera_distribution = camera_distribution_query.filter(Camera.owner_id == owner_id).all()
+        else:
+            camera_distribution = camera_distribution_query.all()
 
         # توزيع أنواع التهديد
         threat_distribution = (

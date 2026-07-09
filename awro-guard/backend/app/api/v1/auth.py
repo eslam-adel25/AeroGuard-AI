@@ -5,6 +5,12 @@ from ...database.session import get_db
 from ...models.models import User, Role
 from ...schemas.schemas import UserRegister, UserLogin
 from ...core.security import hash_password, verify_password, create_access_token
+from ...core.security import create_refresh_token_string
+from ...repositories.token_repository import TokenRepository
+from datetime import datetime, timedelta
+from ...core.emailer import send_verification_email
+from ...models.models import EmailVerificationToken, RefreshToken
+from sqlalchemy import func
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -34,10 +40,25 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
         organization=payload.organization,
         password_hash=hash_password(payload.password),
         role_id=default_role.role_id,
-        status="Active"
+        status="Pending",
+        is_verified=False
     )
     db.add(new_user)
     db.commit()
+    db.refresh(new_user)
+
+    # create verification token
+    token_repo = TokenRepository(db)
+    token_str = create_refresh_token_string(32)
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    ev = EmailVerificationToken(user_id=new_user.user_id, token=token_str, expires_at=expires_at)
+    token_repo.create_email_verification(ev)
+
+    # send verification email (best-effort)
+    try:
+        send_verification_email(new_user.email, new_user.full_name, token_str)
+    except Exception as exc:
+        print(f"⚠️ Failed to send verification email: {exc}")
     return {"status": "success", "message": "User registered successfully"}
 
 # 2. مسار تسجيل الدخول (Section 1)
@@ -47,6 +68,8 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
     
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Email not verified")
     
     # تحديث وقت آخر دخول (Section 3)
     user.last_login = func.now()
@@ -59,9 +82,17 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
         "username": user.username
     })
 
+    # create refresh token record
+    token_repo = TokenRepository(db)
+    refresh_str = create_refresh_token_string(48)
+    rt_expires = datetime.utcnow() + timedelta(days=7)
+    rt = RefreshToken(user_id=user.user_id, token=refresh_str, expires_at=rt_expires)
+    token_repo.create_refresh_token(rt)
+
     return {
         "access_token": token,
         "token_type": "bearer",
+        "refresh_token": refresh_str,
         "user": {
             "user_id": user.user_id,
             "full_name": user.full_name,
@@ -69,6 +100,96 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
             "role": user.role.role_name
         }
     }
+
+
+@router.post("/refresh")
+def refresh_token(payload: dict, db: Session = Depends(get_db)):
+    # expects {"refresh_token": "..."}
+    token_value = payload.get("refresh_token")
+    if not token_value:
+        raise HTTPException(status_code=400, detail="Missing refresh_token")
+    token_repo = TokenRepository(db)
+    rt = token_repo.get_refresh_token(token_value)
+    if not rt or rt.revoked:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if rt.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+
+    user = db.query(User).filter(User.user_id == rt.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    access = create_access_token(data={
+        "user_id": str(user.user_id),
+        "role": user.role.role_name,
+        "username": user.username
+    })
+    return {"access_token": access, "token_type": "bearer"}
+
+
+@router.get("/verify")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    token_repo = TokenRepository(db)
+    ev = token_repo.get_email_verification(token)
+    if not ev:
+        raise HTTPException(status_code=404, detail="Invalid or expired verification token")
+    if ev.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Verification token expired")
+
+    # mark user verified
+    user_repo = Role if False else None
+    user = db.query(User).filter(User.user_id == ev.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_verified = True
+    user.status = "Active"
+    db.commit()
+    token_repo.delete_email_verification(ev.token_id)
+    return {"status": "verified"}
+
+
+@router.post("/resend-verification")
+def resend_verification(payload: dict, db: Session = Depends(get_db)):
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="email required")
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_verified:
+        return {"status": "already_verified"}
+    token_repo = TokenRepository(db)
+    # find existing token and check resend count
+    existing = db.query(EmailVerificationToken).filter(EmailVerificationToken.user_id == user.user_id).first()
+    if existing and existing.resend_count >= 3:
+        raise HTTPException(status_code=429, detail="Resend limit reached")
+    token_str = create_refresh_token_string(32)
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    if existing:
+        existing.token = token_str
+        existing.expires_at = expires_at
+        existing.resend_count = (existing.resend_count or 0) + 1
+        db.commit()
+        token_obj = existing
+    else:
+        token_obj = EmailVerificationToken(user_id=user.user_id, token=token_str, expires_at=expires_at, resend_count=1)
+        token_repo.create_email_verification(token_obj)
+    try:
+        send_verification_email(user.email, user.full_name, token_str)
+    except Exception as exc:
+        print(f"⚠️ Failed to resend verification email: {exc}")
+    return {"status": "sent"}
+
+
+@router.post("/logout")
+def logout(payload: dict, db: Session = Depends(get_db)):
+    # expects {"refresh_token": "..."}
+    token_value = payload.get("refresh_token")
+    if not token_value:
+        return {"status": "ok"}
+    token_repo = TokenRepository(db)
+    token_repo.revoke_refresh_token(token_value)
+    return {"status": "logged_out"}
 
 # 3. مسار الخروج (Logout) - يتم التعامل معه في الفرونتيند بمسح التوكن
 @router.post("/logout")

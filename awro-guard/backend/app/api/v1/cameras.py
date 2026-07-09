@@ -8,9 +8,10 @@ import cv2
 import asyncio
 
 from ...database.session import get_db
-from ...repositories.camera_repository import CameraRepository
 from ...models.models import Camera, RestrictedZone
 from ...schemas.schemas import CameraResponse, ZoneCreate
+from ...core.auth_middleware import get_current_user
+from ...repositories.camera_repository import CameraRepository
 from ...ai.processor import ai_engine 
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
@@ -28,7 +29,8 @@ async def add_camera(
     camera_type: str = Form(...), # LIVE or UPLOAD
     stream_url: str = Form(None), # لروابط RTSP/IP
     video_file: UploadFile = File(None), # لرفع ملفات الفيديو
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     final_url = stream_url
     # دعم كاميرا الجهاز (USB/Webcam)
@@ -52,20 +54,27 @@ async def add_camera(
         camera_type=camera_type,
         status="Online" if camera_type in ["UPLOAD", "USB"] else "Offline"
     )
-    
-    db.add(new_cam)
-    db.commit()
-    db.refresh(new_cam)
-    return new_cam
+    repo = CameraRepository(db)
+    is_admin = current_user.get("role") == "Administrator"
+    created = repo.add_camera(new_cam, owner_id=current_user.get("user_id"))
+    return created
 
 # 2. إدارة المناطق المحظورة (Restricted Zones) لكل كاميرا
 @router.post("/{camera_id}/zones")
-def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db)):
+def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    # verify camera ownership
+    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     new_zone = RestrictedZone(
         camera_id=camera_id,
         zone_name=zone.zone_name,
         zone_type=zone.zone_type,
-        polygon_coords=zone.polygon_coords
+        polygon_coords=zone.polygon_coords,
+        owner_id=current_user.get("user_id")
     )
     db.add(new_zone)
     db.commit()
@@ -73,24 +82,57 @@ def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(
 
 
 @router.get("/{camera_id}/zones")
-def list_restricted_zones(camera_id: str, db: Session = Depends(get_db)):
+def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
+        raise HTTPException(status_code=403, detail="Forbidden")
     zones = db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
     return zones
 
 # 3. تشغيل الـ AI
 @router.post("/{camera_id}/start")
-async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
-    if not cam: raise HTTPException(404)
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
+        raise HTTPException(status_code=403, detail="Forbidden")
     background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
     return {"status": "started"}
 
 # 4. جلب الكاميرات
 @router.get("/", response_model=list[CameraResponse])
-def get_cameras(db: Session = Depends(get_db)):
-    return db.query(Camera).all()
+def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    repo = CameraRepository(db)
+    is_admin = current_user.get("role") == "Administrator"
+    return repo.get_all_cameras(owner_id=current_user.get("user_id"), is_admin=is_admin)
 
-# 5. محرك البث (Streaming)
+# 5. حذف كاميرا
+@router.delete("/{camera_id}")
+def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if cam.camera_type == "UPLOAD" and cam.stream_url:
+        try:
+            abs_path = os.path.abspath(cam.stream_url)
+            if os.path.commonpath([UPLOAD_DIR, abs_path]) == UPLOAD_DIR and os.path.exists(abs_path):
+                os.remove(abs_path)
+        except Exception as exc:
+            print(f"⚠️ Failed to remove upload file for camera {camera_id}: {exc}")
+
+    ai_engine.stop_camera(cam.camera_id)
+    ai_engine.last_frames.pop(str(cam.camera_id), None)
+    db.delete(cam)
+    db.commit()
+    return {"status": "deleted", "camera_id": camera_id}
+
+# 6. محرك البث (Streaming)
 async def frame_generator(camera_id: str):
     iteration = 0
     while True:

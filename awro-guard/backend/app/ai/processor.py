@@ -22,9 +22,10 @@ class AIProcessor:
         self.tracker.initialize()
         
         # مخازن الذاكرة الحية
-        self.last_frames = {} 
-        self.last_alert_time = {} 
-        self.object_history = {} 
+        self.last_frames = {}
+        self.last_alert_time = {}
+        self.object_history = {}
+        self._stop_flags = {}
         
         # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
         self.active_settings = None
@@ -43,6 +44,8 @@ class AIProcessor:
         own_db = db is None
         cap = None
 
+        camera_id_str = str(camera_id)
+        self._stop_flags[camera_id_str] = False
         try:
             # 1. تحديد نوع المصدر ومعالجته
             source = 0 if str(rtsp_url) == "0" else rtsp_url
@@ -95,6 +98,10 @@ class AIProcessor:
                     f"📌 [{camera_id}] loop={iteration} ret={ret} "
                     f"frame_type={type(frame).__name__} frame_shape={None if frame is None else getattr(frame, 'shape', None)}"
                 )
+                if self._stop_flags.get(camera_id_str):
+                    print(f"📌 [{camera_id}] stop signal received")
+                    break
+
                 if not ret:
                     if isinstance(source, str) and not source.isdigit():
                         print(
@@ -180,8 +187,12 @@ class AIProcessor:
                     if status in ["DANGER", "WARNING"]:
                         alert_key = f"{camera_id}_{obj_id}_{status}"
                         if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                            # attach owner based on camera
+                            cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
+                            owner_id = getattr(cam, 'owner_id', None) if cam else None
                             new_det = Detection(
                                 camera_id=camera_id,
+                                owner_id=owner_id,
                                 detection_type=display_label,
                                 confidence=float(conf),
                                 priority="Critical" if status == "DANGER" else "High",
@@ -227,8 +238,12 @@ class AIProcessor:
                 cap.release()
                 print(f"📌 [{camera_id}] cap released and processing ended")
             self.last_frames.pop(str(camera_id), None)
+            self._stop_flags.pop(camera_id_str, None)
             if own_db:
                 local_db.close()
+
+    def stop_camera(self, camera_id):
+        self._stop_flags[str(camera_id)] = True
 
 
 # تصدير نسخة المحرك الموحدة

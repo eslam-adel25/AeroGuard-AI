@@ -3,6 +3,10 @@ from datetime import datetime, timedelta
 from jose import jwt
 import os
 from dotenv import load_dotenv
+import secrets
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 
 load_dotenv()
 
@@ -41,3 +45,21 @@ def verify_token(token: str):
         return payload
     except Exception:
         return None
+
+
+# --- Refresh token helpers (stateless token string generation) ---
+def create_refresh_token_string(length: int = 48) -> str:
+    return secrets.token_urlsafe(length)
+
+
+# --- Dependency helper to protect routes ---
+http_bearer = HTTPBearer(auto_error=False)
+
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload

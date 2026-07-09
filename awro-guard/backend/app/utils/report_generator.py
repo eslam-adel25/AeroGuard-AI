@@ -29,14 +29,18 @@ class ReportGenerator:
             pdf.cell(60, 10, str(item['count']), 1)
             pdf.cell(70, 10, "Verified", 1, 1)
         
-        path = f"uploads/reports/{filename}"
+        dirpath = os.path.join("uploads", "reports")
+        os.makedirs(dirpath, exist_ok=True)
+        path = os.path.join(dirpath, filename)
         pdf.output(path)
         return path
 
     @staticmethod
     def generate_excel(data, filename):
         df = pd.DataFrame(data['details'])
-        path = f"uploads/reports/{filename}"
+        dirpath = os.path.join("uploads", "reports")
+        os.makedirs(dirpath, exist_ok=True)
+        path = os.path.join(dirpath, filename)
         df.to_excel(path, index=False)
         return path
     
@@ -47,13 +51,14 @@ from ..repositories.report_repository import ReportRepository
 
 
 class ReportService:
-
     @staticmethod
     def get_report_stats(
         db: Session,
         start_date: date,
         end_date: date,
         camera_id: str | None = None,
+        owner_id: str | None = None,
+        is_admin: bool = False,
     ):
         repo = ReportRepository(db)
 
@@ -61,4 +66,6 @@ class ReportService:
             start_date=start_date,
             end_date=end_date,
             camera_id=camera_id,
+            owner_id=owner_id,
+            is_admin=is_admin,
         )

@@ -33,7 +33,7 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
 
 class ReportService:
     @staticmethod
-    def get_report_stats(db: Session, start_date: date, end_date: date, camera_id: str = None):
+    def get_report_stats(db: Session, start_date: date, end_date: date, camera_id: str = None, owner_id: str = None, is_admin: bool = False):
         """منطق استخراج الإحصائيات من قاعدة البيانات (Section 4)."""
         filters = [
             func.date(Detection.detected_at) >= start_date,
@@ -41,6 +41,8 @@ class ReportService:
         ]
         if camera_id:
             filters.append(Detection.camera_id == camera_id)
+        if owner_id and not is_admin:
+            filters.append(Detection.owner_id == owner_id)
 
         # 1. إجمالي الاكتشافات
         total = db.query(func.count(Detection.detection_id)).filter(and_(*filters)).scalar() or 0
@@ -99,6 +101,8 @@ class ReportService:
         )
         if camera_id:
             camera_query = camera_query.filter(Camera.camera_id == camera_id)
+        if owner_id and not is_admin:
+            camera_query = camera_query.filter(Camera.owner_id == owner_id)
         camera_rows = camera_query.order_by(Camera.camera_name.asc()).all()
 
         cameras = [
@@ -123,6 +127,7 @@ class ReportService:
             Camera.camera_id == Detection.camera_id,
         ).filter(
             and_(*filters),
+            (Camera.owner_id == owner_id) if (owner_id and not is_admin) else True,
         ).group_by(
             Camera.camera_id,
             Camera.camera_name,

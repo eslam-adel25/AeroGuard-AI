@@ -16,7 +16,9 @@ async def get_report_summary(
     current_user: dict = Depends(get_current_user)
 ):
     """رابط جلب ملخص التقارير (Section 4)"""
-    return ReportService.get_report_stats(db, start_date, end_date, camera_id)
+    owner_id = current_user.get("user_id")
+    is_admin = current_user.get("role") == "Administrator"
+    return ReportService.get_report_stats(db, start_date, end_date, camera_id, owner_id=owner_id, is_admin=is_admin)
 
 @router.get("/export/pdf")
 async def export_pdf(start_date: date, end_date: date, db: Session = Depends(get_db)):
@@ -45,4 +47,6 @@ async def get_dashboard(
         start_date=start_date,
         end_date=end_date,
         camera_id=camera_id,
+        owner_id=current_user.get("user_id"),
+        is_admin=(current_user.get("role") == "Administrator"),
     )

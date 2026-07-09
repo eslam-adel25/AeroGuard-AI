@@ -43,6 +43,20 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    refresh_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
 class RoleResponse(BaseModel):
     role_id: UUID
     role_name: str
@@ -105,6 +119,21 @@ class SettingsUpdate(BaseModel):
     jpeg_quality: Optional[int] = None
     jwt_expiration: Optional[int] = None
     session_timeout: Optional[int] = None
+    # Profile
+    theme: Optional[str] = None
+    profile_language: Optional[str] = None
+    sidebar_state: Optional[str] = None
+    dashboard_layout: Optional[str] = None
+    accent_color: Optional[str] = None
+
+class SettingsResponse(SettingsUpdate):
+    settings_id: Optional[UUID] = None
+    owner_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
     class Config:
         from_attributes = True

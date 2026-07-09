@@ -1,38 +1,34 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ...database.session import get_db
-from ...models.models import SystemSettings
-from ...schemas.schemas import SettingsUpdate
-from ...core.auth_middleware import role_required
+from ...schemas.schemas import SettingsUpdate, SettingsResponse
+from ...core.auth_middleware import get_current_user
+from ...repositories.settings_repository import SettingsRepository
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
-@router.get("/")
-def get_current_settings(db: Session = Depends(get_db)):
-    # جلب السطر الأول والوحيد للإعدادات
-    settings = db.query(SystemSettings).first()
+
+@router.get("/", response_model=SettingsResponse)
+def get_current_settings(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    repo = SettingsRepository(db)
+    owner_id = current_user.get("user_id")
+    settings = repo.get_by_owner(owner_id)
+    if not settings:
+        settings = repo.create_defaults_for(owner_id)
     return settings
 
-@router.put("/")
-def update_settings(
-    payload: SettingsUpdate, 
-    db: Session = Depends(get_db), 
-    current_user = Depends(role_required(["Administrator"]))
-):
-    settings = db.query(SystemSettings).first()
-    if not settings:
-        settings = SystemSettings()
-        db.add(settings)
-    
-    # تحديث الحقول المُرسلة فقط لتفادي استبدال القيم الحالية بـ None
-    for key, value in payload.model_dump(exclude_none=True).items():
-        setattr(settings, key, value)
-    
-    db.commit()
-    db.refresh(settings)
-    
-    # تحديث محرك الـ AI بالقيم الجديدة فوراً
-    from ...ai.processor import ai_engine
-    ai_engine.update_config(settings)
-    
-    return {"status": "success", "message": "Global settings updated"}
+
+@router.put("/", response_model=SettingsResponse)
+def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    repo = SettingsRepository(db)
+    owner_id = current_user.get("user_id")
+    settings = repo.update(owner_id, payload.model_dump(exclude_none=True))
+    return settings
+
+
+@router.post("/reset", response_model=SettingsResponse)
+def reset_settings(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    repo = SettingsRepository(db)
+    owner_id = current_user.get("user_id")
+    settings = repo.reset_to_defaults(owner_id)
+    return settings
