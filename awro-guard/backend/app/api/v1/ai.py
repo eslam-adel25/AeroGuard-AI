@@ -29,7 +29,7 @@ def list_ai_events(camera_id: Optional[str] = None, limit: int = 100, offset: in
             "confidence": i.confidence,
             "screenshot_path": i.screenshot_path,
             "created_at": i.created_at.isoformat(),
-            "metadata": i.metadata,
+            "metadata": i.event_metadata,
         } for i in items
     ]}
 
@@ -52,7 +52,7 @@ def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dic
         "confidence": ev.confidence,
         "screenshot_path": ev.screenshot_path,
         "created_at": ev.created_at.isoformat(),
-        "metadata": ev.metadata,
+        "metadata": ev.event_metadata,
     }
 
 @router.post("/ai/events/manual")

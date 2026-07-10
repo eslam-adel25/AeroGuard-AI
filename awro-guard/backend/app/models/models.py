@@ -256,6 +256,6 @@ class AIEvent(Base):
     severity = Column(String(20), nullable=False)
     confidence = Column(Float, nullable=True)
     screenshot_path = Column(String(400), nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    event_metadata = Column("metadata", JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

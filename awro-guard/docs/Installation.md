@@ -13,7 +13,7 @@ Backend – Python environment
 1. Create and activate virtualenv
 
 ```bash
-cd backend
+cd awro-guard/backend
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
@@ -23,26 +23,11 @@ source .venv/bin/activate
 
 2. Install dependencies
 
-There is no `requirements.txt` in the repository. Based on imports, a minimal `pip` install list includes:
+Install the backend requirements from the pinned file at `requirements.txt`.
 
-```text
-fastapi
-uvicorn
-sqlalchemy
-psycopg2-binary
-python-dotenv
-python-jose[cryptography]
-bcrypt
-python-multipart
-pillow
-fpdf
-pandas
-ultralytics
-opencv-python
-numpy
+```bash
+pip install -r requirements.txt
 ```
-
-Create `requirements.txt` by pinning versions appropriate for your environment before deploying.
 
 3. Environment variables (observed in code)
 
@@ -62,9 +47,9 @@ Create `requirements.txt` by pinning versions appropriate for your environment b
 4. Run backend (development)
 
 ```bash
-cd backend
+cd awro-guard/backend
 .venv\Scripts\activate
-pip install -r requirements.txt  # create this file first
+pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -75,7 +60,7 @@ Frontend – Node.js
 1. Install dependencies
 
 ```bash
-cd frontend
+cd awro-guard/frontend
 npm install
 ```
 
@@ -96,17 +81,17 @@ Notes and verification
 
 - Frontend `api.ts` client points to `http://127.0.0.1:8000/api/v1` by default.
 - WebSocket connects to `ws://127.0.0.1:8000/ws/dashboard?token=<token>` in the frontend socket helper.
-- The repository includes Vite + TypeScript configuration in `frontend/` (`tsconfig.app.json`, `vite.config.ts`).
+- The repository includes Vite + TypeScript configuration in `awro-guard/frontend/` (`tsconfig.app.json`, `vite.config.ts`).
 
 Testing
 
 - Backend unit tests (small set observed):
 
 ```bash
-# from backend/ with virtualenv active
+# from awro-guard/backend/ with virtualenv active
 python -m pytest -q tests/test_security_helpers.py
 ```
 
 This repo's tests exercise security helper functions.
 
-If you want, I can produce a pinned `requirements.txt` and a `package.json` upgrade plan for production-ready bundles.
+Production deployments should review pinned package versions in `awro-guard/backend/requirements.txt` and test them in the target Python environment before deployment.

@@ -83,6 +83,12 @@ class AIRepository:
         Example payload keys: camera_id, detection_type, severity, confidence,
         track_id, detected_by, metadata, screenshot_path
         """
+        # Accept payloads that may use the key 'metadata' (external callers).
+        # Map it to the model attribute name `event_metadata` which is mapped
+        # to the DB column "metadata" to preserve compatibility.
+        if "metadata" in payload:
+            payload["event_metadata"] = payload.pop("metadata")
+
         ev = AIEvent(**payload)
         self.db.add(ev)
         self.db.commit()
@@ -96,6 +102,9 @@ class AIRepository:
         ev = self.get_event(event_id)
         if not ev:
             return None
+        # Allow callers to pass 'metadata' and map it to our model attribute.
+        if "metadata" in kwargs:
+            kwargs["event_metadata"] = kwargs.pop("metadata")
         for k, v in kwargs.items():
             if hasattr(ev, k) and v is not None:
                 setattr(ev, k, v)
@@ -181,7 +190,7 @@ class AIRepository:
                     "severity": r.severity,
                     "confidence": float(r.confidence) if r.confidence is not None else None,
                     "screenshot_path": r.screenshot_path,
-                    "metadata": r.metadata,
+                        "metadata": r.event_metadata,
                     "created_at": r.created_at.isoformat() if r.created_at is not None else None,
                 }
             )

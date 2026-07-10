@@ -1,10 +1,10 @@
 # Camera Pipeline and AI Processing
 
-This document summarizes the camera processing pipeline implemented in `backend/app/ai/processor.py` and the related API controls.
+This document summarizes the camera processing pipeline implemented in `awro-guard/backend/app/ai/processor.py` and the related API controls.
 
 Overview
 
-- Cameras can be added via `POST /api/v1/cameras/` as `LIVE`, `USB`, or `UPLOAD` (video file). Uploaded videos are stored under `backend/uploads/videos/`.
+- Cameras can be added via `POST /api/v1/cameras/` as `LIVE`, `USB`, or `UPLOAD` (video file). Uploaded videos are stored under `awro-guard/backend/uploads/videos/`.
 - Starting processing: `POST /api/v1/cameras/{camera_id}/start` adds a background task that calls `AIProcessor.process_camera(camera_id, stream_url)`.
 - Stopping processing: `AIProcessor.stop_camera(camera_id)` sets a stop flag; the `cameras` router also calls `ai_engine.stop_camera()` during deletion.
 
@@ -31,8 +31,8 @@ Performance
 
 Files of interest
 
-- `backend/app/ai/processor.py`
-- `backend/app/ai/tracker.py`
-- `backend/app/ai/bytetrack_adapter.py`
-- `backend/app/ai/deepsort_adapter.py`
-- `backend/app/services/ai_service.py`
+- `awro-guard/backend/app/ai/processor.py`
+- `awro-guard/backend/app/ai/tracker.py`
+- `awro-guard/backend/app/ai/bytetrack_adapter.py`
+- `awro-guard/backend/app/ai/deepsort_adapter.py`
+- `awro-guard/backend/app/services/ai_service.py`

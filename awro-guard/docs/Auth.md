@@ -1,6 +1,6 @@
 # Authentication Flow (implementation-derived)
 
-This document describes the authentication and session flows implemented in `backend/app/api/v1/auth.py` and related modules.
+This document describes the authentication and session flows implemented in `awro-guard/backend/app/api/v1/auth.py` and related modules.
 
 1. Registration (`POST /api/v1/auth/register`)
    - Accepts `full_name`, `username`, `email`, `password`, `phone`, `organization` via `UserRegister` schema.

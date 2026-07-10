@@ -32,11 +32,10 @@ Quickstart (development)
 1. Backend
 
 ```bash
-cd backend
+cd awro-guard/backend
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
-# Install dependencies (create a pinned requirements.txt first)
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -44,7 +43,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 2. Frontend
 
 ```bash
-cd frontend
+cd awro-guard/frontend
 npm install
 npm run dev
 ```
@@ -53,12 +52,13 @@ Where to look next
 
 - Environment variables the backend reads: see [docs/EnvVars.md](docs/EnvVars.md).
 - The backend exposes an OpenAPI UI at `/docs` when running locally.
-- The frontend's API client and expected endpoints are in `frontend/src/services/api.ts`.
+- The frontend's API client and expected endpoints are in `awro-guard/frontend/src/services/api.ts`.
 
 Important implementation notes
 
-- There is no `requirements.txt` or `pyproject.toml` in the repository root. Python dependencies are inferred from imports and should be pinned before production deployment (see `docs/Dependencies.md`).
+- A pinned backend requirements file exists at `awro-guard/backend/requirements.txt`. Python dependencies should still be reviewed before production deployment (see `docs/Dependencies.md`).
 - No Dockerfile or container definitions are present in the repository. Containerized deployment is recommended for production.
+- The backend already includes a pinned dependency manifest at `awro-guard/backend/requirements.txt`.
 - The backend expects a `DATABASE_URL` environment variable and uses PostgreSQL-specific types (`UUID`, `JSONB`).
 
-If you prefer a single-file README instead of multiple docs, I can compile these into one full document; otherwise open any of the `docs/*.md` files for implementation-level details.
+For implementation-level details, open any of the `docs/*.md` files.

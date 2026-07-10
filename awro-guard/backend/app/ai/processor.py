@@ -403,4 +403,11 @@ class AIProcessor:
 
 # تصدير نسخة المحرك الموحدة
 
-ai_engine = AIProcessor(model_path="models/yolov8n.pt")
+try:
+    ai_engine = AIProcessor(model_path="models/yolov8n.pt")
+except Exception as exc:
+    # Allow the application to start even if the AI model cannot be loaded
+    # (e.g., during CI, dev environments, or when offline). The service
+    # should check `ai_engine` is not None before using it.
+    print(f"⚠️ AIProcessor initialization failed: {type(exc).__name__}: {exc}")
+    ai_engine = None

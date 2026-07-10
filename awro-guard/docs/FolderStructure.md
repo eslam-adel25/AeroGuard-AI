@@ -4,7 +4,7 @@ This is the repository layout as observed when inspecting the source. Paths are 
 
 - `README.md` — repository index and docs links.
 - `docs/` — this documentation folder.
-- `backend/` — FastAPI backend and AI engine implementation
+- `awro-guard/backend/` — FastAPI backend and AI engine implementation
   - `app/`
     - `api/v1/` — REST API routers (`auth.py`, `cameras.py`, `users.py`, `reports.py`, `settings.py`, `ai.py`, `websocket_api.py`)
     - `ai/` — AI engine and tracker adapters (`processor.py`, `tracker.py`, `bytetrack_adapter.py`, `deepsort_adapter.py`)
@@ -19,7 +19,7 @@ This is the repository layout as observed when inspecting the source. Paths are 
   - `uploads/` — runtime storage for avatars, videos, reports, ai_events
   - `tests/` — unit tests (small set: `test_security_helpers.py`)
 
-- `frontend/` — React + TypeScript SPA built with Vite
+- `awro-guard/frontend/` — React + TypeScript SPA built with Vite
   - `src/`
     - `pages/` — main views (`Login.tsx`, `Dashboard.tsx`, `Cameras.tsx`, `Reports.tsx`, `Settings.tsx`, etc.)
     - `components/` — shared UI components
@@ -29,5 +29,5 @@ This is the repository layout as observed when inspecting the source. Paths are 
 
 Notes
 
-- There are two copies of `yolov8n.pt` in the repository (`backend/models/` and `backend/app/models/`). The engine references `models/yolov8n.pt` relative to the backend root.
-- No Dockerfile, no pinned `requirements.txt` found during inspection.
+- There are two copies of `yolov8n.pt` in the repository (`awro-guard/backend/models/` and `awro-guard/backend/app/models/`). The engine references `models/yolov8n.pt` relative to the backend root.
+- No Dockerfile is provided. The backend includes a pinned `requirements.txt` at `awro-guard/backend/requirements.txt`.

@@ -41,7 +41,7 @@ def _check_rate_limit(key: str, window_seconds: int, max_attempts: int) -> None:
 
 # 1. مسار تسجيل حساب جديد (Section 1)
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db), request: Optional[Request] = None):
+def register(payload: UserRegister, db: Session = Depends(get_db), request: Request = None):
     client_id = _get_client_id(request)
     _check_rate_limit(f"register:{client_id}", AUTH_REGISTER_LIMIT_WINDOW_SECONDS, AUTH_REGISTER_LIMIT_MAX_ATTEMPTS)
 
@@ -91,7 +91,7 @@ def register(payload: UserRegister, db: Session = Depends(get_db), request: Opti
 
 # 2. مسار تسجيل الدخول (Section 1)
 @router.post("/login")
-def login(payload: UserLogin, db: Session = Depends(get_db), request: Optional[Request] = None):
+def login(payload: UserLogin, db: Session = Depends(get_db), request: Request = None):
     client_id = _get_client_id(request)
     username_key = (payload.username or "").strip().lower()
     _check_rate_limit(f"login:{client_id}", AUTH_RATE_LIMIT_WINDOW_SECONDS, AUTH_RATE_LIMIT_MAX_ATTEMPTS)

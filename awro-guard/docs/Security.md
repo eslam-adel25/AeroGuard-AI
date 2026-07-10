@@ -5,19 +5,19 @@ This summary enumerates security measures implemented in the codebase and refere
 Authentication & Authorization
 
 - JWT-based authentication
-  - Token creation and validation performed in `backend/app/core/security.py` (uses `python-jose`).
+  - Token creation and validation performed in `awro-guard/backend/app/core/security.py` (uses `python-jose`).
   - `ACCESS_TOKEN_EXPIRE_MINUTES` controls expiration (defaults to 60 mins if unset).
-- Password hashing with bcrypt in `backend/app/core/security.py`.
-- Role-based access control via `backend/app/core/auth_middleware.py` and `role_required()` decorator.
+- Password hashing with bcrypt in `awro-guard/backend/app/core/security.py`.
+- Role-based access control via `awro-guard/backend/app/core/auth_middleware.py` and `role_required()` decorator.
 
 Rate limiting and brute-force protection
 
-- A lightweight in-memory throttling mechanism protects login and registration routes in `backend/app/api/v1/auth.py` (per-client and per-username buckets).
+- A lightweight in-memory throttling mechanism protects login and registration routes in `awro-guard/backend/app/api/v1/auth.py` (per-client and per-username buckets).
 - This is suitable for small deployments; for production a distributed rate limiter (Redis or API gateway rate limits) is recommended.
 
 Input, uploads and file handling
 
-- Avatar and video uploads are validated for extension and size in `backend/app/api/v1/users.py` and `backend/app/api/v1/cameras.py`.
+- Avatar and video uploads are validated for extension and size in `awro-guard/backend/app/api/v1/users.py` and `awro-guard/backend/app/api/v1/cameras.py`.
 - Uploaded files are saved under the `uploads/` directory and are removed when camera entries are deleted (camera type UPLOAD).
 - Screenshot writing for AI events is handled carefully and paths are stored on the model (`screenshot_path`).
 
@@ -27,17 +27,17 @@ Database safety
 
 WebSocket security
 
-- WebSocket endpoint `backend/app/api/v1/websocket_api.py` accepts `token` as a query parameter and validates via JWT helper.
+- WebSocket endpoint `awro-guard/backend/app/api/v1/websocket_api.py` accepts `token` as a query parameter and validates via JWT helper.
 - The WebSocket manager broadcasts JSON messages only; connection cleanup handles dead sockets.
 
 CORS & headers
 
-- Security headers are set by a custom middleware in `backend/app/main.py` (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy).
+- Security headers are set by a custom middleware in `awro-guard/backend/app/main.py` (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy).
 - CORS is configured with an explicit allowlist (localhost dev origins).
 
 Email and secrets
 
-- Email sending is implemented in `backend/app/core/emailer.py` using SMTP settings read from environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM).
+- Email sending is implemented in `awro-guard/backend/app/core/emailer.py` using SMTP settings read from environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM).
 - Secrets (JWT secret, SMTP credentials, DATABASE_URL) must be provided via environment variables. The repository uses `python-dotenv` if `.env` is present, but no `.env` is included in source control.
 
 Session & refresh tokens
@@ -56,4 +56,4 @@ What is missing or recommended
 - No secrets management shown (use environment variables and secret stores in production).
 - No explicit CSRF tokens required because API uses Bearer tokens, but if cookies are used later, CSRF protection must be added.
 
-If you want, I can expand this into a checklist of production hardening steps with suggested tool choices (Redis, Traefik, Nginx, Vault, etc.).
+Review production hardening best practices for authentication, secret management, session storage, and network isolation when deploying this application.

@@ -1,6 +1,6 @@
 # Database Schema & Models (implementation-derived)
 
-This file summarizes the SQLAlchemy models implemented in `backend/app/models/models.py`. The repository uses PostgreSQL-specific column types (UUID, JSONB).
+This file summarizes the SQLAlchemy models implemented in `awro-guard/backend/app/models/models.py`. The repository uses PostgreSQL-specific column types (UUID, JSONB).
 
 Important tables and key fields
 
@@ -72,6 +72,6 @@ Relationships
 Notes
 
 - The code uses PostgreSQL `JSONB` and `UUID` dialect types, so `DATABASE_URL` should point to a PostgreSQL instance (e.g. `postgresql+psycopg2://user:pass@host/dbname`).
-- Nothing in the repo suggests use of Alembic migrations — database schema is created on startup via `Base.metadata.create_all(bind=engine)` in `backend/app/main.py`.
+- Nothing in the repo suggests use of Alembic migrations — database schema is created on startup via `Base.metadata.create_all(bind=engine)` in `awro-guard/backend/app/main.py`.
 
-If you want, I can produce an ER diagram or generate CREATE TABLE statements by introspecting the SQLAlchemy models.
+Refer to the SQLAlchemy models in `awro-guard/backend/app/models/models.py` for full schema details.

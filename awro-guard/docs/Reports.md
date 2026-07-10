@@ -4,11 +4,11 @@ The codebase provides a reporting subsystem used by the frontend to generate ope
 
 Key components
 
-- `ReportService` (`backend/app/services/report_service.py`) — aggregates detections and AI events to construct dashboard data and report payloads.
-- `ReportRepository` (`backend/app/repositories/report_repository.py`) — persists `Report` records and exposes list/get/delete API.
-- `ReportGenerator` (`backend/app/utils/report_generator.py`) — creates PDF/Excel files under `uploads/reports/`.
+- `ReportService` (`awro-guard/backend/app/services/report_service.py`) — aggregates detections and AI events to construct dashboard data and report payloads.
+- `ReportRepository` (`awro-guard/backend/app/repositories/report_repository.py`) — persists `Report` records and exposes list/get/delete API.
+- `ReportGenerator` (`awro-guard/backend/app/utils/report_generator.py`) — creates PDF/Excel files under `uploads/reports/`.
 
-API endpoints (see `backend/app/api/v1/reports.py`)
+API endpoints (see `awro-guard/backend/app/api/v1/reports.py`)
 
 - `GET /api/v1/reports/summary` — aggregate stats for a date range and optional filters.
 - `GET /api/v1/reports/dashboard` — full analytics payload used by the frontend dashboard.

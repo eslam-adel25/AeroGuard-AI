@@ -1,6 +1,6 @@
 # REST API Reference (implementation-derived)
 
-All backend routes are mounted under `/api/v1/` unless noted otherwise. Authentication uses Bearer JWT tokens in the `Authorization` header; the token creation code is in `backend/app/core/security.py`.
+All backend routes are mounted under `/api/v1/` unless noted otherwise. Authentication uses Bearer JWT tokens in the `Authorization` header; the token creation code is in `awro-guard/backend/app/core/security.py`.
 
 Summary of routers and key endpoints found in the codebase:
 
@@ -56,9 +56,9 @@ WebSocket
 
 Authentication / Rate limiting notes
 
-- Passwords hashed using `bcrypt` (`backend/app/core/security.py`).
-- JWT creation/verification lives in `backend/app/core/security.py`; token expiry controlled by `ACCESS_TOKEN_EXPIRE_MINUTES` env var (defaults to 60 minutes).
-- The auth router includes an in-memory throttling mechanism (login/register attempt buckets) implemented in `backend/app/api/v1/auth.py` to reduce brute-force attempts.
+- Passwords hashed using `bcrypt` (`awro-guard/backend/app/core/security.py`).
+- JWT creation/verification lives in `awro-guard/backend/app/core/security.py`; token expiry controlled by `ACCESS_TOKEN_EXPIRE_MINUTES` env var (defaults to 60 minutes).
+- The auth router includes an in-memory throttling mechanism (login/register attempt buckets) implemented in `awro-guard/backend/app/api/v1/auth.py` to reduce brute-force attempts.
 
 Example: login request
 
@@ -87,4 +87,4 @@ Response (example)
 Notes and omissions
 
 - Full OpenAPI examples and detailed JSON schemas are available if you run the backend and access `/docs` (FastAPI OpenAPI UI).
-- This reference is strictly implementation-derived; if you need example payloads for every endpoint, I can generate them next by reading each route's Pydantic schema and creating curl examples.
+- This reference is strictly implementation-derived; example payloads are available from the backend OpenAPI UI at `/docs` once the server is running.

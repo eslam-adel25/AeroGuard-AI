@@ -1,0 +1,90 @@
+# ==========================
+# Python
+# ==========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+.venv_req/
+**/.venv/
+**/.venv_req/
+
+# Environment Variables
+.env
+.env.*
+
+# Python Build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Uploaded Files
+backend/uploads/videos/
+backend/uploads/avatars/
+
+# ==========================
+# Node.js / React / Vite
+# ==========================
+node_modules/
+**/node_modules/
+
+dist/
+**/dist/
+dist-ssr/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==========================
+# IDE
+# ==========================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==========================
+# Operating System
+# ==========================
+.DS_Store
+Thumbs.db
+
+# ==========================
+# Logs
+# ==========================
+logs/
+*.log
+
+# ==========================
+# Temporary Files
+# ==========================
+tmp_*.py
+*.tmp
+
+# ==========================
+# Models 
+# 
+# ==========================
+# backend/models/*.pt
+# backend/models/*.pth
+# backend/models/*.onnx
+
+# ==========================
+# Documentation Archive
+# ==========================
+DC/
