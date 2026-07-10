@@ -1,6 +1,6 @@
 import os
 import uuid
-import shutil
+from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
@@ -27,9 +27,11 @@ from ...core.security import create_refresh_token_string
 router = APIRouter(prefix="/users", tags=["Users & Profile"])
 
 # المجلد الخاص بصور الملف الشخصي
-UPLOAD_DIR = "uploads/avatars"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+BASE_DIR = Path(__file__).resolve().parents[3]
+UPLOAD_DIR = BASE_DIR / "uploads" / "avatars"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_AVATAR_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+MAX_AVATAR_SIZE = 5 * 1024 * 1024
 
 # ==========================================
 # 1. مسارات الملف الشخصي (User Profile - Self)
@@ -140,28 +142,30 @@ async def upload_my_avatar(
     """رفع صورة شخصية (Avatar) وحفظ المسار (Section 3)"""
     user = db.query(User).filter(User.user_id == current_user['user_id']).first()
     
-    # Validate file type and size
-    allowed = {"jpg", "jpeg", "png", "webp"}
-    file_ext = file.filename.split(".")[-1].lower()
-    if file_ext not in allowed:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    file_name = Path(file.filename).name
+    file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+    if file_ext not in ALLOWED_AVATAR_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid file type")
-    # seek to compute size
+
     contents = await file.read()
-    if len(contents) > 5 * 1024 * 1024:
+    if len(contents) > MAX_AVATAR_SIZE:
         raise HTTPException(status_code=400, detail="File too large")
 
-    # remove old avatar
-    try:
-        if user.profile_picture and os.path.exists(user.profile_picture):
-            os.remove(user.profile_picture)
-    except Exception:
-        pass
-
-    # save new file
-    file_name = f"{user.user_id}_{uuid.uuid4().hex[:8]}.{file_ext}"
-    file_path = os.path.join(UPLOAD_DIR, file_name)
-    with open(file_path, "wb") as f:
+    safe_name = f"{user.user_id}_{uuid.uuid4().hex[:8]}.{file_ext}"
+    file_path = UPLOAD_DIR / safe_name
+    with file_path.open("wb") as f:
         f.write(contents)
+
+    if user.profile_picture:
+        try:
+            old_path = Path(user.profile_picture)
+            if old_path.exists() and old_path.parent == UPLOAD_DIR:
+                old_path.unlink()
+        except Exception:
+            pass
 
     # try resizing with Pillow if available
     try:
@@ -174,9 +178,9 @@ async def upload_my_avatar(
     except Exception:
         pass
 
-    user.profile_picture = file_path
+    user.profile_picture = str(file_path)
     db.commit()
-    return {"status": "success", "avatar_url": file_path}
+    return {"status": "success", "avatar_url": str(file_path)}
 
 
 # ==========================================

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Shield, Lock, User, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import axios from "axios";
+import api from "../services/api";
 
 interface LoginProps {
   onLoginSuccess: (token: string) => void;
@@ -20,13 +20,10 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
     setError("");
 
     try {
-      const response = await axios.post(
-        "http://127.0.0.1:8000/api/v1/auth/login",
-        {
-          username,
-          password,
-        },
-      );
+      const response = await api.post("/auth/login", {
+        username,
+        password,
+      });
 
       if (response.data.access_token) {
         onLoginSuccess(response.data.access_token);

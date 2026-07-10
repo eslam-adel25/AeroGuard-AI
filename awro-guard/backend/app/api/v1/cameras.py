@@ -1,6 +1,7 @@
 import os
 import shutil
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -18,8 +19,10 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
 # المجلد الجذري لوحدة backend
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "videos")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+UPLOAD_DIR = Path(BASE_DIR) / "uploads" / "videos"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
+MAX_VIDEO_SIZE = 200 * 1024 * 1024
 
 # 1. تسجيل كاميرا (بث مباشر أو رفع فيديو)
 @router.post("/", response_model=CameraResponse)
@@ -37,15 +40,21 @@ async def add_camera(
     if camera_type == "USB":
         final_url = "0"
     
-    # معالجة رفع الفيديو إذا كان النوع UPLOAD
     if camera_type == "UPLOAD" and video_file:
-        file_ext = video_file.filename.split(".")[-1]
-        file_name = f"{uuid.uuid4()}.{file_ext}"
-        file_path = os.path.join(UPLOAD_DIR, file_name)
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(video_file.file, buffer)
-        final_url = file_path
+        if not video_file.filename:
+            raise HTTPException(status_code=400, detail="Invalid file name")
+        file_name = Path(video_file.filename).name
+        file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+        if file_ext not in ALLOWED_VIDEO_EXTENSIONS:
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        contents = await video_file.read()
+        if len(contents) > MAX_VIDEO_SIZE:
+            raise HTTPException(status_code=400, detail="File too large")
+        safe_name = f"{uuid.uuid4().hex}.{file_ext}"
+        file_path = UPLOAD_DIR / safe_name
+        with file_path.open("wb") as buffer:
+            buffer.write(contents)
+        final_url = str(file_path)
 
     new_cam = Camera(
         camera_name=camera_name,
@@ -149,5 +158,10 @@ async def frame_generator(camera_id: str):
         await asyncio.sleep(0.1)
 
 @router.get("/{camera_id}/stream")
-async def get_stream(camera_id: str):
+async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
+        raise HTTPException(status_code=403, detail="Forbidden")
     return StreamingResponse(frame_generator(camera_id), media_type='multipart/x-mixed-replace; boundary=frame')

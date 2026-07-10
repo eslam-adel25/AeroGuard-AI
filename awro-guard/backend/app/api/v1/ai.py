@@ -13,6 +13,12 @@ router = APIRouter()
 @router.get("/ai/events")
 def list_ai_events(camera_id: Optional[str] = None, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = AIRepository(db)
+    is_admin = current_user.get("role") == "Administrator"
+    if camera_id and not is_admin:
+        from ...models.models import Camera
+        camera = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+        if not camera or camera.owner_id != current_user.get("user_id"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     items = repo.list_events(camera_id=camera_id, limit=limit, offset=offset)
     return {"items": [
         {
@@ -33,6 +39,11 @@ def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dic
     ev = repo.get_event(event_id)
     if not ev:
         raise HTTPException(status_code=404, detail="Event not found")
+    if current_user.get("role") != "Administrator" and ev.camera_id and ev.detected_by != current_user.get("user_id"):
+        from ...models.models import Camera
+        camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
+        if not camera or camera.owner_id != current_user.get("user_id"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return {
         "event_id": str(ev.event_id),
         "camera_id": str(ev.camera_id),
@@ -61,6 +72,11 @@ def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), curren
     ev = repo.get_event(event_id)
     if not ev or not ev.screenshot_path:
         raise HTTPException(status_code=404, detail="Screenshot not found")
+    if current_user.get("role") != "Administrator" and ev.camera_id and ev.detected_by != current_user.get("user_id"):
+        from ...models.models import Camera
+        camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
+        if not camera or camera.owner_id != current_user.get("user_id"):
+            raise HTTPException(status_code=403, detail="Forbidden")
     path = ev.screenshot_path
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Screenshot file missing")

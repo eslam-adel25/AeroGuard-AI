@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from collections import defaultdict, deque
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ...database.session import get_db
@@ -14,9 +16,35 @@ from ...models.models import EmailVerificationToken, RefreshToken
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+AUTH_RATE_LIMIT_WINDOW_SECONDS = 900
+AUTH_RATE_LIMIT_MAX_ATTEMPTS = 8
+AUTH_REGISTER_LIMIT_WINDOW_SECONDS = 1800
+AUTH_REGISTER_LIMIT_MAX_ATTEMPTS = 5
+_AUTH_ATTEMPT_HISTORY: dict[str, deque[datetime]] = defaultdict(deque)
+
+
+def _get_client_id(request: Optional[Request]) -> str:
+    if request is None:
+        return "unknown"
+    return getattr(request.client, "host", "unknown") or "unknown"
+
+
+def _check_rate_limit(key: str, window_seconds: int, max_attempts: int) -> None:
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=window_seconds)
+    bucket = _AUTH_ATTEMPT_HISTORY[key]
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+    if len(bucket) >= max_attempts:
+        raise HTTPException(status_code=429, detail="Too many requests")
+    bucket.append(now)
+
 # 1. مسار تسجيل حساب جديد (Section 1)
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
+def register(payload: UserRegister, db: Session = Depends(get_db), request: Optional[Request] = None):
+    client_id = _get_client_id(request)
+    _check_rate_limit(f"register:{client_id}", AUTH_REGISTER_LIMIT_WINDOW_SECONDS, AUTH_REGISTER_LIMIT_MAX_ATTEMPTS)
+
     # فحص تكرار اسم المستخدم أو الإيميل
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -63,7 +91,12 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 # 2. مسار تسجيل الدخول (Section 1)
 @router.post("/login")
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+def login(payload: UserLogin, db: Session = Depends(get_db), request: Optional[Request] = None):
+    client_id = _get_client_id(request)
+    username_key = (payload.username or "").strip().lower()
+    _check_rate_limit(f"login:{client_id}", AUTH_RATE_LIMIT_WINDOW_SECONDS, AUTH_RATE_LIMIT_MAX_ATTEMPTS)
+    _check_rate_limit(f"login:user:{username_key}", AUTH_RATE_LIMIT_WINDOW_SECONDS, AUTH_RATE_LIMIT_MAX_ATTEMPTS)
+
     user = db.query(User).filter(User.username == payload.username).first()
     
     if not user or not verify_password(payload.password, user.password_hash):
