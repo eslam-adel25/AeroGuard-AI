@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func  # التصحيح: استيراد func من sqlalchemy مباشرة
+from sqlalchemy import func
 from ...database.session import get_db
 from ...models.models import User, Role
 from ...schemas.schemas import UserRegister, UserLogin
@@ -11,7 +11,6 @@ from ...repositories.activity_repository import ActivityRepository
 from datetime import datetime, timedelta
 from ...core.emailer import send_verification_email
 from ...models.models import EmailVerificationToken, RefreshToken
-from sqlalchemy import func
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -220,11 +219,6 @@ def logout(payload: dict, db: Session = Depends(get_db)):
     token_repo = TokenRepository(db)
     token_repo.revoke_refresh_token(token_value)
     return {"status": "logged_out"}
-
-# 3. مسار الخروج (Logout) - يتم التعامل معه في الفرونتيند بمسح التوكن
-@router.post("/logout")
-def logout():
-    return {"status": "success", "message": "Logged out successfully"}
 
 
 @router.get("/create-admin")

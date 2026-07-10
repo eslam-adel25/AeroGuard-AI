@@ -135,9 +135,6 @@ class SettingsResponse(SettingsUpdate):
     class Config:
         from_attributes = True
 
-    class Config:
-        from_attributes = True
-
 class ZoneCreate(BaseModel):
     zone_name: str
     zone_type: str

@@ -18,9 +18,7 @@ from ...schemas.schemas import (
 from ...core.auth_middleware import get_current_user, role_required
 from ...core.security import hash_password, verify_password
 from ...repositories.activity_repository import ActivityRepository
-from ...models.models import RefreshToken
 from ...repositories.token_repository import TokenRepository
-from ...repositories.activity_repository import ActivityRepository
 from ...core.emailer import send_verification_email
 from ...models.models import EmailVerificationToken, RefreshToken
 from datetime import datetime, timedelta
