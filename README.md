@@ -1,323 +1,64 @@
-# 🛡️ AeroGuard AI
+# AeroGuard AI
 
-<div align="center">
+Comprehensive, implementation-backed documentation for the AeroGuard AI repository. This documentation is derived directly from the repository sources (backend and frontend) and does not invent behavior beyond the code.
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
-![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi)
-![React](https://img.shields.io/badge/React-Frontend-61DAFB?style=for-the-badge&logo=react)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-336791?style=for-the-badge&logo=postgresql)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-AI-red?style=for-the-badge)
-![OpenCV](https://img.shields.io/badge/OpenCV-Computer_Vision-green?style=for-the-badge&logo=opencv)
-![License](https://img.shields.io/badge/License-MIT-success?style=for-the-badge)
+This repository contains:
 
-### AI-Powered Smart Airport Surveillance Platform
+- A FastAPI backend implementing REST endpoints, AI pipeline, WebSocket push notifications, persistence and reporting.
+- A React + TypeScript frontend built with Vite providing the dashboard and administrative UI.
 
-Real-time intelligent surveillance system powered by Computer Vision, Deep Learning, and Modern Web Technologies.
+This README is an index; detailed reference documents are available in the `docs/` directory.
 
-</div>
+Docs
 
----
+- [System Architecture & Overview](docs/Architecture.md)
+- [REST API Reference](docs/API.md)
+- [AI Engine & Modules](docs/AI.md)
+- [Database Schema & Models](docs/Database.md)
+- [Security & Hardening Summary](docs/Security.md)
+- [Installation & Build](docs/Installation.md)
+- [Folder Structure](docs/FolderStructure.md)
+- [Environment Variables](docs/EnvVars.md)
+- [Dependencies](docs/Dependencies.md)
+- [Authentication Flow](docs/Auth.md)
+- [WebSockets](docs/WebSockets.md)
+- [Camera Pipeline](docs/CameraPipeline.md)
+- [Reports System](docs/Reports.md)
+- [Settings System](docs/Settings.md)
+- [Reference Map](docs/Reference.md)
 
-# 📌 Overview
+Quickstart (development)
 
-**AeroGuard AI** is an intelligent surveillance platform designed to enhance airport security using Artificial Intelligence and Computer Vision.
-
-The system continuously monitors live camera streams, detects security threats in real time, and delivers instant alerts through an interactive dashboard.
-
-Rather than relying solely on human operators, AeroGuard AI assists security teams by providing automated detection, tracking, reporting, and analytics.
-
----
-
-# ✨ Key Features
-
-## 🎥 Intelligent Video Surveillance
-
-- Real-time camera monitoring
-- Live object detection
-- AI-powered threat recognition
-- Multi-camera management
-- Secure streaming
-
----
-
-## 🧠 Artificial Intelligence
-
-- YOLOv8 Object Detection
-- Deep Learning-based Computer Vision
-- Face Detection
-- Face Recognition
-- Real-time AI Inference
-- Confidence-based Filtering
-
----
-
-## 🚨 Security Monitoring
-
-- Threat Detection
-- Suspicious Object Detection
-- Restricted Zone Monitoring
-- Instant Alerts
-- Alert Prioritization
-- Security Event Logging
-
----
-
-## 📊 Analytics Dashboard
-
-- Real-time Detection Statistics
-- Detection Timeline
-- Threat Distribution
-- Historical Reports
-- AI Performance Metrics
-- Interactive Charts
-
----
-
-## 👤 User Management
-
-- JWT Authentication
-- Role-Based Access Control (RBAC)
-- Administrator
-- Supervisor
-- Security Officer
-
----
-
-## ⚙️ System Management
-
-- Camera Configuration
-- AI Configuration
-- Detection Threshold Control
-- Recording Settings
-- Security Policies
-
----
-
-# 🏗️ System Architecture
-
-```
-                Cameras
-                   │
-                   ▼
-           OpenCV Video Stream
-                   │
-                   ▼
-          YOLOv8 AI Detection
-                   │
-                   ▼
-        Threat Decision Engine
-                   │
-                   ▼
-          FastAPI Backend API
-                   │
-        ┌──────────┴──────────┐
-        ▼                     ▼
- PostgreSQL Database     WebSocket Server
-        │                     │
-        └──────────┬──────────┘
-                   ▼
-          React Dashboard
-```
-
----
-
-# 🛠️ Tech Stack
-
-## Frontend
-
-- React
-- TypeScript
-- Tailwind CSS
-- Axios
-- Recharts
-- Lucide Icons
-
----
-
-## Backend
-
-- FastAPI
-- SQLAlchemy
-- Pydantic
-- JWT Authentication
-- WebSocket
-- Uvicorn
-
----
-
-## AI & Computer Vision
-
-- YOLOv8
-- OpenCV
-- DeepFace
-- NumPy
-- Pillow
-
----
-
-## Database
-
-- PostgreSQL
-
----
-
-## Authentication
-
-- JWT Tokens
-- BCrypt Password Hashing
-- Role-Based Access Control
-
----
-
-# 📂 Project Structure
-
-```
-AeroGuard-AI/
-
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── database/
-│   │   ├── models/
-│   │   ├── repositories/
-│   │   ├── schemas/
-│   │   ├── services/
-│   │   └── websocket/
-│   └── uploads/
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   └── assets/
-│
-└── README.md
-```
-
----
-
-# 🔐 Security Features
-
-- JWT Authentication
-- Password Hashing (BCrypt)
-- Protected API Endpoints
-- Secure WebSocket Connections
-- Role-Based Authorization
-- Input Validation
-- SQL Injection Protection
-
----
-
-# 📈 Current Capabilities
-
-- ✅ User Authentication
-- ✅ Dashboard
-- ✅ Live Camera Monitoring
-- ✅ Real-Time AI Detection
-- ✅ WebSocket Communication
-- ✅ Reports System
-- ✅ Analytics
-- ✅ Camera Management
-- ✅ User Profiles
-- ✅ System Settings
-
----
-
-# 🚀 Future Improvements
-
-- Multi-Camera Tracking
-- Person Re-Identification
-- Crowd Density Analysis
-- License Plate Recognition
-- Drone Surveillance Integration
-- AI Behavior Analysis
-- SMS Notifications
-- Email Alerts
-- Mobile Application
-- Cloud Deployment
-
----
-
-# 🎯 Project Goals
-
-- Improve airport security.
-- Reduce human monitoring workload.
-- Detect threats in real time.
-- Provide actionable AI insights.
-- Build a scalable smart surveillance platform.
-
----
-
-# 💻 Installation
-
-## Clone Repository
-
-```bash
-git clone https://github.com/eslam-adel25/AeroGuard-AI.git
-```
-
----
-
-## Backend
+1. Backend
 
 ```bash
 cd backend
-
 python -m venv .venv
-
+# Windows
+.venv\Scripts\activate
+# Install dependencies (create a pinned requirements.txt first)
 pip install -r requirements.txt
-
-uvicorn main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
----
-
-## Frontend
+2. Frontend
 
 ```bash
 cd frontend
-
 npm install
-
 npm run dev
 ```
 
----
+Where to look next
 
-# 📸 Screenshots
+- Environment variables the backend reads: see [docs/EnvVars.md](docs/EnvVars.md).
+- The backend exposes an OpenAPI UI at `/docs` when running locally.
+- The frontend's API client and expected endpoints are in `frontend/src/services/api.ts`.
 
-> Screenshots of the Dashboard, Analytics, Reports, Camera Monitoring, and AI Detection will be added soon.
+Important implementation notes
 
----
+- There is no `requirements.txt` or `pyproject.toml` in the repository root. Python dependencies are inferred from imports and should be pinned before production deployment (see `docs/Dependencies.md`).
+- No Dockerfile or container definitions are present in the repository. Containerized deployment is recommended for production.
+- The backend expects a `DATABASE_URL` environment variable and uses PostgreSQL-specific types (`UUID`, `JSONB`).
 
-# 👨‍💻 Contributors
-
-- **Eslam Adel**
-- Graduation Project Team
-
----
-
-# 📚 Academic Context
-
-This project is being developed as a Graduation Project for the Faculty of Computers and Artificial Intelligence.
-
-The primary objective is to demonstrate practical applications of Artificial Intelligence, Computer Vision, and Modern Full-Stack Development in airport surveillance systems.
-
----
-
-# ⭐ Support
-
-If you find this project useful, consider giving it a ⭐ on GitHub.
-
----
-
-<div align="center">
-
-## AeroGuard AI
-
-### Smart Surveillance. Intelligent Decisions. Safer Airports.
-
-</div>
+If you prefer a single-file README instead of multiple docs, I can compile these into one full document; otherwise open any of the `docs/*.md` files for implementation-level details.
