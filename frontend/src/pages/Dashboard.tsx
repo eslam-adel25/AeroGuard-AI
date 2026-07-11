@@ -54,6 +54,7 @@ const Dashboard = () => {
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLImageElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingPoints, setDrawingPoints] = useState<Array<[number, number]>>(
     [],
@@ -536,7 +537,13 @@ const Dashboard = () => {
             <>
               <img
                 ref={videoRef}
-                src={isPaused ? "" : `/api/v1/cameras/${selectedCamera}/stream`}
+                src={
+                  isPaused || !selectedCamera
+                    ? ""
+                    : streamToken
+                      ? `/api/v1/cameras/${selectedCamera}/stream?token=${encodeURIComponent(streamToken)}`
+                      : `/api/v1/cameras/${selectedCamera}/stream`
+                }
                 alt="AeroGuard Engine"
                 onLoad={() => {
                   updateOverlayCanvas();

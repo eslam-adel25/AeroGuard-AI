@@ -108,8 +108,13 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
         raise HTTPException(status_code=404, detail="Camera not found")
     if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
         raise HTTPException(status_code=403, detail="Forbidden")
-    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
-    return {"status": "started"}
+    if ai_engine is None:
+        raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
+
+    cam.status = "Processing"
+    db.commit()
+    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url, db)
+    return {"status": "started", "camera_id": str(cam.camera_id)}
 
 # 4. جلب الكاميرات
 @router.get("/", response_model=list[CameraResponse])
@@ -135,8 +140,9 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: d
         except Exception as exc:
             print(f"⚠️ Failed to remove upload file for camera {camera_id}: {exc}")
 
-    ai_engine.stop_camera(cam.camera_id)
-    ai_engine.last_frames.pop(str(cam.camera_id), None)
+    if ai_engine is not None:
+        ai_engine.stop_camera(cam.camera_id)
+        ai_engine.last_frames.pop(str(cam.camera_id), None)
     db.delete(cam)
     db.commit()
     return {"status": "deleted", "camera_id": camera_id}
@@ -146,16 +152,22 @@ async def frame_generator(camera_id: str):
     iteration = 0
     while True:
         iteration += 1
-        frame = ai_engine.get_latest_frame(camera_id)
+        frame = None
+        if ai_engine is not None:
+            frame = ai_engine.get_latest_frame(camera_id)
+
         if frame is not None:
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-            print(f"📌 [stream {camera_id}] generator iter={iteration} frame_present=True encoded={ret}")
-            if ret:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+            try:
+                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                if ret:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+            except Exception as exc:
+                print(f"⚠️ [stream {camera_id}] frame encode failed: {exc}")
         else:
-            print(f"📌 [stream {camera_id}] generator iter={iteration} no frame available")
-        await asyncio.sleep(0.1)
+            await asyncio.sleep(0.2)
+            continue
+        await asyncio.sleep(0.05)
 
 @router.get("/{camera_id}/stream")
 async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -164,4 +176,6 @@ async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user
         raise HTTPException(status_code=404, detail="Camera not found")
     if cam.owner_id != current_user.get("user_id") and current_user.get("role") != "Administrator":
         raise HTTPException(status_code=403, detail="Forbidden")
+    if ai_engine is None:
+        raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
     return StreamingResponse(frame_generator(camera_id), media_type='multipart/x-mixed-replace; boundary=frame')

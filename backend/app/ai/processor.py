@@ -123,23 +123,33 @@ class AIProcessor:
             print(f"📌 [{camera_id}] cap created, isOpened={cap.isOpened()}")
 
             # 2. تحميل إعدادات المناطق المحظورة
-            zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+            zones = []
+            try:
+                zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+            except Exception as zone_exc:
+                print(f"⚠️ [{camera_id}] failed to load restricted zones: {type(zone_exc).__name__}: {zone_exc}")
+                zones = []
+                local_db.rollback()
 
             # 3. التحقق من الإعدادات
-            if not self.active_settings:
-                self.active_settings = local_db.query(SystemSettings).first()
+            try:
+                if not self.active_settings:
+                    self.active_settings = local_db.query(SystemSettings).first()
+            except Exception as settings_exc:
+                print(f"⚠️ [{camera_id}] failed to load settings: {type(settings_exc).__name__}: {settings_exc}")
+                self.active_settings = None
+                local_db.rollback()
 
-            conf_thr = (
-                self.active_settings.detection_confidence
-                if self.active_settings
-                else 0.5
-            )
+            conf_thr = 0.5
+            max_objs = 50
+            if self.active_settings is not None:
+                conf_thr = getattr(self.active_settings, "detection_confidence", 0.5)
+                max_objs = getattr(self.active_settings, "max_objects", 50)
 
-            max_objs = (
-                getattr(self.active_settings, "max_objects", 50)
-                if self.active_settings
-                else 50
-            )
+            if conf_thr is None:
+                conf_thr = 0.5
+            if max_objs is None:
+                max_objs = 50
 
             if not cap.isOpened():
                 print(f"❌ Critical: Could not open camera/video {camera_id}")
@@ -180,7 +190,11 @@ class AIProcessor:
                 start_time = time.time()
 
                 # respect frame-skip
-                frame_skip = getattr(self.active_settings, "frame_skip", 0) if self.active_settings else 0
+                frame_skip = 0
+                if self.active_settings is not None:
+                    frame_skip = getattr(self.active_settings, "frame_skip", 0) or 0
+                if frame_skip is None:
+                    frame_skip = 0
                 do_infer = (frame_skip <= 0) or (iteration % (frame_skip + 1) == 0)
                 results = None
                 if do_infer:
@@ -244,7 +258,9 @@ class AIProcessor:
                         prev_point = self.object_history[obj_id]
                         prev_y = prev_point[1]
                         # Wrong direction heuristic (vertical movement upward)
-                        wrong_enabled = getattr(self.active_settings, "wrong_direction_enabled", False) if self.active_settings else False
+                        wrong_enabled = False
+                        if self.active_settings is not None:
+                            wrong_enabled = getattr(self.active_settings, "wrong_direction_enabled", False) or False
                         if wrong_enabled and base_point[1] < prev_y - 30:
                             status = "WARNING"
                             box_color = (0, 0, 255)
@@ -267,8 +283,11 @@ class AIProcessor:
                                 rec["last_pos"] = base_point
                             else:
                                 # stayed roughly in place
-                                loiter_enabled = getattr(self.active_settings, "loitering_enabled", False) if self.active_settings else False
-                                loiter_seconds = getattr(self.active_settings, "loitering_seconds", 30) if self.active_settings else 30
+                                loiter_enabled = False
+                                loiter_seconds = 30
+                                if self.active_settings is not None:
+                                    loiter_enabled = getattr(self.active_settings, "loitering_enabled", False) or False
+                                    loiter_seconds = getattr(self.active_settings, "loitering_seconds", 30) or 30
                                 if loiter_enabled and (now_ts - rec.get("last_move", now_ts) >= loiter_seconds):
                                     status = "DANGER"
                                     box_color = (0, 0, 255)
@@ -321,8 +340,11 @@ class AIProcessor:
                             if nearest_person_dist is not None and nearest_person_dist < 120:
                                 bag_rec["last_near_person"] = now_ts
                             # evaluate abandoned
-                            abandoned_enabled = getattr(self.active_settings, "abandoned_bag_enabled", False) if self.active_settings else False
-                            abandoned_seconds = getattr(self.active_settings, "abandoned_bag_seconds", 20) if self.active_settings else 20
+                            abandoned_enabled = False
+                            abandoned_seconds = 20
+                            if self.active_settings is not None:
+                                abandoned_enabled = getattr(self.active_settings, "abandoned_bag_enabled", False) or False
+                                abandoned_seconds = getattr(self.active_settings, "abandoned_bag_seconds", 20) or 20
                             if abandoned_enabled:
                                 first_seen = bag_rec.get("first_seen", now_ts)
                                 last_near = bag_rec.get("last_near_person", 0)
@@ -421,12 +443,6 @@ class AIProcessor:
                         "camera_id": str(camera_id)
                    }
                 })
-
-                cv2.rectangle(annotated_frame, (0, 0), (250, 80), (0, 0, 0), -1)
-                cv2.putText(annotated_frame, f"FPS: {current_fps}", (15, 25), 0, 0.6, (0, 255, 0), 2)
-                cv2.putText(annotated_frame, f"ACTIVE OBJS: {active_objs_count}", (15, 50), 0, 0.6, (255, 255, 255), 2)
-                cv2.putText(annotated_frame, f"REC", (15, 72), 0, 0.5, (0, 0, 255), 2)
-                cv2.circle(annotated_frame, (60, 68), 5, (0, 0, 255), -1)
 
                 self.last_frames[str(camera_id)] = annotated_frame
                 await asyncio.sleep(0.01)
