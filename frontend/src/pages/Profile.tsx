@@ -217,7 +217,7 @@ const Profile: React.FC = () => {
               <div className="w-32 h-32 rounded-[2.5rem] bg-ag-dark border-4 border-ag-card shadow-2xl flex items-center justify-center overflow-hidden">
                 {profile?.profile_picture ? (
                   <img
-                    src={`http://127.0.0.1:8000/${profile.profile_picture}`}
+                    src={profile.profile_picture}
                     className="w-full h-full object-cover"
                     alt="Avatar"
                   />

@@ -2,8 +2,11 @@ import cv2
 import asyncio
 import time
 import os
+from pathlib import Path
 import numpy as np
+import torch
 from ultralytics import YOLO
+from ultralytics.nn import tasks as ultralytics_tasks
 from sqlalchemy.orm import Session
 from ..database.session import SessionLocal
 from ..models.models import Detection, Camera, RestrictedZone, SystemSettings
@@ -16,8 +19,9 @@ from ..services.ai_service import AIService
 class AIProcessor:
     def __init__(self, model_path: str):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
-        self.model_path = model_path
-        self.model = YOLO(model_path)
+        self.model_path = self._resolve_model_path(model_path)
+        self._patch_ultralytics_weights_only()
+        self.model = YOLO(self.model_path)
         self.decision_engine = DecisionEngine()
         # Tracker (stable facade). Default uses IoU fallback; swap later with ByteTrack/DeepSORT adapter.
         self.tracker = TrackerManager()
@@ -34,6 +38,46 @@ class AIProcessor:
         
         # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
         self.active_settings = None
+
+    def _resolve_model_path(self, model_path: str) -> str:
+        """Resolve a backend-relative model path to an absolute filesystem path."""
+        path = Path(model_path)
+        if path.is_absolute():
+            resolved = path
+        else:
+            backend_root = Path(__file__).resolve().parents[2]
+            resolved = backend_root / path
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"YOLO model file not found: {resolved}")
+        if resolved.stat().st_size == 0:
+            raise ValueError(f"YOLO model file is empty: {resolved}")
+        return str(resolved)
+
+    def _patch_ultralytics_weights_only(self):
+        """Patch installed Ultralytics to make torch.load use weights_only=False for this backend."""
+        try:
+            if hasattr(ultralytics_tasks, 'torch_safe_load'):
+                # Patch the internal safe load function if needed for older ultralytics installs.
+                def patched_torch_safe_load(weight):
+                    from ultralytics.utils.downloads import attempt_download_asset
+                    from ultralytics.utils.checks import check_suffix
+
+                    check_suffix(file=weight, suffix='.pt')
+                    file = attempt_download_asset(weight)
+                    try:
+                        with ultralytics_tasks.temporary_modules({
+                            'ultralytics.yolo.utils': 'ultralytics.utils',
+                            'ultralytics.yolo.v8': 'ultralytics.models.yolo',
+                            'ultralytics.yolo.data': 'ultralytics.data',
+                        }):
+                            return torch.load(file, map_location='cpu', weights_only=False), file
+                    except Exception:
+                        return ultralytics_tasks.torch_safe_load(weight)
+
+                ultralytics_tasks.torch_safe_load = patched_torch_safe_load
+        except Exception:
+            pass
 
     def update_config(self, settings_model: SystemSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""

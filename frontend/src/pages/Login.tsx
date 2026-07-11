@@ -25,8 +25,19 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
         password,
       });
 
-      if (response.data.access_token) {
-        onLoginSuccess(response.data.access_token);
+      const token = response.data?.access_token;
+      if (
+        typeof token === "string" &&
+        token.trim() &&
+        token !== "null" &&
+        token !== "undefined"
+      ) {
+        localStorage.setItem("ag_token", token);
+        localStorage.setItem("user", JSON.stringify(response.data.user ?? {}));
+        onLoginSuccess(token);
+        window.dispatchEvent(new Event("auth:login"));
+      } else {
+        setError(t("auth.invalidCredentials"));
       }
     } catch {
       setError(t("auth.invalidCredentials"));

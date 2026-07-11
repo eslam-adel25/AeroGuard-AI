@@ -1,6 +1,5 @@
-import api from "./api";
+import api, { aiService, getStoredAuthToken } from "./api";
 import { createSocket, type AlertWSData } from "./socket";
-import { aiService } from "./api";
 
 export type NotificationSeverity =
   | "Critical"
@@ -98,8 +97,13 @@ export const notificationService = {
 
   subscribeToLiveAlerts: (
     callback: (notification: NotificationItem) => void,
-  ): WebSocket | null => {
+  ) => {
     try {
+      const token = getStoredAuthToken();
+      if (!token) {
+        return null;
+      }
+
       return createSocket((message) => {
         if (message.event === "new_alert") {
           const notification = normalizeNotification(message.data);

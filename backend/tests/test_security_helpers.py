@@ -4,7 +4,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.security import hash_password, verify_password, create_access_token, verify_token
+from app.core.security import (
+    DEFAULT_DEMO_ACCOUNT_PASSWORD,
+    hash_password,
+    verify_password,
+    create_access_token,
+    verify_token,
+    ensure_demo_user_password,
+)
+from app.models.models import User
 
 
 def test_password_hash_round_trip():

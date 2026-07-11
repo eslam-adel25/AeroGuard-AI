@@ -15,7 +15,7 @@ def get_current_settings(db: Session = Depends(get_db), current_user: dict = Dep
     settings = repo.get_by_owner(owner_id)
     if not settings:
         settings = repo.create_defaults_for(owner_id)
-    return settings
+    return SettingsResponse.model_validate(settings).model_dump()
 
 
 @router.put("/", response_model=SettingsResponse)
@@ -23,7 +23,7 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), curr
     repo = SettingsRepository(db)
     owner_id = current_user.get("user_id")
     settings = repo.update(owner_id, payload.model_dump(exclude_none=True))
-    return settings
+    return SettingsResponse.model_validate(settings).model_dump()
 
 
 @router.post("/reset", response_model=SettingsResponse)
@@ -31,4 +31,4 @@ def reset_settings(db: Session = Depends(get_db), current_user: dict = Depends(g
     repo = SettingsRepository(db)
     owner_id = current_user.get("user_id")
     settings = repo.reset_to_defaults(owner_id)
-    return settings
+    return SettingsResponse.model_validate(settings).model_dump()

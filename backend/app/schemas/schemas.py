@@ -18,8 +18,7 @@ class CameraResponse(CameraCreate):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 # ==========================================
@@ -61,8 +60,7 @@ class RoleResponse(BaseModel):
     role_id: UUID
     role_name: str
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class UserResponse(BaseModel):
     user_id: UUID
@@ -78,8 +76,7 @@ class UserResponse(BaseModel):
     creator_name: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class UserProfileUpdate(BaseModel):
@@ -132,16 +129,14 @@ class SettingsResponse(SettingsUpdate):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class ZoneCreate(BaseModel):
     zone_name: str
     zone_type: str
     polygon_coords: List[List[int]]
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 # قالب لبيانات الـ FPS القادمة من الـ AI
 class AIStatusUpdate(BaseModel):

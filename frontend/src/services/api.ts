@@ -1,6 +1,16 @@
-import axios from "axios";
+import axios, { AxiosHeaders } from "axios";
 
-const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(
+  /\/$/,
+  "",
+);
+
+const normalizeUrl = (url: string) => url.replace(/\\/g, "/");
+
+const getApiUrl = (path: string) => {
+  const normalizedPath = normalizeUrl(path.startsWith("/") ? path : `/${path}`);
+  return `${API_BASE_URL}${normalizedPath}`;
+};
 
 interface ZoneCreateData {
   zone_name: string;
@@ -15,13 +25,28 @@ const api = axios.create({
   },
 });
 
+export const getStoredAuthToken = () => {
+  const token = localStorage.getItem("ag_token");
+  if (!token || token === "null" || token === "undefined") {
+    localStorage.removeItem("ag_token");
+    return null;
+  }
+  return token;
+};
+
 /**
  * نظام حماية الطلبات: إرفاق توكن JWT تلقائياً (صفحة 79)
  */
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("ag_token");
+  const token = getStoredAuthToken();
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    const headers =
+      config.headers instanceof AxiosHeaders
+        ? config.headers
+        : new AxiosHeaders(config.headers);
+
+    headers.set("Authorization", `Bearer ${token}`);
+    config.headers = headers;
   }
   return config;
 });

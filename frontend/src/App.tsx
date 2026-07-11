@@ -13,7 +13,8 @@ import Login from "./pages/Login";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
-import { aiService } from "./services/api";
+import { aiService, getStoredAuthToken } from "./services/api";
+import { closeActiveSocket } from "./services/socket";
 import {
   notificationService,
   type NotificationItem,
@@ -23,9 +24,8 @@ import {
 function App() {
   const { t } = useTranslation();
   const [activePage, setActivePage] = useState("dashboard");
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    !!localStorage.getItem("ag_token"),
-  );
+  const [isAuthenticated, setIsAuthenticated] =
+    useState(!!getStoredAuthToken());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [screenshotModalEventId, setScreenshotModalEventId] = useState<
     string | null
@@ -60,6 +60,7 @@ function App() {
   const handleLogin = (token: string) => {
     localStorage.setItem("ag_token", token);
     setIsAuthenticated(true);
+    setActivePage("dashboard");
   };
 
   // Load user-specific settings after login
@@ -82,6 +83,7 @@ function App() {
   }, [isAuthenticated]);
 
   const handleLogout = () => {
+    closeActiveSocket();
     localStorage.removeItem("ag_token");
     setIsAuthenticated(false);
     setActivePage("dashboard");
@@ -116,7 +118,16 @@ function App() {
   }, []);
 
   useEffect(() => {
-    let socket: WebSocket | null = null;
+    if (!isAuthenticated) {
+      return;
+    }
+
+    const token = getStoredAuthToken();
+    if (!token) {
+      return;
+    }
+
+    let socketHandle: { close: () => void } | null = null;
 
     const loadNotifications = async () => {
       const fetched = await notificationService.fetchNotifications();
@@ -128,14 +139,14 @@ function App() {
 
     loadNotifications();
 
-    socket = notificationService.subscribeToLiveAlerts((notification) => {
+    socketHandle = notificationService.subscribeToLiveAlerts((notification) => {
       setNotifications((prev) => [notification, ...prev]);
     });
 
     return () => {
-      socket?.close();
+      socketHandle?.close();
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const fetchAndCacheScreenshot = async (eventId?: string | null) => {
     if (!eventId) return null;

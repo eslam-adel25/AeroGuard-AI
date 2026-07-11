@@ -11,6 +11,7 @@ from typing import Optional, Any
 load_dotenv()
 
 DEFAULT_SECRET = "super_secret"
+DEFAULT_DEMO_ACCOUNT_PASSWORD = "admin123"
 
 
 def _get_secret_key() -> str:
@@ -69,6 +70,11 @@ def create_refresh_token_string(length: int = 48) -> str:
     if length <= 0:
         raise ValueError("Token length must be positive")
     return secrets.token_urlsafe(length)
+
+
+def ensure_demo_user_password(password: str) -> str:
+    """Return a stable default password for demo accounts when no override is provided."""
+    return password or DEFAULT_DEMO_ACCOUNT_PASSWORD
 
 
 http_bearer = HTTPBearer(auto_error=False)

@@ -46,7 +46,7 @@ async def get_my_profile(
     user = db.query(User).options(joinedload(User.role)).filter(User.user_id == current_user['user_id']).first()
     if not user:
         raise HTTPException(status_code=404, detail="User profile not found")
-    return user
+    return UserResponse.model_validate(user).model_dump()
 
 @router.put("/profile", response_model=UserResponse)
 async def update_my_profile(
@@ -98,7 +98,7 @@ async def update_my_profile(
     except Exception:
         pass
 
-    return user
+    return UserResponse.model_validate(user).model_dump()
 
 @router.put("/profile/password")
 @router.post("/profile/password")
@@ -178,9 +178,9 @@ async def upload_my_avatar(
     except Exception:
         pass
 
-    user.profile_picture = str(file_path)
+    user.profile_picture = f"/uploads/avatars/{safe_name}"
     db.commit()
-    return {"status": "success", "avatar_url": str(file_path)}
+    return {"status": "success", "avatar_url": user.profile_picture}
 
 
 # ==========================================
@@ -208,7 +208,7 @@ def list_all_users(
     for u in users:
         u.creator_name = creator_map.get(u.created_by, "System")
         
-    return users
+    return [UserResponse.model_validate(u).model_dump() for u in users]
 
 @router.post("/", response_model=UserResponse)
 def authorize_new_user(
@@ -234,7 +234,7 @@ def authorize_new_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return UserResponse.model_validate(new_user).model_dump()
 
 @router.delete("/{user_id}", status_code=status.HTTP_200_OK)
 def revoke_user_access(

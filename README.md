@@ -32,7 +32,7 @@ Quickstart (development)
 1. Backend
 
 ```bash
-cd awro-guard/backend
+cd backend
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
@@ -43,7 +43,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 2. Frontend
 
 ```bash
-cd awro-guard/frontend
+cd frontend
 npm install
 npm run dev
 ```

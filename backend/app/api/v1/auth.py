@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict, deque
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,7 +11,7 @@ from ...core.security import hash_password, verify_password, create_access_token
 from ...core.security import create_refresh_token_string
 from ...repositories.token_repository import TokenRepository
 from ...repositories.activity_repository import ActivityRepository
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ...core.emailer import send_verification_email
 from ...models.models import EmailVerificationToken, RefreshToken
 
@@ -21,6 +22,11 @@ AUTH_RATE_LIMIT_MAX_ATTEMPTS = 8
 AUTH_REGISTER_LIMIT_WINDOW_SECONDS = 1800
 AUTH_REGISTER_LIMIT_MAX_ATTEMPTS = 5
 _AUTH_ATTEMPT_HISTORY: dict[str, deque[datetime]] = defaultdict(deque)
+
+
+def should_require_email_verification() -> bool:
+    value = (os.getenv("REQUIRE_EMAIL_VERIFICATION") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _get_client_id(request: Optional[Request]) -> str:
@@ -39,6 +45,17 @@ def _check_rate_limit(key: str, window_seconds: int, max_attempts: int) -> None:
         raise HTTPException(status_code=429, detail="Too many requests")
     bucket.append(now)
 
+
+def _is_token_expired(expires_at: datetime) -> bool:
+    if expires_at is None:
+        return True
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    return expires_at <= now
+
 # 1. مسار تسجيل حساب جديد (Section 1)
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(payload: UserRegister, db: Session = Depends(get_db), request: Request = None):
@@ -46,9 +63,11 @@ def register(payload: UserRegister, db: Session = Depends(get_db), request: Requ
     _check_rate_limit(f"register:{client_id}", AUTH_REGISTER_LIMIT_WINDOW_SECONDS, AUTH_REGISTER_LIMIT_MAX_ATTEMPTS)
 
     # فحص تكرار اسم المستخدم أو الإيميل
-    if db.query(User).filter(User.username == payload.username).first():
+    normalized_username = (payload.username or "").strip()
+    normalized_email = (str(payload.email) or "").strip().lower()
+    if db.query(User).filter(User.username == normalized_username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
-    if db.query(User).filter(User.email == payload.email).first():
+    if db.query(User).filter(User.email == normalized_email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     # جلب رتبة "Officer" كافتراضية للمسجلين الجدد
@@ -59,34 +78,36 @@ def register(payload: UserRegister, db: Session = Depends(get_db), request: Requ
         db.commit()
         db.refresh(default_role)
 
+    require_email_verification = should_require_email_verification()
+
     # إنشاء المستخدم وتشفير كلمة السر
     new_user = User(
         full_name=payload.full_name,
-        username=payload.username,
-        email=payload.email,
+        username=normalized_username,
+        email=normalized_email,
         phone=payload.phone,
         organization=payload.organization,
         password_hash=hash_password(payload.password),
         role_id=default_role.role_id,
-        status="Pending",
-        is_verified=False
+        status="Active" if not require_email_verification else "Pending",
+        is_verified=not require_email_verification,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # create verification token
-    token_repo = TokenRepository(db)
-    token_str = create_refresh_token_string(32)
-    expires_at = datetime.utcnow() + timedelta(hours=24)
-    ev = EmailVerificationToken(user_id=new_user.user_id, token=token_str, expires_at=expires_at)
-    token_repo.create_email_verification(ev)
+    if require_email_verification:
+        token_repo = TokenRepository(db)
+        token_str = create_refresh_token_string(32)
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        ev = EmailVerificationToken(user_id=new_user.user_id, token=token_str, expires_at=expires_at)
+        token_repo.create_email_verification(ev)
 
-    # send verification email (best-effort)
-    try:
-        send_verification_email(new_user.email, new_user.full_name, token_str)
-    except Exception as exc:
-        print(f"⚠️ Failed to send verification email: {exc}")
+        try:
+            send_verification_email(new_user.email, new_user.full_name, token_str)
+        except Exception as exc:
+            print(f"⚠️ Failed to send verification email: {exc}")
+
     return {"status": "success", "message": "User registered successfully"}
 
 # 2. مسار تسجيل الدخول (Section 1)
@@ -97,15 +118,16 @@ def login(payload: UserLogin, db: Session = Depends(get_db), request: Request = 
     _check_rate_limit(f"login:{client_id}", AUTH_RATE_LIMIT_WINDOW_SECONDS, AUTH_RATE_LIMIT_MAX_ATTEMPTS)
     _check_rate_limit(f"login:user:{username_key}", AUTH_RATE_LIMIT_WINDOW_SECONDS, AUTH_RATE_LIMIT_MAX_ATTEMPTS)
 
-    user = db.query(User).filter(User.username == payload.username).first()
-    
+    normalized_username = (payload.username or "").strip()
+    user = db.query(User).filter(User.username == normalized_username).first()
+
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    if not user.is_verified:
+    if should_require_email_verification() and not user.is_verified:
         raise HTTPException(status_code=403, detail="Email not verified")
     
     # تحديث وقت آخر دخول (Section 3)
-    user.last_login = func.now()
+    user.last_login = datetime.utcnow()
     db.commit()
 
     # إنشاء التوكن (JWT)
@@ -173,7 +195,7 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     ev = token_repo.get_email_verification(token)
     if not ev:
         raise HTTPException(status_code=404, detail="Invalid or expired verification token")
-    if ev.expires_at < datetime.utcnow():
+    if _is_token_expired(ev.expires_at):
         raise HTTPException(status_code=400, detail="Verification token expired")
 
     # mark user verified or apply pending email/username change

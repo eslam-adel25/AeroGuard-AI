@@ -6,7 +6,7 @@ import {
   useLayoutEffect,
   type MouseEvent,
 } from "react";
-import { cameraService } from "../services/api";
+import { cameraService, getStoredAuthToken } from "../services/api";
 
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
@@ -74,11 +74,15 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    const socket = createSocket((message: WSMessage) => {
+    const token = getStoredAuthToken();
+    if (!token) {
+      return;
+    }
+
+    const handleMessage = (message: WSMessage) => {
       if (message.event === "new_alert") {
         setAlerts((prev) => [message.data, ...prev].slice(0, 3));
         setDetectionCount((c) => c + 1);
-        // إخفاء التنبيه تلقائياً بعد 5 ثوانٍ لضمان نظافة الشاشة
         setTimeout(
           () => setAlerts((prev) => prev.filter((a) => a !== message.data)),
           5000,
@@ -108,7 +112,9 @@ const Dashboard = () => {
           ].slice(0, 3),
         );
       }
-    });
+    };
+
+    const socket = createSocket(handleMessage);
 
     const init = async () => {
       try {
@@ -126,7 +132,7 @@ const Dashboard = () => {
 
     init();
     return () => {
-      if (socket) socket.close();
+      socket.close();
     };
   }, [startCameraAI]);
 
@@ -530,11 +536,7 @@ const Dashboard = () => {
             <>
               <img
                 ref={videoRef}
-                src={
-                  isPaused
-                    ? ""
-                    : `http://127.0.0.1:8000/api/v1/cameras/${selectedCamera}/stream`
-                }
+                src={isPaused ? "" : `/api/v1/cameras/${selectedCamera}/stream`}
                 alt="AeroGuard Engine"
                 onLoad={() => {
                   updateOverlayCanvas();
