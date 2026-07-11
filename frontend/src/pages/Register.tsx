@@ -35,14 +35,33 @@ const Register = () => {
     e.preventDefault();
     setError("");
 
-    // 1. التحقق من تطابق كلمات السر (Section 1)
+    if (!form.full_name.trim()) {
+      return setError("Full name is required.");
+    }
+    if (!form.username.trim()) {
+      return setError("Username is required.");
+    }
+    if (form.username.trim().length < 3) {
+      return setError("Username must be at least 3 characters.");
+    }
+    if (!form.email.trim()) {
+      return setError("Corporate email is required.");
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      return setError("Please enter a valid email address.");
+    }
+    if (!form.phone.trim()) {
+      return setError("Phone number is required.");
+    }
+    if (!form.password || form.password.length < 8) {
+      return setError("Password must be at least 8 characters.");
+    }
     if (form.password !== form.confirm_password) {
       return setError(t("auth.passwordsDoNotMatch"));
     }
 
     setLoading(true);
     try {
-      // 2. إرسال البيانات للباكيند
       await authService.register(form);
       alert(t("auth.registrationSuccess"));
       navigate("/login");
@@ -52,6 +71,8 @@ const Register = () => {
       } else {
         setError(t("auth.registrationFailed"));
       }
+    } finally {
+      setLoading(false);
     }
   };
 

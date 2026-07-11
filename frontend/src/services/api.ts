@@ -5,13 +5,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(
   "",
 );
 
-const normalizeUrl = (url: string) => url.replace(/\\/g, "/");
-
-const getApiUrl = (path: string) => {
-  const normalizedPath = normalizeUrl(path.startsWith("/") ? path : `/${path}`);
-  return `${API_BASE_URL}${normalizedPath}`;
-};
-
 interface ZoneCreateData {
   zone_name: string;
   zone_type: string;
@@ -141,6 +134,9 @@ export const authService = {
     }),
 
   login: (data: LoginData) => api.post("/auth/login", data),
+
+  verifyEmail: (token: string) =>
+    api.get("/auth/verify", { params: { token } }),
 
   logout: () => {
     localStorage.removeItem("ag_token");

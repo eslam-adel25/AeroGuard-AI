@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { Bell, X, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -10,6 +11,8 @@ import Analytics from "./pages/Analytics";
 import Users from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
+import VerifyEmail from "./pages/VerifyEmail";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
@@ -244,11 +247,7 @@ function App() {
     });
   };
 
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLogin} />;
-  }
-
-  return (
+  const authenticatedShell = (
     <div className="flex min-h-screen bg-ag-dark text-ag-primary">
       <Sidebar
         activePage={activePage}
@@ -504,6 +503,42 @@ function App() {
         )}
       </div>
     </div>
+  );
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            isAuthenticated ? (
+              <Navigate to="/" replace />
+            ) : (
+              <Login onLoginSuccess={handleLogin} />
+            )
+          }
+        />
+        <Route
+          path="/register"
+          element={isAuthenticated ? <Navigate to="/" replace /> : <Register />}
+        />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route
+          path="/"
+          element={
+            isAuthenticated ? (
+              authenticatedShell
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        <Route
+          path="*"
+          element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />}
+        />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

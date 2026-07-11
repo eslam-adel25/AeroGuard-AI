@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Shield, Lock, User, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import api from "../services/api";
 
 interface LoginProps {
@@ -119,6 +120,16 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
             )}
           </button>
         </form>
+
+        <p className="text-center text-gray-400 text-sm mt-6">
+          Don't have an account?{" "}
+          <Link
+            to="/register"
+            className="font-semibold text-ag-danger hover:underline"
+          >
+            Create Account
+          </Link>
+        </p>
 
         <p className="text-center text-gray-600 text-xs mt-8 uppercase tracking-widest">
           {t("auth.secureInfrastructureNode")}

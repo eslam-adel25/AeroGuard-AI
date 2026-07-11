@@ -65,6 +65,22 @@ def register(payload: UserRegister, db: Session = Depends(get_db), request: Requ
     # فحص تكرار اسم المستخدم أو الإيميل
     normalized_username = (payload.username or "").strip()
     normalized_email = (str(payload.email) or "").strip().lower()
+    normalized_full_name = (payload.full_name or "").strip()
+    normalized_phone = (payload.phone or "").strip()
+
+    if not normalized_full_name:
+        raise HTTPException(status_code=400, detail="Full name is required")
+    if not normalized_username:
+        raise HTTPException(status_code=400, detail="Username is required")
+    if len(normalized_username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+    if not normalized_email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+    if not payload.password or len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
     if db.query(User).filter(User.username == normalized_username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
     if db.query(User).filter(User.email == normalized_email).first():
