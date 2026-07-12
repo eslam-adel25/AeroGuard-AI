@@ -174,11 +174,21 @@ class AIProcessor:
 
                 if not ret:
                     if isinstance(source, str) and not source.isdigit():
+                        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                        frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+                        if frame_count > 0 and frame_pos >= frame_count:
+                            print(
+                                f"✅ [{camera_id}] EOF reached after last_valid_frame={last_valid_frame} "
+                                f"iterations={iteration-1} source={source!r} frame_pos={frame_pos} frame_count={frame_count}"
+                            )
+                            break
+                        # transient read failure for file source; retry briefly
                         print(
-                            f"✅ [{camera_id}] EOF reached after last_valid_frame={last_valid_frame} "
-                            f"iterations={iteration-1} source={source!r}"
+                            f"⚠️ [{camera_id}] temporary file read failure at frame_pos={frame_pos} "
+                            f"frame_count={frame_count}, retrying"
                         )
-                        break
+                        await asyncio.sleep(0.1)
+                        continue
                     print(f"⚠️ [{camera_id}] camera stream read failed, retrying after sleep")
                     await asyncio.sleep(1)
                     continue
