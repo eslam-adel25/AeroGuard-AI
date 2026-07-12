@@ -1,4 +1,6 @@
+import logging
 import os
+import random
 from collections import defaultdict, deque
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -14,6 +16,8 @@ from ...repositories.activity_repository import ActivityRepository
 from datetime import datetime, timedelta, timezone
 from ...core.emailer import send_verification_email
 from ...models.models import EmailVerificationToken, RefreshToken
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -52,9 +56,25 @@ def _is_token_expired(expires_at: datetime) -> bool:
 
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
+    else:
+        expires_at = expires_at.astimezone(timezone.utc)
 
     now = datetime.now(timezone.utc)
     return expires_at <= now
+
+
+def _generate_verification_code(length: int = 6) -> str:
+    return "".join(str(random.randint(0, 9)) for _ in range(length))
+
+
+def _create_verification_token(db: Session, user: User) -> tuple[str, EmailVerificationToken]:
+    token_repo = TokenRepository(db)
+    token_str = create_refresh_token_string(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=int(os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "15")))
+    ev = EmailVerificationToken(user_id=user.user_id, token=token_str, expires_at=expires_at)
+    token_repo.create_email_verification(ev)
+    return token_str, ev
+
 
 # 1. مسار تسجيل حساب جديد (Section 1)
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -113,18 +133,21 @@ def register(payload: UserRegister, db: Session = Depends(get_db), request: Requ
     db.refresh(new_user)
 
     if require_email_verification:
-        token_repo = TokenRepository(db)
-        token_str = create_refresh_token_string(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
-        ev = EmailVerificationToken(user_id=new_user.user_id, token=token_str, expires_at=expires_at)
-        token_repo.create_email_verification(ev)
-
+        token_str, ev = _create_verification_token(db, new_user)
+        otp_code = _generate_verification_code()
+        ev.otp_code = otp_code
+        db.commit()
+        db.refresh(ev)
         try:
-            send_verification_email(new_user.email, new_user.full_name, token_str)
-        except Exception as exc:
-            print(f"⚠️ Failed to send verification email: {exc}")
+            send_verification_email(new_user.email, new_user.full_name, token_str, otp_code)
+        except Exception:
+            logger.exception("Registration email verification failed for user %s", new_user.email)
 
-    return {"status": "success", "message": "User registered successfully"}
+    return {
+        "status": "success",
+        "message": "User registered successfully",
+        "requires_verification": require_email_verification,
+    }
 
 # 2. مسار تسجيل الدخول (Section 1)
 @router.post("/login")
@@ -214,15 +237,12 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     if _is_token_expired(ev.expires_at):
         raise HTTPException(status_code=400, detail="Verification token expired")
 
-    # mark user verified or apply pending email/username change
     user = db.query(User).filter(User.user_id == ev.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # handle email/username change requests
     changed = False
     if getattr(ev, "new_email", None):
-        # ensure new email is not used
         if db.query(User).filter(User.email == ev.new_email).first():
             raise HTTPException(status_code=400, detail="Email already in use")
         user.email = ev.new_email
@@ -238,12 +258,45 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     db.commit()
     token_repo.delete_email_verification(ev.token_id)
 
-    # log activity
     try:
         act = ActivityRepository(db)
         act.log(str(user.user_id), "email_verified", {"changed": changed})
     except Exception:
-        pass
+        logger.exception("Failed to log verification activity for user %s", user.user_id)
+
+    return {"status": "verified"}
+
+
+@router.post("/verify-otp")
+def verify_otp(payload: dict, db: Session = Depends(get_db)):
+    email = (payload.get("email") or "").strip().lower()
+    code = (payload.get("code") or "").strip()
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Email and verification code are required")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ev = db.query(EmailVerificationToken).filter(EmailVerificationToken.user_id == user.user_id).order_by(EmailVerificationToken.created_at.desc()).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Verification code not found")
+    if _is_token_expired(ev.expires_at):
+        raise HTTPException(status_code=400, detail="Verification code expired")
+    if ev.otp_code != code:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    user.is_verified = True
+    user.status = "Active"
+    db.commit()
+    db.delete(ev)
+    db.commit()
+
+    try:
+        act = ActivityRepository(db)
+        act.log(str(user.user_id), "email_verified_otp", {"email": email})
+    except Exception:
+        logger.exception("Failed to log OTP verification activity for user %s", user.user_id)
 
     return {"status": "verified"}
 
@@ -259,25 +312,32 @@ def resend_verification(payload: dict, db: Session = Depends(get_db)):
     if user.is_verified:
         return {"status": "already_verified"}
     token_repo = TokenRepository(db)
-    # find existing token and check resend count
     existing = db.query(EmailVerificationToken).filter(EmailVerificationToken.user_id == user.user_id).first()
     if existing and existing.resend_count >= 3:
         raise HTTPException(status_code=429, detail="Resend limit reached")
+
     token_str = create_refresh_token_string(32)
-    expires_at = datetime.utcnow() + timedelta(hours=24)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=int(os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "15")))
     if existing:
         existing.token = token_str
         existing.expires_at = expires_at
         existing.resend_count = (existing.resend_count or 0) + 1
-        db.commit()
         token_obj = existing
     else:
         token_obj = EmailVerificationToken(user_id=user.user_id, token=token_str, expires_at=expires_at, resend_count=1)
         token_repo.create_email_verification(token_obj)
+
     try:
-        send_verification_email(user.email, user.full_name, token_str)
-    except Exception as exc:
-        print(f"⚠️ Failed to resend verification email: {exc}")
+        otp_code = _generate_verification_code()
+        token_obj.otp_code = otp_code
+        token_obj.expires_at = expires_at
+        token_obj.resend_count = (token_obj.resend_count or 0) + 1
+        db.commit()
+        db.refresh(token_obj)
+        send_verification_email(user.email, user.full_name, token_str, otp_code)
+    except Exception:
+        logger.exception("Failed to resend verification email for user %s", user.email)
+        raise
     return {"status": "sent"}
 
 

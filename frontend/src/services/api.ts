@@ -138,6 +138,12 @@ export const authService = {
   verifyEmail: (token: string) =>
     api.get("/auth/verify", { params: { token } }),
 
+  verifyOtp: (email: string, code: string) =>
+    api.post("/auth/verify-otp", { email, code }),
+
+  resendVerification: (email: string) =>
+    api.post("/auth/resend-verification", { email }),
+
   logout: () => {
     localStorage.removeItem("ag_token");
     localStorage.removeItem("user");

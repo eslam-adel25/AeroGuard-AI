@@ -63,8 +63,7 @@ const Register = () => {
     setLoading(true);
     try {
       await authService.register(form);
-      alert(t("auth.registrationSuccess"));
-      navigate("/login");
+      navigate(`/verify-email?email=${encodeURIComponent(form.email)}`);
     } catch (err) {
       if (axios.isAxiosError(err)) {
         setError(err.response?.data?.detail ?? t("auth.usernameOrEmailTaken"));

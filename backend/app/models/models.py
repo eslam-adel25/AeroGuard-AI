@@ -107,6 +107,7 @@ class EmailVerificationToken(Base):
     token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
     token = Column(String(255), nullable=False, unique=True, index=True)
+    otp_code = Column(String(20), nullable=True)
     new_email = Column(String(255), nullable=True)
     new_username = Column(String(100), nullable=True)
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
