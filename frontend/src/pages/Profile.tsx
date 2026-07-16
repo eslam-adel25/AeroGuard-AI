@@ -9,7 +9,6 @@ import {
   Save,
   Loader2,
   ChevronRight,
-  Bell,
   RefreshCw,
   Info,
   Eye,
@@ -175,28 +174,6 @@ const Profile: React.FC = () => {
           <h1 className="text-2xl font-bold mt-1 tracking-tight">
             {t("profile.title")}
           </h1>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <div className="flex bg-[#16191f] rounded-lg p-1 text-[11px] font-bold">
-            <button className="px-3 py-1 bg-blue-600/20 text-blue-400 rounded-md">
-              EN
-            </button>
-            <button className="px-3 py-1 text-gray-500">AR</button>
-          </div>
-          <div className="relative">
-            <Bell size={20} className="text-gray-400 cursor-pointer" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-[#0c0e12]"></span>
-          </div>
-          <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10">
-            <img
-              src={
-                profile?.profile_picture || "https://i.pravatar.cc/150?u=admin"
-              }
-              alt="Profile"
-              className="w-full h-full object-cover"
-            />
-          </div>
         </div>
       </header>
 

@@ -24,6 +24,8 @@ def create_app() -> FastAPI:
     def startup_event() -> None:
         Base.metadata.create_all(bind=engine)
         _ensure_schema_compatibility()
+        # Register AI processor with settings API so it receives config updates
+        settings.set_ai_processor(ai_engine)
 
     return app
 

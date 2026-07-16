@@ -183,6 +183,10 @@ class UserSettings(Base):
     show_alert_labels = Column(Boolean, default=True)
     desktop_notifications = Column(Boolean, default=True)
 
+    # Performance / AI options
+    gpu_enabled = Column(Boolean, default=False)
+    frame_skip = Column(Integer, default=0)
+
     # Phase 7 AI Module Toggles
     loitering_enabled = Column(Boolean, default=False)
     loitering_seconds = Column(Integer, default=30)

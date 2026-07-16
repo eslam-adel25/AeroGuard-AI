@@ -22,7 +22,6 @@ class AIService:
 
     def register_event(self, camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, track_id: Optional[str] = None, user_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, screenshot_bytes: Optional[bytes] = None):
         payload = {
-            "track_id": track_id,
             "camera_id": camera_id,
             "detected_by": user_id,
             "detection_type": detection_type,
@@ -30,6 +29,14 @@ class AIService:
             "confidence": confidence,
             "metadata": metadata or {},
         }
+        if track_id is not None:
+            try:
+                payload["track_id"] = str(track_id)
+                # Only keep UUID-compatible values; otherwise leave it unset.
+                import uuid
+                uuid.UUID(str(track_id))
+            except Exception:
+                payload["track_id"] = None
         if screenshot_bytes:
             try:
                 path = self._save_screenshot(screenshot_bytes, prefix=detection_type.lower())

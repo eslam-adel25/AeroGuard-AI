@@ -96,32 +96,56 @@ class PasswordChangeRequest(BaseModel):
 # ==========================================
 
 class SettingsUpdate(BaseModel):
+    # General Settings
     organization_name: Optional[str] = None
     airport_name: Optional[str] = None
     language: Optional[str] = None
     timezone: Optional[str] = None
     system_name: Optional[str] = None
+    
+    # AI Core Settings
     detection_confidence: Optional[float] = None
     tracking_enabled: Optional[bool] = None
     object_detection_enabled: Optional[bool] = None
     face_detection_enabled: Optional[bool] = None
     face_recognition_enabled: Optional[bool] = None
     max_objects: Optional[int] = None
+    
+    # Camera & Stream Settings
+    default_fps: Optional[int] = None
+    recording_quality: Optional[str] = None
+    frame_buffer: Optional[int] = None
+    auto_reconnect: Optional[bool] = None
+    video_resolution: Optional[str] = None
+    compression_enabled: Optional[bool] = None
+    jpeg_quality: Optional[int] = None
+    
+    # Alert Settings
     enable_alert_sounds: Optional[bool] = None
     alert_duration: Optional[int] = None
     min_alert_confidence: Optional[float] = None
     show_alert_labels: Optional[bool] = None
-    default_fps: Optional[int] = None
-    video_resolution: Optional[str] = None
-    jpeg_quality: Optional[int] = None
+    
+    # Performance / AI Options
+    gpu_enabled: Optional[bool] = None
+    frame_skip: Optional[int] = None
+    
+    # Phase 7 AI Module Toggles
+    loitering_enabled: Optional[bool] = None
+    loitering_seconds: Optional[int] = None
+    crowd_density_enabled: Optional[bool] = None
+    crowd_density_threshold: Optional[int] = None
+    abandoned_bag_enabled: Optional[bool] = None
+    abandoned_bag_seconds: Optional[int] = None
+    wrong_direction_enabled: Optional[bool] = None
+    wrong_direction_angle_threshold: Optional[int] = None
+    restricted_area_enabled: Optional[bool] = None
+    fire_detection_enabled: Optional[bool] = None
+    smoke_detection_enabled: Optional[bool] = None
+    
+    # Security Settings
     jwt_expiration: Optional[int] = None
     session_timeout: Optional[int] = None
-    # Profile
-    theme: Optional[str] = None
-    profile_language: Optional[str] = None
-    sidebar_state: Optional[str] = None
-    dashboard_layout: Optional[str] = None
-    accent_color: Optional[str] = None
 
 class SettingsResponse(SettingsUpdate):
     settings_id: Optional[UUID] = None

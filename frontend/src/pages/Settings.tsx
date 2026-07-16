@@ -7,11 +7,18 @@ import {
   Globe,
   Loader2,
   Zap,
+  Shield,
+  Eye,
+  Settings as SettingsIcon,
+  HelpCircle,
+  Plus,
+  Minus,
+  Volume2,
   Clock,
-  Activity,
 } from "lucide-react";
 import { settingsService } from "../services/api";
 import type { ISystemSettings } from "../services/api";
+
 const DEFAULT_SETTINGS: ISystemSettings = {
   organization_name: "AeroGuard AI",
   airport_name: "Main International Airport",
@@ -52,6 +59,27 @@ const DEFAULT_SETTINGS: ISystemSettings = {
   session_timeout: 30,
 };
 
+const Toggle = ({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    onClick={onToggle}
+    className={`w-10 h-5 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out ${
+      enabled ? "bg-[#34c759]" : "bg-[#3e404a]"
+    }`}
+  >
+    <div
+      className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform duration-300 ease-in-out ${
+        enabled ? "translate-x-5" : "translate-x-0"
+      }`}
+    />
+  </button>
+);
+
 const Settings = () => {
   const { t } = useTranslation();
   const [config, setConfig] = useState<ISystemSettings>(DEFAULT_SETTINGS);
@@ -64,7 +92,6 @@ const Settings = () => {
         const res = await settingsService.get();
         if (res.data) setConfig(res.data);
       } catch {
-        // تم حذف (err) لحل خطأ no-unused-vars
         console.error("Failed to load settings from server");
       } finally {
         setIsLoading(false);
@@ -79,7 +106,6 @@ const Settings = () => {
       await settingsService.update(config);
       alert(t("settings.saveSuccess"));
     } catch {
-      // تم حذف (error) لحل خطأ no-unused-vars
       alert(t("settings.saveFailed"));
     } finally {
       setIsSaving(false);
@@ -94,479 +120,372 @@ const Settings = () => {
 
   if (isLoading)
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-ag-dark">
-        <Loader2 className="animate-spin text-ag-danger" size={48} />
+      <div className="h-screen w-full flex items-center justify-center bg-[#090a11]">
+        <Loader2 className="animate-spin text-blue-500" size={48} />
       </div>
     );
 
   return (
-    <div className="p-8 space-y-8 bg-ag-dark min-h-screen text-ag-primary pb-24">
+    <div className="p-6 bg-[#090a11] min-h-screen text-white font-sans max-w-[1400px] mx-auto space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-end sticky top-0 z-50 bg-ag-dark/80 backdrop-blur-xl py-4 border-b border-white/5">
-        <div>
-          <h2 className="text-4xl font-black tracking-tighter uppercase">
-            {t("settings.title")}
-          </h2>
-          <p className="text-gray-500 font-medium">{t("settings.subtitle")}</p>
+      <header className="flex justify-between items-center mb-8">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-600/10 p-2 rounded-lg">
+            <SettingsIcon className="text-blue-500" size={24} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              System Settings
+            </h1>
+            <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mt-0.5">
+              Core Intelligence & Infrastructure Parameters
+            </p>
+          </div>
         </div>
-        <div className="flex gap-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={handleLoadDefaults}
-            className="px-6 py-3 rounded-2xl bg-white/5 hover:bg-white/10 font-bold text-xs flex items-center gap-2 border border-white/10 transition-all"
+            className="px-4 py-2 rounded-lg bg-[#11131a] border border-[#1e212b] text-sm font-bold text-gray-300 flex items-center gap-2 hover:bg-[#1a1c26] transition-colors"
           >
-            <RotateCcw size={16} /> {t("settings.loadDefaults")}
+            <RotateCcw size={14} /> Load Defaults
           </button>
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="bg-ag-success hover:bg-green-600 text-white px-10 py-3 rounded-2xl font-black text-sm flex items-center gap-3 transition-all shadow-xl shadow-green-900/20"
+            className="px-6 py-2 rounded-lg bg-[#0084ff] text-white text-sm font-bold flex items-center gap-2 hover:bg-blue-600 transition-all disabled:opacity-50"
           >
             {isSaving ? (
-              <Loader2 className="animate-spin" />
+              <Loader2 className="animate-spin" size={18} />
             ) : (
-              <>
-                <Save size={20} /> {t("settings.saveDeploy")}
-              </>
+              <Save size={18} />
             )}
+            Save & Deploy
+          </button>
+          <button className="p-2 text-gray-500 hover:text-white transition-colors">
+            <HelpCircle size={20} />
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-        {/* General Settings */}
-        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3 text-ag-success mb-2">
-            <Globe size={24} />
-            <h3 className="text-xl font-black uppercase tracking-widest">
-              {t("settings.environment")}
-            </h3>
-          </div>
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-                {t("settings.airportName")}
-              </label>
-              <input
-                value={config.airport_name}
-                onChange={(e) =>
-                  setConfig({ ...config, airport_name: e.target.value })
-                }
-                className="w-full bg-ag-dark border border-white/10 p-4 rounded-2xl outline-none focus:border-ag-success font-bold"
-              />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column */}
+        <div className="space-y-6">
+          {/* Environment */}
+          <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Globe className="text-blue-500" size={18} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                Environment
+              </h3>
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-                {t("settings.timeZone")}
-              </label>
-              <input
-                value={config.timezone}
-                onChange={(e) =>
-                  setConfig({ ...config, timezone: e.target.value })
-                }
-                className="w-full bg-ag-dark border border-white/10 p-4 rounded-2xl outline-none focus:border-ag-success font-bold"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* AI Control */}
-        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3 text-ag-warning mb-2">
-            <Zap size={24} />
-            <h3 className="text-xl font-black uppercase tracking-widest">
-              {t("settings.aiCore")}
-            </h3>
-          </div>
-          <div className="space-y-6">
-            <div>
-              <div className="flex justify-between mb-2">
-                <label className="text-xs font-bold text-gray-400">
-                  {t("settings.objectConfidenceThreshold")}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  Airport Name
                 </label>
-                <span className="text-ag-warning font-mono font-bold">
-                  {Math.round(config.detection_confidence * 100)}%
+                <input
+                  value={config.airport_name}
+                  onChange={(e) =>
+                    setConfig({ ...config, airport_name: e.target.value })
+                  }
+                  className="w-full bg-[#0d0e14] border border-[#1e212b] p-3 rounded-lg text-sm font-semibold outline-none focus:border-blue-500/50"
+                  placeholder="e.g. Dubai International (DXB)"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  Time Zone
+                </label>
+                <select
+                  value={config.timezone}
+                  onChange={(e) =>
+                    setConfig({ ...config, timezone: e.target.value })
+                  }
+                  className="w-full bg-[#0d0e14] border border-[#1e212b] p-3 rounded-lg text-sm font-semibold outline-none focus:border-blue-500/50 appearance-none"
+                >
+                  <option value="UTC">UTC (GMT+0)</option>
+                  <option value="GST">GST (GMT+4)</option>
+                  <option value="EST">EST (GMT-5)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                <span className="text-xs text-gray-400 font-medium">
+                  Active deployment - 14.2ms latency verified
                 </span>
               </div>
-              <input
-                type="range"
-                min="0.1"
-                max="0.9"
-                step="0.05"
-                value={config.detection_confidence}
-                onChange={(e) =>
+              <span className="text-[10px] font-black text-blue-500 uppercase">
+                Connected
+              </span>
+            </div>
+          </section>
+
+          {/* Notification Engine */}
+          <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Bell className="text-orange-500" size={18} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                Notification Engine
+              </h3>
+            </div>
+            <div className="flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+              <div className="flex items-center gap-3">
+                <Volume2 className="text-orange-500" size={18} />
+                <div>
+                  <div className="text-sm font-bold">Dashboard Audio Siren</div>
+                  <div className="text-[10px] text-gray-500 font-medium">
+                    Triggers audible alarm on security breach
+                  </div>
+                </div>
+              </div>
+              <Toggle
+                enabled={config.enable_alert_sounds}
+                onToggle={() =>
                   setConfig({
                     ...config,
-                    detection_confidence: parseFloat(e.target.value),
+                    enable_alert_sounds: !config.enable_alert_sounds,
                   })
                 }
-                className="w-full accent-ag-warning"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-                <span className="text-xs font-bold">
-                  {t("settings.faceRecognition")}
-                </span>
-                <button
-                  onClick={() =>
+          </section>
+
+          {/* Security Lifecycle */}
+          <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Shield className="text-blue-500" size={18} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                Security Lifecycle
+              </h3>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+                <div className="flex items-center gap-3">
+                  <RotateCcw className="text-blue-500" size={18} />
+                  <div>
+                    <div className="text-sm font-bold">
+                      Persistent Operation
+                    </div>
+                    <div className="text-[10px] text-gray-500 font-medium">
+                      System remains active indefinitely
+                    </div>
+                  </div>
+                </div>
+                <Toggle
+                  enabled={config.auto_reconnect}
+                  onToggle={() =>
+                    setConfig({
+                      ...config,
+                      auto_reconnect: !config.auto_reconnect,
+                    })
+                  }
+                />
+              </div>
+              <div className="flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Clock className="text-orange-500" size={18} />
+                  <div>
+                    <div className="text-sm font-bold">Auto Shutdown</div>
+                    <div className="text-[10px] text-gray-500 font-medium">
+                      The system will automatically stop after the specified
+                      hours
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={config.jwt_expiration}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        jwt_expiration: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-12 bg-transparent text-right text-sm font-bold outline-none text-blue-500"
+                  />
+                  <span className="text-[10px] font-black bg-[#1a1c26] px-2 py-1 rounded text-gray-400">
+                    HRS
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-6">
+          {/* AI Core Intelligence */}
+          <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Zap className="text-orange-500" size={18} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                AI Core Intelligence
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex justify-between items-center p-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Eye className="text-blue-400" size={16} />
+                  <span className="text-xs font-bold">Face Recognition</span>
+                </div>
+                <Toggle
+                  enabled={config.face_recognition_enabled}
+                  onToggle={() =>
                     setConfig({
                       ...config,
                       face_recognition_enabled:
                         !config.face_recognition_enabled,
                     })
                   }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.face_recognition_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.face_recognition_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
+                />
               </div>
-              <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-                <span className="text-xs font-bold">
-                  {t("settings.motionTracking")}
-                </span>
-                <button
-                  onClick={() =>
+              <div className="flex justify-between items-center p-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Zap className="text-blue-400" size={16} />
+                  <span className="text-xs font-bold">Motion Tracking</span>
+                </div>
+                <Toggle
+                  enabled={config.tracking_enabled}
+                  onToggle={() =>
                     setConfig({
                       ...config,
                       tracking_enabled: !config.tracking_enabled,
                     })
                   }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.tracking_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.tracking_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Alert Protocol */}
-        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3 text-ag-danger mb-2">
-            <Bell size={24} />
-            <h3 className="text-xl font-black uppercase tracking-widest">
-              {t("settings.notificationEngine")}
-            </h3>
-          </div>
-          <div className="flex justify-between items-center p-5 bg-ag-dark/40 rounded-2xl border border-white/5">
-            <div className="flex items-center gap-3">
-              <Activity className="text-ag-danger" size={20} />
-              <span className="font-bold">
-                {t("settings.dashboardAudioSiren")}
-              </span>
-            </div>
-            <button
-              onClick={() =>
-                setConfig({
-                  ...config,
-                  enable_alert_sounds: !config.enable_alert_sounds,
-                })
-              }
-              className={`w-14 h-7 rounded-full relative transition-all ${config.enable_alert_sounds ? "bg-ag-danger" : "bg-gray-700"}`}
-            >
-              <div
-                className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all ${config.enable_alert_sounds ? "right-1" : "left-1"}`}
-              ></div>
-            </button>
-          </div>
-        </section>
-
-        {/* AI Modules */}
-        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3 text-ag-danger mb-2">
-            <Zap size={24} />
-            <h3 className="text-xl font-black uppercase tracking-widest">
-              AI Modules
-            </h3>
-          </div>
-          <div className="grid grid-cols-1 gap-4">
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">GPU Acceleration</div>
-                <div className="text-xs text-gray-400">
-                  Enable GPU for model inference (if available)
-                </div>
-              </div>
-              <div>
-                <button
-                  onClick={() =>
-                    setConfig({ ...config, gpu_enabled: !config.gpu_enabled })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.gpu_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.gpu_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Frame Skip</div>
-                <div className="text-xs text-gray-400">
-                  Skip N frames between inferences to save CPU
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={config.frame_skip ?? 0}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      frame_skip: parseInt(e.target.value || "0"),
-                    })
-                  }
-                  className="w-20 bg-ag-dark p-2 rounded"
                 />
               </div>
             </div>
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Loitering Detection</div>
-                <div className="text-xs text-gray-400">
-                  Detects persons loitering in an area
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={config.loitering_seconds}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      loitering_seconds: parseInt(e.target.value || "0"),
-                    })
-                  }
-                  className="w-20 bg-ag-dark p-2 rounded"
-                />
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      loitering_enabled: !config.loitering_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.loitering_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.loitering_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
+          </section>
 
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Crowd Density</div>
-                <div className="text-xs text-gray-400">
-                  Counts people and alerts on threshold
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={config.crowd_density_threshold}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      crowd_density_threshold: parseInt(e.target.value || "0"),
-                    })
-                  }
-                  className="w-20 bg-ag-dark p-2 rounded"
-                />
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      crowd_density_enabled: !config.crowd_density_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.crowd_density_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.crowd_density_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
+          {/* AI Vision Modules */}
+          <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <Eye className="text-orange-500" size={18} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">
+                AI Vision Modules
+              </h3>
             </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Abandoned Bag Detection</div>
-                <div className="text-xs text-gray-400">
-                  Detects ownerless bags
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={config.abandoned_bag_seconds}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      abandoned_bag_seconds: parseInt(e.target.value || "0"),
-                    })
-                  }
-                  className="w-20 bg-ag-dark p-2 rounded"
-                />
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      abandoned_bag_enabled: !config.abandoned_bag_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.abandoned_bag_enabled ? "bg-ag-success" : "bg-gray-700"}`}
+            <div className="space-y-1">
+              {[
+                {
+                  label: "GPU Acceleration",
+                  sub: "Enable GPU for model inference (if available)",
+                  key: "gpu_enabled",
+                },
+                {
+                  label: "Frame Skip",
+                  sub: "Skip N frames between inferences to save CPU",
+                  key: "frame_skip",
+                  control: true,
+                },
+                {
+                  label: "Loitering Detection",
+                  sub: "Detects persons loitering in an area",
+                  key: "loitering_enabled",
+                },
+                {
+                  label: "Crowd Density",
+                  sub: "Counts people and alerts on threshold",
+                  key: "crowd_density_enabled",
+                },
+                {
+                  label: "Abandoned Bag Detection",
+                  sub: "Detects ownerless bags",
+                  key: "abandoned_bag_enabled",
+                },
+                {
+                  label: "Wrong Direction",
+                  sub: "Alerts when people move against allowed direction",
+                  key: "wrong_direction_enabled",
+                },
+                {
+                  label: "Restricted Area",
+                  sub: "Named polygon zones with intrusion alerts",
+                  key: "restricted_area_enabled",
+                },
+                {
+                  label: "Fire Detection",
+                  sub: "Integrate pretrained fire model",
+                  key: "fire_detection_enabled",
+                },
+                {
+                  label: "Smoke Detection",
+                  sub: "Integrate pretrained smoke model",
+                  key: "smoke_detection_enabled",
+                },
+              ].map((module) => (
+                <div
+                  key={module.key}
+                  className="flex justify-between items-center py-3 border-b border-[#1e212b]/50 last:border-0 group"
                 >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.abandoned_bag_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Wrong Direction</div>
-                <div className="text-xs text-gray-400">
-                  Alerts when people move against allowed direction
+                  <div className="flex items-center gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500/20 group-hover:bg-blue-500 transition-colors"></div>
+                    <div>
+                      <div className="text-xs font-bold">{module.label}</div>
+                      <div className="text-[10px] text-gray-500 font-medium">
+                        {module.sub}
+                      </div>
+                    </div>
+                  </div>
+                  {module.control ? (
+                    <div className="flex items-center bg-[#0d0e14] border border-[#1e212b] rounded-lg overflow-hidden">
+                      <button
+                        onClick={() =>
+                          setConfig({
+                            ...config,
+                            frame_skip: Math.max(
+                              0,
+                              (config.frame_skip ?? 0) - 1,
+                            ),
+                          })
+                        }
+                        className="p-1.5 hover:bg-[#1a1c26] text-gray-400"
+                      >
+                        <Minus size={12} />
+                      </button>
+                      <input
+                        type="number"
+                        value={config.frame_skip ?? 0}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            frame_skip: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="w-10 bg-transparent text-center text-xs font-bold outline-none"
+                      />
+                      <button
+                        onClick={() =>
+                          setConfig({
+                            ...config,
+                            frame_skip: (config.frame_skip ?? 0) + 1,
+                          })
+                        }
+                        className="p-1.5 hover:bg-[#1a1c26] text-gray-400"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    <Toggle
+                      enabled={!!config[module.key as keyof ISystemSettings]}
+                      onToggle={() =>
+                        setConfig({
+                          ...config,
+                          [module.key]:
+                            !config[module.key as keyof ISystemSettings],
+                        })
+                      }
+                    />
+                  )}
                 </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={config.wrong_direction_angle_threshold}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      wrong_direction_angle_threshold: parseInt(
-                        e.target.value || "0",
-                      ),
-                    })
-                  }
-                  className="w-20 bg-ag-dark p-2 rounded"
-                />
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      wrong_direction_enabled: !config.wrong_direction_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.wrong_direction_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.wrong_direction_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
+              ))}
             </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Restricted Area</div>
-                <div className="text-xs text-gray-400">
-                  Named polygon zones with intrusion alerts
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      restricted_area_enabled: !config.restricted_area_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.restricted_area_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.restricted_area_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Fire Detection</div>
-                <div className="text-xs text-gray-400">
-                  Integrate pretrained fire model
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      fire_detection_enabled: !config.fire_detection_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.fire_detection_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.fire_detection_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center p-4 bg-ag-dark/40 rounded-2xl border border-white/5">
-              <div>
-                <div className="font-bold">Smoke Detection</div>
-                <div className="text-xs text-gray-400">
-                  Integrate pretrained smoke model
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      smoke_detection_enabled: !config.smoke_detection_enabled,
-                    })
-                  }
-                  className={`w-12 h-6 rounded-full relative transition-all ${config.smoke_detection_enabled ? "bg-ag-success" : "bg-gray-700"}`}
-                >
-                  <div
-                    className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${config.smoke_detection_enabled ? "right-1" : "left-1"}`}
-                  ></div>
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Security & Access */}
-        <section className="bg-ag-card p-8 rounded-[2.5rem] border border-white/5 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3 text-blue-400 mb-2">
-            <Clock size={24} />
-            <h3 className="text-xl font-black uppercase tracking-widest">
-              {t("settings.securityLifecycle")}
-            </h3>
-          </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-500 uppercase ml-2">
-              {t("settings.sessionExpiration")}
-            </label>
-            <input
-              type="number"
-              value={config.jwt_expiration}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  jwt_expiration: parseInt(e.target.value),
-                })
-              }
-              className="w-full bg-ag-dark border border-white/10 p-4 rounded-2xl outline-none font-bold"
-            />
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   );

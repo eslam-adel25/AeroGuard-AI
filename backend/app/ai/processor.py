@@ -217,9 +217,27 @@ class AIProcessor:
                 annotated_frame = frame.copy()
 
                 detections_for_tracker = []
-                boxes = results[0].boxes.xyxy.cpu().numpy() if len(results[0].boxes) > 0 else []
-                labels = results[0].boxes.cls.cpu().numpy().astype(int) if len(results[0].boxes) > 0 else []
-                confs = results[0].boxes.conf.cpu().numpy() if len(results[0].boxes) > 0 else []
+                try:
+                    result = results[0] if results else None
+                    boxes_obj = getattr(result, "boxes", None) if result is not None else None
+                    if boxes_obj is not None and hasattr(boxes_obj, "xyxy") and hasattr(boxes_obj, "cls") and hasattr(boxes_obj, "conf"):
+                        if len(boxes_obj) > 0:
+                            boxes = boxes_obj.xyxy.cpu().numpy()
+                            labels = boxes_obj.cls.cpu().numpy().astype(int)
+                            confs = boxes_obj.conf.cpu().numpy()
+                        else:
+                            boxes = []
+                            labels = []
+                            confs = []
+                    else:
+                        boxes = []
+                        labels = []
+                        confs = []
+                except Exception as box_exc:
+                    print(f"⚠️ [{camera_id}] failed to parse model boxes: {type(box_exc).__name__}: {box_exc}")
+                    boxes = []
+                    labels = []
+                    confs = []
 
                 for box, cls_idx, conf in zip(boxes, labels, confs):
                     x1, y1, x2, y2 = box.astype(int)
@@ -389,7 +407,16 @@ class AIProcessor:
                                 cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
 
                     # Fire / Smoke immediate critical events
-                    if label_name in {"fire", "smoke"}:
+                    # Check if fire/smoke detection is enabled
+                    fire_enabled = getattr(self.active_settings, "fire_detection_enabled", False) or False
+                    smoke_enabled = getattr(self.active_settings, "smoke_detection_enabled", False) or False
+                    
+                    should_trigger_fire_smoke = (
+                        (label_name == "fire" and fire_enabled) or
+                        (label_name == "smoke" and smoke_enabled)
+                    )
+                    
+                    if should_trigger_fire_smoke:
                         status = "DANGER"
                         box_color = (0, 0, 255)
                         display_label = label_name.upper()
