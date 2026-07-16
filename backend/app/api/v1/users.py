@@ -71,15 +71,6 @@ async def update_my_profile(
         except Exception:
             pass
         # do not update user.email until verified
-    if payload.username and payload.username != user.username:
-        if db.query(User).filter(User.username == payload.username).first():
-            raise HTTPException(status_code=400, detail="Username already in use")
-        token_repo = TokenRepository(db)
-        token_str = create_refresh_token_string(40)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
-        ev = EmailVerificationToken(user_id=user.user_id, token=token_str, expires_at=expires_at, new_username=payload.username)
-        token_repo.create_email_verification(ev)
-        # user.username will update after verification
 
     if payload.full_name:
         user.full_name = payload.full_name

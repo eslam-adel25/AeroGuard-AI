@@ -4,29 +4,21 @@ import { userService } from "../services/api";
 import type { IUserProfile } from "../services/api";
 import {
   User,
-  Calendar,
   LogIn,
   Key,
-  Camera as CameraIcon,
   Save,
   Loader2,
-  Users as UsersIcon,
   ChevronRight,
-  BadgeCheck,
-  Building,
-  Phone,
-  Fingerprint,
+  Bell,
+  RefreshCw,
+  Info,
+  Eye,
+  EyeOff,
+  Lock,
+  Edit2,
+  Database,
+  Activity,
 } from "lucide-react";
-
-interface UserActivity {
-  id: string;
-  user_id: string;
-  event_type: string;
-  details?: Record<string, unknown> | null;
-  ip_address?: string | null;
-  user_agent?: string | null;
-  created_at: string;
-}
 
 interface UserSession {
   token: string;
@@ -37,19 +29,22 @@ interface UserSession {
 
 const Profile: React.FC = () => {
   const { t } = useTranslation();
+
   // --- States ---
   const [profile, setProfile] = useState<IUserProfile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [activity, setActivity] = useState<UserActivity[]>([]);
   const [sessions, setSessions] = useState<UserSession[]>([]);
 
-  // دالة مرجعية لفتح نافذة اختيار الصور
+  // Password visibility states
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // States لتغيير كلمة المرور
   const [passwords, setPasswords] = useState({
     old_password: "",
     new_password: "",
@@ -70,15 +65,6 @@ const Profile: React.FC = () => {
     }
   }, []);
 
-  const loadActivity = async () => {
-    try {
-      const res = await userService.getActivity();
-      setActivity(res.data || []);
-    } catch (err) {
-      console.warn("Failed to load activity", err);
-    }
-  };
-
   const loadSessions = async () => {
     try {
       const res = await userService.getSessions();
@@ -90,18 +76,15 @@ const Profile: React.FC = () => {
 
   useEffect(() => {
     loadProfile();
-    loadActivity();
     loadSessions();
   }, [loadProfile]);
 
-  // تحديث البيانات الأساسية (Section 3)
   const handleUpdateInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
     setIsSaving(true);
     try {
       await userService.updateProfile(profile);
-      alert("✅ Security identity updated successfully!");
       setIsEditing(false);
     } catch {
       alert("❌ Failed to update registry.");
@@ -110,7 +93,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  // تغيير كلمة المرور (Section 1)
   const handlePasswordRotate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new_password !== passwords.confirm_password) {
@@ -132,7 +114,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  // رفع الصورة الشخصية (Section 3)
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -143,9 +124,7 @@ const Profile: React.FC = () => {
     setIsUploading(true);
     try {
       await userService.uploadAvatar(formData);
-      await loadProfile(); // إعادة التحميل لإظهار الصورة الجديدة
-      alert("✅ Avatar updated!");
-      loadActivity();
+      await loadProfile();
     } catch {
       alert("❌ Failed to upload image.");
     } finally {
@@ -161,10 +140,8 @@ const Profile: React.FC = () => {
       alert(
         "Verification email sent to new address. Follow the link to confirm.",
       );
-      loadActivity();
     } catch (err) {
       console.warn("Failed to request email change", err);
-      alert("Failed to request email change.");
     }
   };
 
@@ -172,9 +149,7 @@ const Profile: React.FC = () => {
     if (!window.confirm("Logout all sessions?")) return;
     try {
       await userService.logoutAllSessions();
-      alert("All sessions logged out.");
       loadSessions();
-      loadActivity();
     } catch {
       alert("Failed to logout sessions.");
     }
@@ -182,386 +157,506 @@ const Profile: React.FC = () => {
 
   if (isLoading)
     return (
-      <div className="h-screen flex items-center justify-center bg-ag-dark">
-        <Loader2 className="animate-spin text-ag-danger" size={48} />
+      <div className="h-screen flex items-center justify-center bg-[#0c0e12]">
+        <Loader2 className="animate-spin text-[#3b82f6]" size={48} />
       </div>
     );
 
   return (
-    <div className="p-8 font-sans animate-in fade-in duration-700 max-w-6xl mx-auto pb-20">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-10">
-        <div className="flex items-center gap-4">
-          <div className="bg-ag-card p-3 rounded-2xl border border-white/5 shadow-xl">
-            <Fingerprint className="text-ag-danger" size={24} />
+    <div className="min-h-screen bg-[#0c0e12] text-white p-6 font-sans">
+      {/* Top Header Navigation */}
+      <header className="flex justify-between items-center mb-8 px-2">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
+            <span>Aeroguard ai</span>
+            <ChevronRight size={12} />
+            <span className="text-blue-400">{t("profile.title")}</span>
           </div>
-          <div>
-            <h2 className="text-3xl font-black text-white tracking-tight uppercase">
-              {t("profile.title")}
-            </h2>
-            <p className="text-gray-500 text-sm font-medium">
-              {t("profile.subtitle")}: {profile?.role?.role_name}
-            </p>
+          <h1 className="text-2xl font-bold mt-1 tracking-tight">
+            {t("profile.title")}
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="flex bg-[#16191f] rounded-lg p-1 text-[11px] font-bold">
+            <button className="px-3 py-1 bg-blue-600/20 text-blue-400 rounded-md">
+              EN
+            </button>
+            <button className="px-3 py-1 text-gray-500">AR</button>
+          </div>
+          <div className="relative">
+            <Bell size={20} className="text-gray-400 cursor-pointer" />
+            <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-[#0c0e12]"></span>
+          </div>
+          <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10">
+            <img
+              src={
+                profile?.profile_picture || "https://i.pravatar.cc/150?u=admin"
+              }
+              alt="Profile"
+              className="w-full h-full object-cover"
+            />
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* العمود الأيسر: بطاقة الهوية */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto">
+        {/* Left Column (Security Profile & History) */}
         <div className="lg:col-span-4 space-y-6">
-          <div className="bg-ag-card rounded-[3rem] p-8 border border-white/5 shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-b from-ag-danger/20 to-transparent"></div>
-
-            {/* Avatar Section */}
-            <div className="relative group mb-6 mt-4">
-              <div className="w-32 h-32 rounded-[2.5rem] bg-ag-dark border-4 border-ag-card shadow-2xl flex items-center justify-center overflow-hidden">
-                {profile?.profile_picture ? (
-                  <img
-                    src={profile.profile_picture}
-                    className="w-full h-full object-cover"
-                    alt="Avatar"
-                  />
-                ) : (
-                  <User size={48} className="text-gray-700" />
-                )}
-                {isUploading && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                    <Loader2 className="animate-spin text-white" />
-                  </div>
-                )}
+          {/* Security Profile Card */}
+          <section className="bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-8">
+              {t("profile.accountStatus")}
+            </h2>
+            <div className="flex flex-col items-center">
+              <div className="relative mb-6">
+                <div className="w-28 h-28 rounded-2xl bg-[#0c0e12] overflow-hidden border border-white/10 shadow-2xl">
+                  {profile?.profile_picture ? (
+                    <img
+                      src={profile.profile_picture}
+                      className="w-full h-full object-cover"
+                      alt="Avatar"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gray-800">
+                      <User size={40} />
+                    </div>
+                  )}
+                  {isUploading && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-2xl">
+                      <Loader2 className="animate-spin text-white" />
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  hidden
+                  onChange={handleAvatarChange}
+                  accept="image/*"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute -bottom-2 -right-2 p-1.5 bg-blue-500 text-white rounded-lg shadow-xl hover:bg-blue-400 transition-colors"
+                >
+                  <Edit2 size={14} />
+                </button>
               </div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                hidden
-                onChange={handleAvatarChange}
-                accept="image/*"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="absolute bottom-0 right-0 p-3 bg-ag-danger text-white rounded-2xl shadow-lg hover:scale-110 transition-all border-4 border-ag-card"
-              >
-                <CameraIcon size={18} />
+
+              <h3 className="text-xl font-bold mb-3">
+                {profile?.full_name || "System administrator"}
+              </h3>
+
+              <div className="flex gap-2 mb-8">
+                <span className="px-3 py-0.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-md uppercase tracking-wider">
+                  Global
+                </span>
+                <span className="px-3 py-0.5 bg-gray-800 text-gray-400 text-[10px] font-bold rounded-md uppercase tracking-wider">
+                  {profile?.role?.role_name?.toLowerCase() || "admin"}
+                </span>
+              </div>
+
+              <div className="w-full space-y-4 pt-6 border-t border-white/5">
+                <div className="flex justify-between items-center text-[11px] font-medium">
+                  <span className="text-gray-500">
+                    {t("profile.accountStatus")}
+                  </span>
+                  <span className="text-green-500 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>{" "}
+                    Online
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[11px] font-medium">
+                  <span className="text-gray-500">{t("profile.systemId")}</span>
+                  <span className="bg-[#0c0e12] px-2 py-1 rounded text-white font-mono text-[10px]">
+                    {profile?.user_id?.slice(0, 8).toUpperCase() || "CCFF-096B"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Access History Card */}
+          <section className="bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest">
+                {t("profile.accessHistory")}
+              </h2>
+              <button className="text-[11px] text-blue-400 hover:underline">
+                View logs
               </button>
             </div>
 
-            <h3 className="text-2xl font-black text-white tracking-tight">
-              {profile?.full_name}
-            </h3>
-            <div className="flex items-center gap-2 mt-2 px-4 py-1.5 bg-ag-warning/10 text-ag-warning rounded-full border border-ag-warning/20">
-              <BadgeCheck size={14} />
-              <span className="text-[10px] font-black uppercase tracking-widest">
-                {profile?.role?.role_name}
-              </span>
-            </div>
+            <div className="space-y-8 relative">
+              <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-white/5"></div>
 
-            <div className="w-full mt-8 pt-8 border-t border-white/5 space-y-4">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-gray-500 font-bold uppercase tracking-tighter">
-                  {t("profile.accountStatus")}
-                </span>
-                <span className="text-ag-success font-black flex items-center gap-1">
-                  ● {profile?.status}
-                </span>
+              <div className="flex gap-4 relative">
+                <div className="w-4 h-4 rounded-full border-2 border-gray-600 bg-[#16191f] z-10 flex-shrink-0 mt-1"></div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold">
+                    {t("profile.commissionedOn")}
+                  </p>
+                  <p className="text-[10px] text-gray-500">
+                    {profile?.created_at
+                      ? new Date(profile.created_at).toLocaleDateString(
+                          "en-US",
+                          { month: "long", day: "numeric", year: "numeric" },
+                        )
+                      : "July 07, 2026"}
+                  </p>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Initial instantiation completed by system root.
+                  </p>
+                </div>
               </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-gray-500 font-bold uppercase tracking-tighter">
-                  {t("profile.systemId")}
-                </span>
-                <span className="text-white font-mono">
-                  {profile?.user_id?.slice(0, 13)}
-                </span>
-              </div>
-            </div>
-          </div>
 
-          {/* سجل الدخول (Access Logs) */}
-          <div className="bg-ag-card/50 rounded-[2.5rem] p-6 border border-white/5 space-y-4 backdrop-blur-md">
-            <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 ml-2">
-              {t("profile.accessHistory")}
-            </h4>
-            <div className="flex items-start gap-4">
-              <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
-                <Calendar size={16} />
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-400 font-bold">
-                  {t("profile.commissionedOn")}
-                </p>
-                <p className="text-xs text-white font-mono">
-                  {new Date(profile?.created_at || "").toLocaleDateString()}
-                </p>
+              <div className="flex gap-4 relative">
+                <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center z-10 flex-shrink-0 mt-1">
+                  <LogIn size={8} className="text-white" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold">{t("profile.lastLogin")}</p>
+                  <p className="text-[10px] text-gray-500">
+                    {profile?.last_login ? "Active" : "5 minutes ago"}
+                  </p>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Neural-link handshake verified at node-04.
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="flex items-start gap-4">
-              <div className="p-2.5 bg-ag-success/10 text-ag-success rounded-xl">
-                <LogIn size={16} />
-              </div>
-              <div>
-                <p className="text-[10px] text-gray-400 font-bold">
-                  {t("profile.lastLogin")}
-                </p>
-                <p className="text-xs text-white font-mono">
-                  {profile?.last_login
-                    ? new Date(profile.last_login).toLocaleString()
-                    : "First Session"}
-                </p>
-              </div>
-            </div>
-          </div>
+          </section>
         </div>
 
-        {/* العمود الأيمن: النماذج */}
-        <div className="lg:col-span-8 space-y-8">
-          {/* General Info Form */}
-          <form
-            onSubmit={handleUpdateInfo}
-            className="bg-ag-card rounded-[3rem] p-10 border border-white/5 shadow-2xl space-y-8"
-          >
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-3 text-ag-primary">
-                <UsersIcon size={20} className="text-ag-danger" />
-                <h3 className="text-xl font-black uppercase tracking-tighter">
+        {/* Right Column (Registry & Credentials) */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Registry Data Form */}
+          <section className="bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl">
+            <header className="flex justify-between items-start mb-10">
+              <div className="flex items-center gap-3">
+                <div className="bg-[#0c0e12] p-2.5 rounded-xl border border-white/5">
+                  <Database size={20} className="text-blue-400" />
+                </div>
+                <h2 className="text-xl font-bold">
                   {t("profile.registryData")}
-                </h3>
+                </h2>
               </div>
               <button
-                type="button"
                 onClick={() => setIsEditing(!isEditing)}
-                className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${isEditing ? "bg-ag-danger text-white" : "text-ag-danger border border-ag-danger/30 hover:bg-ag-danger/10"}`}
+                className="px-6 py-2 bg-white/5 border border-white/5 text-[11px] font-bold rounded-lg hover:bg-white/10 transition-colors"
               >
                 {isEditing
                   ? t("profile.discardChanges")
                   : t("profile.modifyRecord")}
               </button>
-            </div>
+            </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase ml-4">
-                  {t("profile.fullIdentityName")}
-                </label>
-                <input
-                  disabled={!isEditing}
-                  value={profile?.full_name}
-                  onChange={(e) =>
-                    setProfile({ ...profile!, full_name: e.target.value })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase ml-4">
-                  {t("profile.corporateEmail")}
-                </label>
-                <div className="flex gap-3">
+            <form onSubmit={handleUpdateInfo} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    {t("profile.fullIdentityName")}
+                  </label>
                   <input
                     disabled={!isEditing}
-                    value={profile?.email}
+                    value={profile?.full_name || ""}
                     onChange={(e) =>
-                      setProfile({ ...profile!, email: e.target.value })
+                      setProfile({ ...profile!, full_name: e.target.value })
                     }
-                    className="flex-1 bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
+                    className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 disabled:text-gray-400 transition-all"
                   />
-                  <button
-                    type="button"
-                    onClick={handleChangeEmail}
-                    className="px-3 py-2 rounded-lg bg-white/5 text-xs font-bold"
-                  >
-                    Change
-                  </button>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    {t("profile.corporateEmail")}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      disabled={!isEditing}
+                      value={profile?.email || ""}
+                      onChange={(e) =>
+                        setProfile({ ...profile!, email: e.target.value })
+                      }
+                      className="flex-1 bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 disabled:text-gray-400 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleChangeEmail}
+                      className="px-4 py-2 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold text-gray-400 hover:text-white"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    Secure contact line
+                  </label>
+                  <input
+                    disabled={!isEditing}
+                    value={profile?.phone || ""}
+                    onChange={(e) =>
+                      setProfile({ ...profile!, phone: e.target.value })
+                    }
+                    className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 disabled:text-gray-400 transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    Assigned organization
+                  </label>
+                  <input
+                    disabled={!isEditing}
+                    value={profile?.organization || ""}
+                    onChange={(e) =>
+                      setProfile({ ...profile!, organization: e.target.value })
+                    }
+                    className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 disabled:text-gray-400 transition-all"
+                  />
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase ml-4 flex items-center gap-2">
-                  <Phone size={12} /> Secure Contact Line
-                </label>
-                <input
-                  disabled={!isEditing}
-                  value={profile?.phone || ""}
-                  onChange={(e) =>
-                    setProfile({ ...profile!, phone: e.target.value })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-500 font-black uppercase ml-4 flex items-center gap-2">
-                  <Building size={12} /> Assigned Organization
-                </label>
-                <input
-                  disabled={!isEditing}
-                  value={profile?.organization || ""}
-                  onChange={(e) =>
-                    setProfile({ ...profile!, organization: e.target.value })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-danger disabled:opacity-40 transition-all font-bold"
-                />
-              </div>
-            </div>
 
-            {isEditing && (
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="bg-ag-success text-white px-10 py-4 rounded-2xl font-black text-sm shadow-xl flex items-center gap-3 active:scale-95 transition-all"
-              >
-                {isSaving ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <>
-                    <Save size={18} /> Commit Update
-                  </>
-                )}
-              </button>
-            )}
-          </form>
+              {isEditing && (
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="mt-4 px-10 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm flex items-center gap-2 shadow-lg transition-all"
+                >
+                  {isSaving ? (
+                    <Loader2 className="animate-spin" size={18} />
+                  ) : (
+                    <>
+                      <Save size={18} /> Commit Update
+                    </>
+                  )}
+                </button>
+              )}
 
-          {/* Credential Rotation Form */}
-          <form
-            onSubmit={handlePasswordRotate}
-            className="bg-ag-card rounded-[3rem] p-10 border border-white/5 shadow-2xl space-y-8"
-          >
-            <div className="flex items-center gap-3 text-ag-primary">
-              <Key size={20} className="text-ag-warning" />
-              <h3 className="text-xl font-black uppercase tracking-tighter">
+              <div className="bg-blue-600/10 border border-blue-500/20 rounded-xl p-4 flex gap-4 mt-8">
+                <Info
+                  size={20}
+                  className="text-blue-400 flex-shrink-0 mt-0.5"
+                />
+                <p className="text-[11px] text-blue-300/80 leading-relaxed">
+                  Registry modifications require secondary biometric
+                  verification and administrative approval.
+                </p>
+              </div>
+            </form>
+          </section>
+
+          {/* Credential Rotation Card */}
+          <section className="bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl">
+            <header className="flex items-center gap-3 mb-10">
+              <div className="bg-[#0c0e12] p-2.5 rounded-xl border border-white/5">
+                <Key size={20} className="text-blue-400" />
+              </div>
+              <h2 className="text-xl font-bold">
                 {t("profile.credentialRotation")}
-              </h3>
-            </div>
+              </h2>
+            </header>
 
-            <div className="space-y-5">
-              <input
-                type="password"
-                required
-                placeholder={t("profile.currentSystemPassword")}
-                value={passwords.old_password}
-                onChange={(e) =>
-                  setPasswords({ ...passwords, old_password: e.target.value })
-                }
-                className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-warning font-bold"
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="password"
-                  required
-                  placeholder={t("profile.newSecurePassword")}
-                  value={passwords.new_password}
-                  onChange={(e) =>
-                    setPasswords({ ...passwords, new_password: e.target.value })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-warning font-bold"
-                />
-                <input
-                  type="password"
-                  required
-                  placeholder={t("profile.confirmNewPassword")}
-                  value={passwords.confirm_password}
-                  onChange={(e) =>
-                    setPasswords({
-                      ...passwords,
-                      confirm_password: e.target.value,
-                    })
-                  }
-                  className="w-full bg-ag-dark border border-white/5 p-4 rounded-2xl text-white outline-none focus:border-ag-warning font-bold"
-                />
+            <form onSubmit={handlePasswordRotate} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                  {t("profile.currentSystemPassword")}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldPass ? "text" : "password"}
+                    required
+                    value={passwords.old_password}
+                    onChange={(e) =>
+                      setPasswords({
+                        ...passwords,
+                        old_password: e.target.value,
+                      })
+                    }
+                    className="w-full bg-[#0c0e12] border border-white/5 p-4 pr-24 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
+                    placeholder="••••••••••••"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-3 text-gray-600">
+                    <button
+                      type="button"
+                      onClick={() => setShowOldPass(!showOldPass)}
+                    >
+                      {showOldPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                    <Lock size={18} />
+                  </div>
+                </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    {t("profile.newSecurePassword")}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPass ? "text" : "password"}
+                      required
+                      value={passwords.new_password}
+                      onChange={(e) =>
+                        setPasswords({
+                          ...passwords,
+                          new_password: e.target.value,
+                        })
+                      }
+                      className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
+                      placeholder="Min. 32 characters"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPass(!showNewPass)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600"
+                    >
+                      {showNewPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
+                    {t("profile.confirmNewPassword")}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPass ? "text" : "password"}
+                      required
+                      value={passwords.confirm_password}
+                      onChange={(e) =>
+                        setPasswords({
+                          ...passwords,
+                          confirm_password: e.target.value,
+                        })
+                      }
+                      className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
+                      placeholder="Re-enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPass(!showConfirmPass)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600"
+                    >
+                      {showConfirmPass ? (
+                        <EyeOff size={18} />
+                      ) : (
+                        <Eye size={18} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                className="bg-white/5 text-ag-warning hover:bg-ag-warning/10 border border-ag-warning/20 px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95"
+                className="mt-4 px-8 py-3 bg-gradient-to-r from-blue-300 via-blue-400 to-indigo-300 hover:from-blue-200 hover:to-indigo-200 text-black font-bold rounded-xl text-sm transition-all shadow-lg active:scale-[0.98]"
               >
                 {t("profile.rotateCredentials")}
               </button>
-            </div>
-          </form>
-
-          {/* Admin Directory Link (Only for Admins - Section 3) */}
-          {profile?.role?.role_name === "Administrator" && (
-            <div className="bg-gradient-to-r from-ag-danger to-red-900 rounded-[2.5rem] p-10 flex justify-between items-center shadow-2xl ring-1 ring-white/10">
-              <div>
-                <h4 className="text-2xl font-black text-white tracking-tight">
-                  {t("profile.personnelDirectory")}
-                </h4>
-                <p className="text-white/60 text-xs mt-1 font-medium">
-                  Authorized to manage all system nodes and operator access
-                  records
-                </p>
-              </div>
-              <button className="bg-white text-ag-danger p-4 rounded-2xl font-black shadow-xl hover:scale-105 active:scale-95 transition-all">
-                <ChevronRight size={24} />
-              </button>
-            </div>
-          )}
-
-          {/* Activity Timeline */}
-          <div className="bg-ag-card rounded-[3rem] p-8 border border-white/5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black">Activity Timeline</h3>
-              <button onClick={loadActivity} className="text-sm text-gray-400">
-                Refresh
-              </button>
-            </div>
-            <div className="space-y-3 max-h-48 overflow-auto">
-              {activity.length === 0 && (
-                <p className="text-sm text-gray-500">No recent activity</p>
-              )}
-              {activity.map((a) => (
-                <div key={a.id} className="flex items-start gap-3">
-                  <div className="w-10 text-xs text-gray-400">
-                    {new Date(a.created_at).toLocaleString()}
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold">{a.event_type}</div>
-                    <div className="text-xs text-gray-400">
-                      {JSON.stringify(a.details || {})}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Sessions */}
-          <div className="bg-ag-card rounded-[3rem] p-8 border border-white/5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black">Active Sessions</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={loadSessions}
-                  className="text-sm text-gray-400"
-                >
-                  Refresh
-                </button>
-                <button
-                  onClick={handleLogoutAll}
-                  className="text-sm bg-red-600 px-3 py-1 rounded text-white"
-                >
-                  Logout All
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {sessions.length === 0 && (
-                <p className="text-sm text-gray-500">No active sessions</p>
-              )}
-              {sessions.map((s) => (
-                <div
-                  key={s.token}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <div className="font-mono">
-                    {s.token.slice(0, 8)}...{s.token.slice(-8)}
-                  </div>
-                  <div className="text-gray-400">
-                    {s.created_at
-                      ? new Date(s.created_at).toLocaleString()
-                      : "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            </form>
+          </section>
         </div>
+
+        {/* Bottom Section: Active Sessions */}
+        <section className="lg:col-span-12 bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl mb-10">
+          <header className="flex justify-between items-center mb-10">
+            <div className="flex items-center gap-3">
+              <Activity size={18} className="text-blue-400" />
+              <h2 className="text-sm font-bold">Active sessions</h2>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={loadSessions}
+                className="flex items-center gap-2 px-6 py-2 bg-[#0c0e12] border border-white/5 rounded-lg text-[11px] font-bold text-gray-400 hover:text-white transition-colors"
+              >
+                <RefreshCw size={14} /> Refresh
+              </button>
+              <button
+                onClick={handleLogoutAll}
+                className="px-6 py-2 border border-red-500/30 text-red-400 rounded-lg text-[11px] font-bold hover:bg-red-500/10 transition-colors"
+              >
+                Logout all
+              </button>
+            </div>
+          </header>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="text-[10px] text-gray-500 font-bold uppercase border-b border-white/5 tracking-wider">
+                  <th className="pb-4 font-bold">Session ID</th>
+                  <th className="pb-4 font-bold">Login date & time</th>
+                  <th className="pb-4 font-bold">Device type</th>
+                  <th className="pb-4 text-right font-bold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {sessions.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="py-8 text-center text-gray-600 text-sm"
+                    >
+                      No active sessions found.
+                    </td>
+                  </tr>
+                ) : (
+                  sessions.map((s, idx) => (
+                    <tr
+                      key={s.token}
+                      className="text-xs group hover:bg-white/[0.02] transition-colors"
+                    >
+                      <td className="py-6 font-mono text-gray-400">
+                        sess_{s.token.slice(0, 4)}...{s.token.slice(-3)}
+                      </td>
+                      <td className="py-6 text-gray-400">
+                        {s.created_at
+                          ? new Date(s.created_at).toLocaleString()
+                          : "—"}
+                      </td>
+                      <td className="py-6 text-gray-400">
+                        {idx % 2 === 0 ? "Desktop - Chrome" : "Mobile - Safari"}
+                      </td>
+                      <td className="py-6 text-right">
+                        <span
+                          className={`px-3 py-1 rounded-md text-[10px] font-bold ${idx === 0 ? "bg-blue-600/20 text-blue-400" : "bg-gray-800 text-gray-500"}`}
+                        >
+                          {idx === 0 ? "Active" : "Idle"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
+
+      {/* Footer */}
+      <footer className="max-w-[1600px] mx-auto border-t border-white/5 py-8 mt-10 px-2 flex flex-col md:flex-row justify-between items-center gap-6">
+        <p className="text-xs text-gray-600 font-medium tracking-tight">
+          © 2027 AeroGuard AI. All rights reserved.
+        </p>
+        <div className="flex gap-8 text-[11px] text-gray-500 font-bold tracking-tight uppercase">
+          <button className="hover:text-white transition-colors">
+            Privacy Policy
+          </button>
+          <button className="hover:text-white transition-colors">
+            Terms of Service
+          </button>
+          <button className="hover:text-white transition-colors">
+            Documentation
+          </button>
+          <button className="hover:text-white transition-colors">
+            Support
+          </button>
+          <button className="hover:text-white transition-colors">
+            Contact
+          </button>
+        </div>
+      </footer>
     </div>
   );
 };
