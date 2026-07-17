@@ -35,6 +35,8 @@ class AIProcessor:
         self.loitering_tracker = {}  # camera_id -> {track_id: {first_seen, last_pos, last_move_time}}
         self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
         self.crowd_cooldown = {}  # camera_id -> last_alert_time
+        self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
+        self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
         self._stop_flags = {}
         self._active_cameras = set()
         self._active_camera_lock = threading.Lock()
@@ -141,6 +143,92 @@ class AIProcessor:
         return None
 
     @staticmethod
+    def _get_person_confidence_threshold(default_confidence):
+        """Use a slightly lower threshold for person detections to improve recall without changing the model."""
+        try:
+            configured = float(default_confidence)
+        except (TypeError, ValueError):
+            configured = 0.5
+        return max(0.25, min(0.5, configured - 0.12))
+
+    def _assign_display_ids(self, camera_id, active_tracks):
+        """Create visualization-only display IDs for currently visible tracks without changing tracker internals."""
+        camera_key = str(camera_id)
+        state = self.display_id_state.setdefault(camera_key, {})
+        visible_ids = {track.track_id for track in active_tracks if getattr(track, "track_id", None) is not None}
+
+        # Remove stale ids for tracks no longer visible.
+        for internal_id in list(state.keys()):
+            if internal_id not in visible_ids:
+                del state[internal_id]
+
+        ordered_tracks = [track for track in active_tracks if getattr(track, "track_id", None) is not None]
+        ordered_tracks.sort(key=lambda track: (getattr(track, "bbox", [0, 0, 0, 0])[1], getattr(track, "bbox", [0, 0, 0, 0])[0]))
+
+        display_map = {}
+        for index, track in enumerate(ordered_tracks, start=1):
+            internal_id = getattr(track, "track_id", None)
+            if internal_id is None:
+                continue
+            display_map[internal_id] = index
+            state[internal_id] = index
+
+        # Keep any visible ids that are no longer part of the active set in state for the current frame.
+        for internal_id in visible_ids:
+            if internal_id not in display_map:
+                display_map[internal_id] = state.get(internal_id, 0)
+
+        return display_map
+
+    def _assign_bag_owner(self, camera_id, person_tracks, bag_tracks):
+        """Assign a stable owner ID to bags for overlay display without changing tracker internals."""
+        camera_key = str(camera_id)
+        bag_owner_state = self.bag_owner_state.setdefault(camera_key, {})
+
+        person_candidates = []
+        for track in person_tracks:
+            bbox = getattr(track, "bbox", None)
+            if bbox is None or len(bbox) != 4:
+                continue
+            person_candidates.append(track)
+
+        owner_map = {}
+        for bag_track in bag_tracks:
+            bag_id = getattr(bag_track, "track_id", None)
+            if bag_id is None:
+                continue
+
+            current_owner = bag_owner_state.get(bag_id)
+            if current_owner is not None:
+                owner_map[bag_id] = current_owner
+                continue
+
+            best_owner = None
+            best_score = None
+            bag_bbox = getattr(bag_track, "bbox", None) or [0, 0, 0, 0]
+            bag_center = [int((bag_bbox[0] + bag_bbox[2]) / 2), int((bag_bbox[1] + bag_bbox[3]) / 2)]
+            for person_track in person_candidates:
+                person_bbox = getattr(person_track, "bbox", None) or [0, 0, 0, 0]
+                person_center = [int((person_bbox[0] + person_bbox[2]) / 2), int((person_bbox[1] + person_bbox[3]) / 2)]
+                dx = bag_center[0] - person_center[0]
+                dy = bag_center[1] - person_center[1]
+                distance = (dx * dx + dy * dy) ** 0.5
+                if distance > 220:
+                    continue
+                score = max(0.0, 220.0 - distance)
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_owner = getattr(person_track, "track_id", None)
+
+            if best_owner is None:
+                owner_map[bag_id] = current_owner
+            else:
+                owner_map[bag_id] = best_owner
+                bag_owner_state[bag_id] = best_owner
+
+        return owner_map
+
+    @staticmethod
     def _format_overlay_label(track_id, label_name, status=None):
         """Render a compact overlay label that includes the persistent track ID."""
         if label_name is None:
@@ -164,6 +252,73 @@ class AIProcessor:
             label = f"{label} [{str(status).upper()}]"
 
         return label
+
+    @staticmethod
+    def _get_overlay_draw_settings(frame_shape):
+        """Return compact display settings that keep labels readable without blocking the scene."""
+        height = max(1, int(frame_shape[0]))
+        width = max(1, int(frame_shape[1]))
+        scale = min(width / 1280.0, height / 720.0)
+        font_scale = max(0.28, min(0.5, 0.32 + scale * 0.1))
+        line_thickness = max(1, int(round(1 + scale)))
+        padding = max(2, int(round(2 + scale * 0.8)))
+        return {
+            "font_scale": font_scale,
+            "line_thickness": line_thickness,
+            "padding": padding,
+        }
+
+    @staticmethod
+    def _get_text_color(background_color):
+        """Choose a high-contrast text color for the label background."""
+        r, g, b = background_color
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        return (0, 0, 0) if luminance > 0.55 else (255, 255, 255)
+
+    @staticmethod
+    def _draw_detection_overlay(frame, x1, y1, x2, y2, label, color, draw_settings):
+        """Draw a compact, high-contrast detection box and label on the frame."""
+        if frame is None:
+            return
+
+        thickness = draw_settings["line_thickness"]
+        padding = draw_settings["padding"]
+        font_scale = draw_settings["font_scale"]
+        text_thickness = max(1, int(round(thickness / 2)))
+
+        points = [
+            (x1, y1),
+            (x2, y1),
+            (x2, y2),
+            (x1, y2),
+        ]
+        for idx, point in enumerate(points):
+            next_point = points[(idx + 1) % len(points)]
+            cv2.line(frame, point, next_point, color, thickness, cv2.LINE_AA)
+
+        label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
+        text_width = label_size[0]
+        text_height = label_size[1]
+
+        text_color = AIProcessor._get_text_color(color)
+        label_x = max(0, int(x1 + max(1, padding // 2)))
+        label_y = max(text_height + max(1, padding // 2), int(y1 - max(1, padding // 2)))
+        label_x1 = max(0, label_x - max(1, padding // 2))
+        label_y1 = max(0, label_y - text_height - max(1, padding // 2))
+        label_x2 = min(frame.shape[1], label_x + text_width + max(1, padding // 2))
+        label_y2 = min(frame.shape[0], label_y + baseline + max(1, padding // 2))
+
+        cv2.rectangle(frame, (label_x1, label_y1), (label_x2, label_y2), color, -1)
+        cv2.putText(
+            frame,
+            label,
+            (label_x, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_color,
+            text_thickness,
+            cv2.LINE_AA,
+        )
 
     async def process_camera(self, camera_id, rtsp_url, db: Session = None):
         """المحرك الشامل: معالجة البث الحي أو الفيديوهات المرفوعة (Section 5 & 13)"""
@@ -223,6 +378,8 @@ class AIProcessor:
             if self.active_settings is not None:
                 conf_thr = getattr(self.active_settings, "detection_confidence", 0.5)
                 max_objs = getattr(self.active_settings, "max_objects", 50)
+
+            person_conf_thr = self._get_person_confidence_threshold(conf_thr)
 
             if conf_thr is None:
                 conf_thr = 0.5
@@ -339,10 +496,13 @@ class AIProcessor:
                     label_name = self.model.names[int(cls_idx)].lower()
                     if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke"]:
                         continue
+                    detection_confidence = float(conf)
+                    if label_name == "person" and detection_confidence < person_conf_thr:
+                        continue
                     detections_for_tracker.append({
                         "bbox": [int(x1), int(y1), int(x2), int(y2)],
                         "class_name": label_name,
-                        "confidence": float(conf),
+                        "confidence": detection_confidence,
                     })
 
                 tracks = self.tracker.update(detections_for_tracker)
@@ -351,6 +511,9 @@ class AIProcessor:
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
                 bag_count = sum(1 for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"})
                 vehicle_count = sum(1 for t in active_tracks if t.class_name in {"car", "truck", "bus", "vehicle"})
+
+                display_ids = self._assign_display_ids(camera_id, active_tracks)
+                bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
 
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
@@ -365,7 +528,12 @@ class AIProcessor:
                     status = "NORMAL"
                     box_color = self._get_detection_box_color(label_name)
                     display_label = "Person" if label_name == "person" else "Baggage"
-                    overlay_label = self._format_overlay_label(obj_id, label_name)
+                    display_id = display_ids.get(obj_id, 0)
+                    if label_name in {"bag", "backpack", "suitcase"}:
+                        owner_id = bag_owner_map.get(obj_id)
+                        overlay_label = f"Owner:{owner_id:03d} Bag" if owner_id is not None else f"Bag"
+                    else:
+                        overlay_label = self._format_overlay_label(display_id, label_name)
 
                     in_restricted = False
                     for zone in zones:
@@ -496,11 +664,17 @@ class AIProcessor:
                                         })
                                         self.last_alert_time[alert_key] = time.time()
 
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 2)
-                    label_size, _ = cv2.getTextSize(overlay_label, cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
-                    cv2.rectangle(annotated_frame, (x1, y1 - 25), (x1 + label_size[0] + 10, y1), box_color, -1)
-                    cv2.putText(annotated_frame, overlay_label, (x1 + 5, y1 - 8),
-                                cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
+                    draw_settings = self._get_overlay_draw_settings(annotated_frame.shape)
+                    self._draw_detection_overlay(
+                        annotated_frame,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        overlay_label,
+                        box_color,
+                        draw_settings,
+                    )
 
                     # Fire / Smoke immediate critical events
                     # Check if fire/smoke detection is enabled
