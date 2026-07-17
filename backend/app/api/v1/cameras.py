@@ -113,7 +113,7 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
 
     cam.status = "Processing"
     db.commit()
-    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url, db)
+    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 # 4. جلب الكاميرات

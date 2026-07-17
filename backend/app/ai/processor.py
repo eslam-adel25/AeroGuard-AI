@@ -2,6 +2,7 @@ import cv2
 import asyncio
 import time
 import os
+import threading
 from pathlib import Path
 import numpy as np
 import torch
@@ -35,6 +36,8 @@ class AIProcessor:
         self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
         self.crowd_cooldown = {}  # camera_id -> last_alert_time
         self._stop_flags = {}
+        self._active_cameras = set()
+        self._active_camera_lock = threading.Lock()
         
         # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
         self.active_settings = None
@@ -104,7 +107,15 @@ class AIProcessor:
         cap = None
 
         camera_id_str = str(camera_id)
+        with self._active_camera_lock:
+            if camera_id_str in self._active_cameras:
+                print(f"⚠️ [{camera_id}] camera already processing, skipping duplicate start")
+                return
+            self._active_cameras.add(camera_id_str)
+
         self._stop_flags[camera_id_str] = False
+        consecutive_read_failures = 0
+        last_frame_pos = -1
         try:
             # 1. تحديد نوع المصدر ومعالجته
             source = 0 if str(rtsp_url) == "0" else rtsp_url
@@ -116,9 +127,11 @@ class AIProcessor:
                         os.path.join(os.path.dirname(__file__), "..", "..")
                     )
                     source = os.path.abspath(os.path.join(backend_root, source))
-                print(f"📌 [{camera_id}] resolved source path={source}")
+                    print(f"📌 [{camera_id}] resolved source path={source}")
 
-            print(f"📌 [{camera_id}] source={source!r} type={type(source).__name__} file_source={is_file_source}")
+            print(
+                f"📌 [{camera_id}] source={source!r} type={type(source).__name__} file_source={is_file_source}"
+            )
             cap = cv2.VideoCapture(source, cv2.CAP_DSHOW) if source == 0 else cv2.VideoCapture(source)
             print(f"📌 [{camera_id}] cap created, isOpened={cap.isOpened()}")
 
@@ -176,22 +189,39 @@ class AIProcessor:
                     if isinstance(source, str) and not source.isdigit():
                         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
                         frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+                        consecutive_read_failures += 1
+
                         if frame_count > 0 and frame_pos >= frame_count:
                             print(
                                 f"✅ [{camera_id}] EOF reached after last_valid_frame={last_valid_frame} "
                                 f"iterations={iteration-1} source={source!r} frame_pos={frame_pos} frame_count={frame_count}"
                             )
                             break
-                        # transient read failure for file source; retry briefly
+
+                        if (
+                            consecutive_read_failures >= 3
+                            or (frame_pos == last_frame_pos and frame_pos > 0)
+                        ):
+                            print(
+                                f"⚠️ [{camera_id}] persistent read failure, stopping playback "
+                                f"source={source!r} frame_pos={frame_pos} frame_count={frame_count} "
+                                f"consecutive_failures={consecutive_read_failures}"
+                            )
+                            break
+
                         print(
-                            f"⚠️ [{camera_id}] temporary file read failure at frame_pos={frame_pos} "
-                            f"frame_count={frame_count}, retrying"
+                            f"⚠️ [{camera_id}] transient file read failure at frame_pos={frame_pos} "
+                            f"frame_count={frame_count}, retrying ({consecutive_read_failures})"
                         )
                         await asyncio.sleep(0.1)
                         continue
                     print(f"⚠️ [{camera_id}] camera stream read failed, retrying after sleep")
                     await asyncio.sleep(1)
                     continue
+
+                consecutive_read_failures = 0
+                frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+                last_frame_pos = frame_pos
 
                 if last_valid_frame == 0:
                     print(f"📌 [{camera_id}] first frame decoded successfully")
@@ -491,6 +521,8 @@ class AIProcessor:
                 print(f"📌 [{camera_id}] cap released and processing ended")
             self.last_frames.pop(str(camera_id), None)
             self._stop_flags.pop(camera_id_str, None)
+            with self._active_camera_lock:
+                self._active_cameras.discard(camera_id_str)
             if own_db:
                 local_db.close()
 
