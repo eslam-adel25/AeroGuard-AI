@@ -1,5 +1,6 @@
 from fastapi import HTTPException, Depends, Header
 from .security import verify_token # دالة افتراضية للتحقق من التوكن
+from uuid import UUID
 
 async def get_current_user(authorization: str = Header(None), token: str | None = None):
     """استخراج المستخدم من عنوان الـ Header أو من بارامتر الاستعلام token."""
@@ -17,6 +18,13 @@ async def get_current_user(authorization: str = Header(None), token: str | None 
 
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user_id = payload.get("user_id")
+    if isinstance(user_id, str):
+        try:
+            payload["user_id"] = UUID(user_id)
+        except ValueError:
+            pass
 
     return payload
 
