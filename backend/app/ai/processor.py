@@ -100,6 +100,71 @@ class AIProcessor:
     def get_latest_frame(self, camera_id):
         return self.last_frames.get(str(camera_id))
 
+    @staticmethod
+    def _get_detection_box_color(label_name):
+        """Return a fixed color for normal detections by class without using red."""
+        normalized = (label_name or "").lower()
+        if normalized in {"person"}:
+            return (0, 255, 0)
+        if normalized in {"bag", "backpack", "suitcase", "baggage", "luggage"}:
+            return (0, 255, 255)
+        if normalized in {"car", "bus", "truck", "motorcycle", "bicycle", "vehicle"}:
+            return (255, 0, 0)
+        if normalized in {"animal", "dog", "cat", "bird"}:
+            return (0, 165, 255)
+        if normalized in {"knife", "weapon", "gun"}:
+            return (255, 0, 255)
+        return (255, 255, 0)
+
+    @staticmethod
+    def _get_track_id(track) -> str | int | None:
+        """Extract a stable track identifier from the tracker object if available."""
+        if track is None:
+            return None
+
+        for attr_name in ("track_id", "id"):
+            value = getattr(track, attr_name, None)
+            if value is None:
+                continue
+            if isinstance(value, (str, int)):
+                return value
+            if hasattr(value, "__int__"):
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    pass
+
+        tracked_object = getattr(track, "tracked_object", None)
+        if tracked_object is not None:
+            return AIProcessor._get_track_id(tracked_object)
+
+        return None
+
+    @staticmethod
+    def _format_overlay_label(track_id, label_name, status=None):
+        """Render a compact overlay label that includes the persistent track ID."""
+        if label_name is None:
+            base_label = "Object"
+        elif str(label_name).lower() == "person":
+            base_label = "Person"
+        elif str(label_name).lower() in {"bag", "backpack", "suitcase", "baggage"}:
+            base_label = "Baggage"
+        else:
+            base_label = str(label_name).capitalize()
+
+        if track_id is None:
+            label = base_label
+        else:
+            try:
+                label = f"ID:{int(track_id):03d} {base_label}"
+            except (TypeError, ValueError):
+                label = f"ID:{track_id} {base_label}"
+
+        if status and str(status).upper() not in {"NORMAL", ""}:
+            label = f"{label} [{str(status).upper()}]"
+
+        return label
+
     async def process_camera(self, camera_id, rtsp_url, db: Session = None):
         """المحرك الشامل: معالجة البث الحي أو الفيديوهات المرفوعة (Section 5 & 13)"""
         local_db = db if db is not None else SessionLocal()
@@ -291,15 +356,16 @@ class AIProcessor:
                     if active_objs_count >= max_objs:
                         print(f"📌 [{camera_id}] track loop break due to max_objs={max_objs}")
                         break
-                    obj_id = track.track_id
+                    obj_id = self._get_track_id(track)
                     label_name = track.class_name
                     conf = track.confidence
                     x1, y1, x2, y2 = track.bbox
                     base_point = (int((x1 + x2) / 2), y2)
 
                     status = "NORMAL"
-                    box_color = (0, 255, 0)
+                    box_color = self._get_detection_box_color(label_name)
                     display_label = "Person" if label_name == "person" else "Baggage"
+                    overlay_label = self._format_overlay_label(obj_id, label_name)
 
                     in_restricted = False
                     for zone in zones:
@@ -431,9 +497,9 @@ class AIProcessor:
                                         self.last_alert_time[alert_key] = time.time()
 
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 2)
-                    label_size, _ = cv2.getTextSize(f"{display_label}", cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
+                    label_size, _ = cv2.getTextSize(overlay_label, cv2.FONT_HERSHEY_DUPLEX, 0.5, 1)
                     cv2.rectangle(annotated_frame, (x1, y1 - 25), (x1 + label_size[0] + 10, y1), box_color, -1)
-                    cv2.putText(annotated_frame, f"{display_label}", (x1 + 5, y1 - 8),
+                    cv2.putText(annotated_frame, overlay_label, (x1 + 5, y1 - 8),
                                 cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1)
 
                     # Fire / Smoke immediate critical events
