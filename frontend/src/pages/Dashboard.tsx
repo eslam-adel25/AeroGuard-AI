@@ -389,79 +389,51 @@ const Dashboard = () => {
           ref={videoContainerRef}
           className="relative group rounded-lg overflow-hidden border border-white/8 shadow-[0_18px_60px_rgba(0,0,0,0.45)] bg-black ring-1 ring-white/8 min-h-0"
         >
-          {/* Compact Glass Overlays */}
-          <div className="absolute left-4 top-4 z-40 pointer-events-none flex flex-col gap-3 max-w-[min(42%,360px)]">
-            <div className="rounded-2xl border border-white/10 bg-black/50 backdrop-blur-xl px-3 py-3 shadow-xl shadow-black/20">
-              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.32em] text-white/75 mb-2">
-                <span className="w-2 h-2 rounded-full bg-ag-success animate-pulse" />
-                {t("dashboard.liveMonitoring")}
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-gray-300">
-                    {t("dashboard.camera")}
-                  </p>
-                  <p className="text-sm font-bold text-white truncate">
-                    {cameras.find((c) => c.camera_id === selectedCamera)
-                      ?.camera_name || t("dashboard.provisioning")}
-                  </p>
-                </div>
-                <div className="rounded-full bg-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.22em] text-ag-success font-black">
-                  {t("common.active")}
-                </div>
-              </div>
-            </div>
+          {/* Compact Top-Center Status Bar */}
+          <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2 pointer-events-none inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
+            <span className="flex items-center gap-2">
+              <span className="text-[14px]">📹</span>
+              <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
+                {cameras.find((c) => c.camera_id === selectedCamera)
+                  ?.camera_name || t("dashboard.provisioning")}
+              </span>
+            </span>
 
-            <div className="rounded-2xl border border-white/10 bg-black/50 backdrop-blur-xl px-3 py-3 shadow-xl shadow-black/20">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-[52px]">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    {t("common.fps")}
-                  </p>
-                  <p className="text-lg font-black text-ag-success font-mono">
-                    {fps || 30}
-                  </p>
-                </div>
-                <div className="min-w-[66px]">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    {t("common.objects")}
-                  </p>
-                  <p className="text-lg font-black text-white font-mono">
-                    {detectionCount}
-                  </p>
-                </div>
-                <div className="min-w-[66px]">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    People
-                  </p>
-                  <p className="text-lg font-black text-white font-mono">
-                    {peopleCount}
-                  </p>
-                </div>
-                <div className="min-w-[66px]">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    Bags
-                  </p>
-                  <p className="text-lg font-black text-white font-mono">
-                    {bagCount}
-                  </p>
-                </div>
-                <div className="min-w-[66px]">
-                  <p className="text-[9px] uppercase tracking-[0.2em] text-gray-400">
-                    Cars
-                  </p>
-                  <p className="text-lg font-black text-white font-mono">
-                    {carCount}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 rounded-full bg-black/30 px-3 py-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.4)]" />
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-white font-semibold">
-                    {t("common.recording")}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-2 text-[14px] text-white">
+              <span className="h-2 w-2 rounded-full bg-ag-success" />
+              {t("common.active")}
+            </span>
+
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-1 text-white/90">
+              FPS:{" "}
+              <span className="font-black text-ag-success">{fps || 30}</span>
+            </span>
+
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-1 text-white/90">
+              <span>🎯</span>
+              <span className="font-black">{detectionCount}</span>
+            </span>
+
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-1 text-white/90">
+              <span>👤</span>
+              <span className="font-black">{peopleCount}</span>
+            </span>
+
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-1 text-white/90">
+              <span>🎒</span>
+              <span className="font-black">{bagCount}</span>
+            </span>
+
+            <span className="text-white/50">|</span>
+            <span className="flex items-center gap-1 text-white/90">
+              <span>🚗</span>
+              <span className="font-black">{carCount}</span>
+            </span>
           </div>
 
           {/* Floating Violation Alerts */}
@@ -684,13 +656,7 @@ const Dashboard = () => {
             </div>
           )}
 
-          {/* Recording Indicator */}
-          <div className="absolute top-4 right-4 z-30 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 backdrop-blur-xl">
-            <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.3)]"></div>
-            <span className="text-[10px] font-semibold text-white uppercase tracking-[0.22em]">
-              {t("common.recording")}
-            </span>
-          </div>
+          {/* Recording indicator removed from overlay per request */}
         </div>
 
         {/* Camera Strip */}
