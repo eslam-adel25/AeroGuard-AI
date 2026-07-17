@@ -366,25 +366,8 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-ag-dark text-ag-primary p-2 md:p-3 font-sans overflow-hidden">
-      {/* Compact Header (reduced height for camera-first UX) */}
-      <header className="h-12 md:h-14 flex items-center justify-between rounded-lg bg-ag-card/45 backdrop-blur-xl border border-white/5 shadow-lg px-3 md:px-4 mb-2">
-        <div className="flex items-center gap-3 md:gap-4 min-w-0">
-          <div className="min-w-0 flex items-center gap-3">
-            <h1 className="text-sm md:text-base font-bold tracking-tight text-white leading-none">
-              {t("dashboard.monitoringTitle")}
-            </h1>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-ag-success rounded-full animate-pulse" />
-              <p className="text-[10px] text-ag-success font-semibold uppercase truncate">
-                {t("dashboard.secureNodeActive")}
-              </p>
-            </div>
-          </div>
-        </div>
-      </header>
-
       {/* Camera-first Layout */}
-      <div className="grid grid-rows-[minmax(0,1fr)_auto] gap-2 h-[calc(100vh-3.2rem)] min-h-0">
+      <div className="grid grid-rows-[minmax(0,1fr)_auto] gap-2 h-[calc(100vh-1.5rem)] min-h-0">
         <div
           ref={videoContainerRef}
           className="relative group rounded-lg overflow-hidden border border-white/8 shadow-[0_18px_60px_rgba(0,0,0,0.45)] bg-black ring-1 ring-white/8 min-h-0"
