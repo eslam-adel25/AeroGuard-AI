@@ -107,10 +107,26 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
 
+    if ai_engine is not None:
+        ai_engine.stop_all_other_cameras(cam.camera_id)
+        await asyncio.sleep(0.05)
+
     cam.status = "Processing"
     db.commit()
     background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
     return {"status": "started", "camera_id": str(cam.camera_id)}
+
+
+@router.post("/{camera_id}/stop")
+async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    cam = _get_camera_for_user(db, camera_id, current_user)
+    if ai_engine is None:
+        raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
+
+    ai_engine.stop_camera(cam.camera_id)
+    cam.status = "Offline"
+    db.commit()
+    return {"status": "stopped", "camera_id": str(cam.camera_id)}
 
 # 4. جلب الكاميرات
 @router.get("/", response_model=list[CameraResponse])

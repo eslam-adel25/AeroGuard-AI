@@ -81,6 +81,15 @@ const Dashboard = () => {
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null);
 
   // --- AI Operations ---
+  const stopCameraSession = useCallback(async (id: string | null) => {
+    if (!id) return;
+    try {
+      await cameraService.stop(id);
+    } catch {
+      console.log("AI stopping...");
+    }
+  }, []);
+
   const startCameraAI = useCallback(async (id: string) => {
     setCameraStatus("Processing");
     try {
@@ -89,6 +98,25 @@ const Dashboard = () => {
       console.log("AI initializing...");
     }
   }, []);
+
+  const handleCameraSelection = useCallback(
+    async (id: string, shouldStart: boolean = true) => {
+      const previousCamera = selectedCameraRef.current;
+      setSelectedCamera(id);
+      selectedCameraRef.current = id;
+
+      if (previousCamera && previousCamera !== id) {
+        await stopCameraSession(previousCamera);
+      }
+
+      if (shouldStart) {
+        await startCameraAI(id);
+      } else {
+        setCameraStatus("Offline");
+      }
+    },
+    [startCameraAI, stopCameraSession],
+  );
 
   useEffect(() => {
     selectedCameraRef.current = selectedCamera;
@@ -166,8 +194,7 @@ const Dashboard = () => {
         const data = res.data as CameraData[];
         setCameras(data);
         if (data.length > 0) {
-          setSelectedCamera(data[0].camera_id);
-          startCameraAI(data[0].camera_id);
+          await handleCameraSelection(data[0].camera_id, true);
         }
       } catch {
         console.error("Link failed");
@@ -178,7 +205,7 @@ const Dashboard = () => {
     return () => {
       socket.close();
     };
-  }, [startCameraAI]);
+  }, [handleCameraSelection]);
 
   // --- Control Functions ---
   const toggleFullscreen = () => {
@@ -626,7 +653,19 @@ const Dashboard = () => {
             {/* Compact Control Bar */}
             <div className="absolute left-1/2 bottom-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 shadow-md backdrop-blur-lg opacity-95 transition-all duration-250 group-hover:scale-[1.02]">
               <button
-                onClick={() => setIsPaused(!isPaused)}
+                onClick={async () => {
+                  if (isPaused) {
+                    setIsPaused(false);
+                    if (selectedCamera) {
+                      await startCameraAI(selectedCamera);
+                    }
+                  } else {
+                    setIsPaused(true);
+                    if (selectedCamera) {
+                      await stopCameraSession(selectedCamera);
+                    }
+                  }
+                }}
                 className="p-2.5 bg-white/6 hover:bg-ag-danger rounded-full text-white transition-transform hover:scale-105 cursor-pointer"
               >
                 {isPaused ? (
@@ -795,10 +834,18 @@ const Dashboard = () => {
             {cameras.map((cam) => (
               <button
                 key={cam.camera_id}
-                onClick={() => {
-                  setSelectedCamera(cam.camera_id);
+                onClick={async () => {
+                  if (cam.camera_id === selectedCamera) {
+                    return;
+                  }
+
+                  const shouldStart = !isPaused;
                   setIsPaused(false);
-                  startCameraAI(cam.camera_id);
+                  await handleCameraSelection(cam.camera_id, shouldStart);
+
+                  if (!shouldStart) {
+                    setIsPaused(true);
+                  }
                 }}
                 className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest cursor-pointer
                     ${

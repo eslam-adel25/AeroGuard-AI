@@ -923,6 +923,14 @@ class AIProcessor:
     def stop_camera(self, camera_id):
         self._stop_flags[str(camera_id)] = True
 
+    def stop_all_other_cameras(self, keep_camera_id):
+        current_key = str(keep_camera_id)
+        with self._active_camera_lock:
+            camera_ids = [camera_id for camera_id in list(self._active_cameras) if str(camera_id) != current_key]
+
+        for camera_id in camera_ids:
+            self.stop_camera(camera_id)
+
 
 # تصدير نسخة المحرك الموحدة
 

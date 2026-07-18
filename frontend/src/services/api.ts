@@ -178,6 +178,8 @@ export const cameraService = {
 
   start: (id: string) => api.post(`/cameras/${id}/start`),
 
+  stop: (id: string) => api.post(`/cameras/${id}/stop`),
+
   getZones: (id: string) => api.get(`/cameras/${id}/zones`),
 
   delete: (id: string) => api.delete(`/cameras/${id}`),
