@@ -17,6 +17,32 @@ from ..websocket.manager import manager
 from .tracker import TrackerManager
 from ..services.ai_service import AIService
 
+
+def build_detection_record(camera_id, owner_id, detection_type, confidence, status=None):
+    priority = "Medium"
+    is_violation = False
+    violation_type = None
+
+    if status == "DANGER":
+        priority = "Critical"
+        is_violation = True
+        violation_type = "DANGER"
+    elif status == "WARNING":
+        priority = "High"
+        is_violation = True
+        violation_type = "WARNING"
+
+    return Detection(
+        camera_id=camera_id,
+        owner_id=owner_id,
+        detection_type=detection_type,
+        confidence=float(confidence or 0),
+        priority=priority,
+        is_violation=is_violation,
+        violation_type=violation_type,
+    )
+
+
 class AIProcessor:
     def __init__(self, model_path: str):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
@@ -38,6 +64,7 @@ class AIProcessor:
         self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
         self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
         self.active_critical_alerts = {}  # camera_id -> [alert_timestamps]
+        self._detection_persist_cooldown = {}  # key -> last persisted timestamp
         self._stop_flags = {}
         self._active_cameras = set()
         self._active_camera_lock = threading.Lock()
@@ -99,6 +126,27 @@ class AIProcessor:
         alerts.append(time.time())
         now = time.time()
         self.active_critical_alerts[camera_key] = [ts for ts in alerts if now - ts < 5]
+
+    def _persist_detection(self, db_session, camera_id, owner_id, detection_type, confidence, track_id, status=None):
+        if not owner_id:
+            return None
+
+        key = f"{str(camera_id)}:{str(track_id)}:{(detection_type or '').lower()}"
+        now = time.time()
+        last_persisted = self._detection_persist_cooldown.get(key, 0)
+        if now - last_persisted < 5:
+            return None
+
+        self._detection_persist_cooldown[key] = now
+        repo = DetectionRepository(db_session)
+        detection = build_detection_record(
+            camera_id=camera_id,
+            owner_id=owner_id,
+            detection_type=detection_type,
+            confidence=confidence,
+            status=status,
+        )
+        return repo.save_detection(detection)
 
     def update_config(self, settings_model: SystemSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
@@ -569,6 +617,9 @@ class AIProcessor:
                     print(f"⚠️ [{camera_id}] failed to reload restricted zones: {type(zone_reload_exc).__name__}: {zone_reload_exc}")
                     local_db.rollback()
 
+                cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
+                camera_owner_id = getattr(cam, 'owner_id', None) if cam else None
+
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
                         print(f"📌 [{camera_id}] track loop break due to max_objs={max_objs}")
@@ -584,8 +635,8 @@ class AIProcessor:
                     display_label = "Person" if label_name == "person" else "Baggage"
                     display_id = display_ids.get(obj_id, 0)
                     if label_name in {"bag", "backpack", "suitcase"}:
-                        owner_id = bag_owner_map.get(obj_id)
-                        overlay_label = f"Owner:{owner_id:03d} Bag" if owner_id is not None else f"Bag"
+                        overlay_owner_id = bag_owner_map.get(obj_id)
+                        overlay_label = f"Owner:{overlay_owner_id:03d} Bag" if overlay_owner_id is not None else f"Bag"
                     else:
                         overlay_label = self._format_overlay_label(display_id, label_name)
 
@@ -754,6 +805,17 @@ class AIProcessor:
 
                     self.object_history[obj_id] = base_point
 
+                    # Persist detections so analytics has real data even for non-alert objects
+                    self._persist_detection(
+                        local_db,
+                        camera_id,
+                        camera_owner_id,
+                        display_label,
+                        float(conf),
+                        obj_id,
+                        status,
+                    )
+
                     # Abandoned bag detection
                     if label_name in {"bag", "backpack", "suitcase"}:
                         cam_bags = self.bag_tracker.setdefault(str(camera_id), {})
@@ -838,19 +900,6 @@ class AIProcessor:
                     if status in ["DANGER", "WARNING"]:
                         alert_key = f"{camera_id}_{obj_id}_{status}"
                         if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                            # attach owner based on camera
-                            cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
-                            owner_id = getattr(cam, 'owner_id', None) if cam else None
-                            new_det = Detection(
-                                camera_id=camera_id,
-                                owner_id=owner_id,
-                                detection_type=display_label,
-                                confidence=float(conf),
-                                priority="Critical" if status == "DANGER" else "High",
-                                is_violation=True,
-                                violation_type=status
-                            )
-                            repo.save_detection(new_det)
                             # also register AIEvent and broadcast
                             try:
                                 # capture a quick JPEG of the annotated frame
@@ -866,7 +915,7 @@ class AIProcessor:
                                 severity="Critical" if status == "DANGER" else "High",
                                 confidence=float(conf),
                                 track_id=str(obj_id),
-                                user_id=owner_id,
+                                user_id=camera_owner_id,
                                 metadata={"bbox": [x1, y1, x2, y2]},
                                 screenshot_bytes=img_bytes,
                             )
