@@ -300,7 +300,23 @@ class ReportService:
                 }
             )
 
-        active_cameras = sum(1 for c in cameras if (c.get("status") or "").lower() == "online")
+        active_cameras = sum(1 for c in cameras if (c.get("status") or "").lower() in {"online", "running", "processing", "active"})
+
+        accuracy = None
+        if total:
+            accuracy = round((1 - (violations / total)) * 100, 2) if total else None
+
+        zone_frequency_rows = db.query(
+            Camera.camera_name,
+            func.count(Detection.detection_id).label("count"),
+        ).join(
+            Detection,
+            Camera.camera_id == Detection.camera_id,
+        ).filter(and_(*filters)).group_by(Camera.camera_name).order_by(func.count(Detection.detection_id).desc()).all()
+
+        zone_frequency = [
+            {"name": row.camera_name, "count": int(row.count or 0)} for row in zone_frequency_rows
+        ]
 
         return {
             "summary": {
@@ -316,6 +332,10 @@ class ReportService:
                 "high_alerts": severity_counts["High"],
                 "medium_alerts": severity_counts["Medium"],
                 "low_alerts": severity_counts["Low"],
+                "fire": categorized_counts["fire"] + categorized_counts["smoke"],
+                "weapons": categorized_counts["weapons"],
+                "persons": categorized_counts["persons"],
+                "vehicles": categorized_counts["vehicles"],
                 "fire_detections": categorized_counts["fire"],
                 "smoke_detections": categorized_counts["smoke"],
                 "weapon_detections": categorized_counts["weapons"],
@@ -330,7 +350,7 @@ class ReportService:
                 "min_confidence": float(min_conf),
                 "average_confidence": round(float(avg_conf), 2),
                 "active_cameras": active_cameras,
-                "ai_accuracy": None,
+                "ai_accuracy": accuracy,
             },
             "details": details,
             "charts": {
@@ -340,6 +360,7 @@ class ReportService:
                 "top_cameras": top_cameras,
                 "top_detection_types": top_detection_types,
                 "heatmap": heatmap,
+                "frequency_by_zone": zone_frequency,
             },
             "recent_alerts": recent_alerts,
             "cameras": cameras,

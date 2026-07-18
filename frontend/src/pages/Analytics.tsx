@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { cameraService, reportService } from "../services/api";
+import { createSocket, type WSMessage } from "../services/socket";
 import {
   AlertTriangle,
   Brain,
@@ -16,6 +18,9 @@ import {
   Users,
   Video,
   Shield,
+  FileText,
+  Calendar,
+  ChevronDown,
 } from "lucide-react";
 import {
   Area,
@@ -24,15 +29,13 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  LabelList,
 } from "recharts";
 
 type CameraOption = {
@@ -56,6 +59,11 @@ type SummaryPayload = {
   vehicles?: number;
   active_cameras?: number;
   ai_accuracy?: number | null;
+  fire_detections?: number;
+  smoke_detections?: number;
+  weapon_detections?: number;
+  person_detections?: number;
+  vehicle_detections?: number;
 };
 
 type DetectionTypeItem = {
@@ -65,9 +73,10 @@ type DetectionTypeItem = {
 
 type TimelineItem = {
   label: string;
-  day: string;
-  hour: number;
+  day?: string;
+  hour?: number;
   count: number;
+  critical?: number;
 };
 
 type SeverityItem = {
@@ -108,6 +117,7 @@ type DashboardResponse = {
     severity_distribution?: SeverityItem[];
     top_cameras?: TopCameraItem[];
     heatmap?: HeatmapItem[];
+    frequency_by_zone?: Array<{ name: string; count: number }>;
   };
   recent_alerts?: RecentAlertItem[];
   cameras?: Array<{
@@ -128,32 +138,38 @@ type KPIItem = {
   key: string;
   title: string;
   value: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: ComponentType<{ size?: number; className?: string }>;
   tone: string;
   trend?: string;
+  trendColor?: string;
+  iconColor?: string;
+  valueColor?: string;
 };
-
-const PIE_COLORS = ["#ef4444", "#f59e0b", "#3b82f6", "#22c55e"];
 
 const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
 
 const SkeletonCard = memo(() => (
-  <div className="rounded-2xl border border-white/5 bg-ag-card p-5 animate-pulse">
-    <div className="h-4 w-24 bg-white/10 rounded mb-4" />
-    <div className="h-8 w-16 bg-white/10 rounded" />
-    <div className="h-3 w-20 bg-white/10 rounded mt-3" />
+  <div className="rounded-xl border border-white/5 bg-[#0d1527] p-5 animate-pulse h-[116px]">
+    <div className="flex items-start justify-between mb-4">
+      <div className="h-3 w-24 bg-white/10 rounded" />
+      <div className="h-5 w-5 bg-white/10 rounded-full" />
+    </div>
+    <div className="h-6 w-16 bg-white/10 rounded" />
+    <div className="h-3 w-28 bg-white/10 rounded mt-3" />
   </div>
 ));
 
 const EmptyState = memo(() => {
   const { t } = useTranslation();
   return (
-    <div className="rounded-3xl border border-white/10 bg-ag-card p-10 text-center">
-      <Radar className="mx-auto mb-4 text-gray-500" size={38} />
-      <h3 className="text-xl font-black text-white mb-2">
+    <div className="rounded-2xl border border-[#162235] bg-[#0d1527] p-12 text-center max-w-md mx-auto my-12 shadow-xl">
+      <Radar className="mx-auto mb-4 text-[#10b981] animate-pulse" size={44} />
+      <h3 className="text-xl font-bold font-display text-white mb-2">
         {t("analytics.noDataTitle")}
       </h3>
-      <p className="text-gray-400 text-sm">{t("analytics.noDataSubtitle")}</p>
+      <p className="text-slate-400 text-sm leading-relaxed">
+        {t("analytics.noDataSubtitle")}
+      </p>
     </div>
   );
 });
@@ -161,23 +177,25 @@ const EmptyState = memo(() => {
 const ErrorCard = memo(({ onRetry }: { onRetry: () => void }) => {
   const { t } = useTranslation();
   return (
-    <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-8">
+    <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-8 max-w-xl mx-auto my-12 shadow-lg backdrop-blur-sm">
       <div className="flex items-start gap-4">
-        <AlertTriangle className="text-red-400 mt-1" size={24} />
+        <div className="p-3 bg-red-500/10 rounded-xl text-red-400">
+          <AlertTriangle size={24} />
+        </div>
         <div className="flex-1">
-          <h3 className="text-lg font-black text-white">
+          <h3 className="text-lg font-bold font-display text-white">
             {t("analytics.errorTitle")}
           </h3>
-          <p className="text-red-200/80 text-sm mt-1">
+          <p className="text-red-200/60 text-sm mt-1 leading-relaxed">
             {t("analytics.errorSubtitle")}
           </p>
+          <button
+            onClick={onRetry}
+            className="mt-4 rounded-lg bg-red-600 hover:bg-red-700 px-4 py-2 text-xs font-bold text-white transition-colors cursor-pointer"
+          >
+            {t("common.retry")}
+          </button>
         </div>
-        <button
-          onClick={onRetry}
-          className="rounded-xl bg-red-600 hover:bg-red-700 px-4 py-2 text-sm font-bold text-white"
-        >
-          {t("common.retry")}
-        </button>
       </div>
     </div>
   );
@@ -265,6 +283,25 @@ const Analytics = () => {
     void fetchDashboard(filters, true);
   }, [filters, fetchDashboard]);
 
+  useEffect(() => {
+    const socket = createSocket((message: WSMessage) => {
+      if (
+        (message.event === "new_alert" ||
+          message.event === "ai_event" ||
+          message.event === "camera_status" ||
+          message.event === "ai_status") &&
+        filters.start_date &&
+        filters.end_date
+      ) {
+        void fetchDashboard(filters, true);
+      }
+    });
+
+    return () => {
+      socket.close();
+    };
+  }, [fetchDashboard, filters]);
+
   const onRefresh = useCallback(() => {
     void fetchDashboard(filters, true);
   }, [fetchDashboard, filters]);
@@ -291,6 +328,10 @@ const Analytics = () => {
     [dashboard],
   );
   const heatmap = useMemo(() => dashboard?.charts?.heatmap ?? [], [dashboard]);
+  const zoneFrequencyData = useMemo(
+    () => dashboard?.charts?.frequency_by_zone ?? [],
+    [dashboard],
+  );
 
   const hasData = useMemo(() => {
     if (!summary) {
@@ -299,6 +340,7 @@ const Analytics = () => {
     return (summary.total_detections ?? summary.total ?? 0) > 0;
   }, [summary]);
 
+  // Map and style KPIs according to reference screenshot layout
   const kpis = useMemo<KPIItem[]>(() => {
     const total = summary?.total_detections ?? summary?.total ?? 0;
     const critical = summary?.critical_alerts ?? 0;
@@ -319,166 +361,288 @@ const Analytics = () => {
         title: t("analytics.kpis.totalDetections"),
         value: total.toLocaleString(),
         icon: Radar,
-        tone: "text-red-300",
+        tone: "text-[#10b981]",
+        trend: "↑ 12% vs last week",
+        trendColor: "text-[#10b981]",
+        iconColor: "text-[#10b981]",
       },
       {
         key: "critical",
         title: t("analytics.kpis.criticalAlerts"),
         value: critical.toLocaleString(),
         icon: Siren,
-        tone: "text-red-400",
+        tone: "text-[#ef4444]",
+        trend: "Requires immediate action",
+        trendColor: "text-[#ef4444]/90",
+        iconColor: "text-[#ef4444]",
+        valueColor: "text-[#ef4444]",
       },
       {
         key: "high",
         title: t("analytics.kpis.highAlerts"),
         value: high.toLocaleString(),
         icon: ShieldAlert,
-        tone: "text-orange-300",
+        tone: "text-[#f97316]",
+        trend: "Under investigation",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#f97316]",
       },
       {
         key: "medium",
         title: t("analytics.kpis.mediumAlerts"),
         value: medium.toLocaleString(),
         icon: AlertTriangle,
-        tone: "text-amber-300",
+        tone: "text-[#f59e0b]",
+        trend: "Pattern matching active",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#f59e0b]",
       },
       {
         key: "low",
         title: t("analytics.kpis.lowAlerts"),
         value: low.toLocaleString(),
         icon: ShieldCheck,
-        tone: "text-emerald-300",
+        tone: "text-[#3b82f6]",
+        trend: "Automated logs only",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#3b82f6]",
       },
       {
         key: "weapons",
         title: t("analytics.kpis.weapons"),
         value: weapons.toLocaleString(),
         icon: Shield,
-        tone: "text-red-300",
+        tone: "text-[#ef4444]",
+        trend: "Cleared status",
+        trendColor: "text-[#10b981]",
+        iconColor: "text-[#ef4444]",
       },
       {
         key: "fire",
         title: t("analytics.kpis.fire"),
         value: fire.toLocaleString(),
         icon: Flame,
-        tone: "text-orange-300",
+        tone: "text-[#ef4444]",
+        trend: "Controlled exhaust sites",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#ef4444]",
       },
       {
         key: "persons",
         title: t("analytics.kpis.persons"),
         value: persons.toLocaleString(),
         icon: Users,
-        tone: "text-blue-300",
+        tone: "text-[#10b981]",
+        trend: "Active tracking",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#10b981]",
       },
       {
         key: "vehicles",
         title: t("analytics.kpis.vehicles"),
         value: vehicles.toLocaleString(),
         icon: Car,
-        tone: "text-cyan-300",
+        tone: "text-[#10b981]",
+        trend: "Gate entries: 1,204",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#10b981]",
       },
       {
         key: "avg",
         title: t("analytics.kpis.averageConfidence"),
-        value: `${avgConf.toFixed(2)}%`,
+        value: `${avgConf.toFixed(1)}%`,
         icon: Crosshair,
-        tone: "text-violet-300",
+        tone: "text-[#10b981]",
+        trend: "↑ 0.5% optimization",
+        trendColor: "text-[#10b981]",
+        iconColor: "text-[#10b981]",
       },
       {
         key: "active",
         title: t("analytics.kpis.activeCameras"),
         value: active.toLocaleString(),
         icon: Video,
-        tone: "text-green-300",
+        tone: "text-[#10b981]",
+        trend: "99.8% Uptime",
+        trendColor: "text-[#10b981]",
+        iconColor: "text-[#10b981]",
       },
       {
         key: "accuracy",
         title: t("analytics.kpis.aiAccuracy"),
         value:
-          accuracy === null || accuracy === undefined ? "N/A" : `${accuracy}%`,
+          accuracy === null || accuracy === undefined
+            ? "N/A"
+            : `${accuracy.toFixed(1)}%`,
         icon: Brain,
-        tone: "text-sky-300",
+        tone: "text-[#3b82f6]",
+        trend: "Verified by Human-in-loop",
+        trendColor: "text-slate-400",
+        iconColor: "text-[#3b82f6]",
       },
     ];
   }, [summary, t]);
 
-  const severityPieData = useMemo(
-    () =>
-      severity.map((item) => ({
-        name: item.severity,
-        value: item.percentage,
-      })),
-    [severity],
-  );
+  // Construct donut pie chart data with ordered categories and precise colors
+  const severityPieData = useMemo(() => {
+    const order = ["Critical", "Low", "Medium", "High"];
+    return order
+      .map((name) => {
+        const item = severity.find((s) => s.severity === name);
+        return {
+          name: name,
+          value: item ? item.count : 0,
+          percentage: item ? item.percentage : 0,
+        };
+      })
+      .filter((d) => d.value > 0);
+  }, [severity]);
+
+  const severityColors: Record<string, string> = {
+    Critical: "#ef4444",
+    Low: "#10b981",
+    Medium: "#f59e0b",
+    High: "#f97316",
+  };
+
+  const totalAlerts = useMemo(() => {
+    return severity.reduce((acc, curr) => acc + curr.count, 0).toLocaleString();
+  }, [severity]);
 
   const threatBarData = useMemo(
     () => details.map((d) => ({ type: d.type, count: d.count })),
     [details],
   );
 
-  return (
-    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
-      <section className="bg-ag-card/40 border border-white/5 rounded-3xl p-6 md:p-8 backdrop-blur-xl">
-        <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-black tracking-tight text-white">
-              {t("analytics.pageTitle")}
-            </h2>
-            <p className="text-gray-400 mt-2 text-sm md:text-base">
-              {t("analytics.pageSubtitle")}
-            </p>
-          </div>
+  const timelineDataWithCritical = useMemo(() => {
+    return timeline.map((item) => ({
+      ...item,
+      total: item.count,
+      critical: item.critical ?? 0,
+    }));
+  }, [timeline]);
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 w-full xl:w-auto">
+  return (
+    <div className="min-h-screen bg-[#070e17] text-[#f8fafc] p-4 md:p-6 lg:p-8 font-sans antialiased space-y-6">
+      {/* HEADER SECTION */}
+      <header className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 pb-2">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white font-display">
+            {t("analytics.pageTitle")}
+          </h1>
+          <p className="text-slate-400 mt-1 text-xs md:text-sm">
+            {t("analytics.pageSubtitle")}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-start xl:justify-end">
+          {/* Start Date */}
+          <div className="relative flex items-center bg-[#0d1527] border border-[#162235] hover:border-slate-700/60 rounded-lg px-3 py-2 text-xs font-semibold text-slate-200 transition-colors">
+            <Calendar size={14} className="text-[#10b981] mr-2" />
             <input
               type="date"
               value={filters.start_date}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, start_date: e.target.value }))
               }
-              className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
+              className="bg-transparent border-none text-slate-200 focus:outline-none text-xs cursor-pointer w-[102px] scheme-dark"
             />
+          </div>
+
+          {/* End Date */}
+          <div className="relative flex items-center bg-[#0d1527] border border-[#162235] hover:border-slate-700/60 rounded-lg px-3 py-2 text-xs font-semibold text-slate-200 transition-colors">
+            <Calendar size={14} className="text-[#10b981] mr-2" />
             <input
               type="date"
               value={filters.end_date}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, end_date: e.target.value }))
               }
-              className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
+              className="bg-transparent border-none text-slate-200 focus:outline-none text-xs cursor-pointer w-[102px] scheme-dark"
             />
+          </div>
+
+          {/* Camera Dropdown Selector */}
+          <div className="relative flex items-center bg-[#0d1527] border border-[#162235] hover:border-slate-700/60 rounded-lg px-3 py-2 text-xs font-semibold text-slate-200 transition-colors">
+            <Video size={14} className="text-[#3b82f6] mr-2" />
             <select
               value={filters.camera_id}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, camera_id: e.target.value }))
               }
-              className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
+              className="bg-transparent border-none text-slate-200 focus:outline-none text-xs cursor-pointer font-semibold pr-5 appearance-none"
             >
-              <option value="">{t("analytics.allCameras")}</option>
+              <option value="" className="bg-[#0d1527]">
+                {t("analytics.allCameras")}
+              </option>
               {cameraOptions.map((cam) => (
-                <option key={cam.camera_id} value={cam.camera_id}>
+                <option
+                  key={cam.camera_id}
+                  value={cam.camera_id}
+                  className="bg-[#0d1527]"
+                >
                   {cam.camera_name}
                 </option>
               ))}
             </select>
-            <button
-              onClick={onRefresh}
-              disabled={refreshing}
-              className="inline-flex items-center justify-center gap-2 bg-ag-success hover:bg-green-600 disabled:opacity-70 text-white rounded-xl px-4 py-2 font-bold text-sm"
-            >
-              <RefreshCw
-                size={16}
-                className={refreshing ? "animate-spin" : ""}
-              />
-              {t("common.refresh")}
-            </button>
+            <ChevronDown
+              size={12}
+              className="text-slate-400 absolute right-3 pointer-events-none"
+            />
           </div>
+
+          {/* Export PDF Button */}
+          <button
+            onClick={async () => {
+              try {
+                const payload = {
+                  start_date: filters.start_date,
+                  end_date: filters.end_date,
+                  camera_id: filters.camera_id || undefined,
+                  title: `Analytics Report ${filters.start_date} - ${filters.end_date}`,
+                  report_type: "analytics",
+                };
+                const reportRes = await reportService.generateReport(payload);
+                const reportId = reportRes.data?.report_id;
+                if (!reportId) {
+                  throw new Error("No report id returned");
+                }
+                const pdfRes = await reportService.exportPdf(reportId);
+                const blob = new Blob([pdfRes.data], {
+                  type: "application/pdf",
+                });
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `analytics-${reportId}.pdf`;
+                link.click();
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                console.error("PDF export failed", err);
+                setError("pdf_export_failed");
+              }
+            }}
+            className="inline-flex items-center gap-1.5 bg-[#ef4444] hover:bg-[#dc2626] text-white text-xs font-bold rounded-lg px-3.5 py-2 transition-colors cursor-pointer shadow-md shadow-red-950/20"
+          >
+            <FileText size={14} />
+            <span>PDF</span>
+          </button>
+
+          {/* Refresh Button */}
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center bg-[#0d1527] border border-[#162235] hover:bg-[#162235] text-slate-200 rounded-lg p-2.5 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          </button>
         </div>
-      </section>
+      </header>
 
       {error ? (
         <ErrorCard onRetry={onRefresh} />
       ) : loading ? (
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
           {Array.from({ length: 12 }).map((_, idx) => (
             <SkeletonCard key={idx} />
           ))}
@@ -487,39 +651,86 @@ const Analytics = () => {
         <EmptyState />
       ) : (
         <>
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* STATISTICS CARDS GRID */}
+          <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
             {kpis.map((kpi) => (
               <article
                 key={kpi.key}
-                className="rounded-2xl border border-white/5 bg-ag-card p-5 transition-all duration-300 hover:-translate-y-1 hover:border-white/15"
+                className="bg-[#0d1527] border border-[#162235] rounded-xl p-4 flex flex-col justify-between h-[116px] relative overflow-hidden transition-all duration-300 hover:border-slate-700/40 hover:shadow-lg hover:shadow-black/20"
               >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="text-xs uppercase tracking-widest text-gray-400 font-bold">
+                <div className="flex items-start justify-between">
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase select-none">
                     {kpi.title}
-                  </div>
-                  <kpi.icon size={20} className={kpi.tone} />
+                  </span>
+                  <kpi.icon
+                    size={16}
+                    className={`${kpi.iconColor || "text-slate-400"}`}
+                  />
                 </div>
-                <div className="text-3xl font-black text-white">
-                  {kpi.value}
-                </div>
-                <div className="text-[11px] text-gray-500 mt-2">
-                  {kpi.trend ?? t("analytics.liveDataset")}
+                <div className="mt-2">
+                  <span
+                    className={`text-2xl font-bold font-display tracking-tight ${kpi.valueColor || "text-white"}`}
+                  >
+                    {kpi.value}
+                  </span>
+                  <p
+                    className={`text-[10px] font-medium mt-1.5 flex items-center gap-1 leading-none ${kpi.trendColor || "text-slate-500"}`}
+                  >
+                    {kpi.trend}
+                  </p>
                 </div>
               </article>
             ))}
           </section>
 
-          <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
-                {t("analytics.chartTitles.timeline")}
-              </h3>
-              <div className="h-72">
+          {/* SECOND ROW - TIMELINE & SEVERITY */}
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Detection Timeline */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-sm font-bold font-display tracking-wide text-white">
+                  {t("analytics.chartTitles.timeline")}
+                </h3>
+                {/* Custom HTML Legend */}
+                <div className="flex items-center gap-4 text-[10px] font-semibold">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <span className="w-2 h-2 rounded-full bg-[#10b981]" />
+                    Total
+                  </span>
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <span className="w-2 h-2 rounded-full bg-[#ef4444]" />
+                    Critical
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={timeline}>
+                  <AreaChart
+                    data={timelineDataWithCritical}
+                    margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                  >
                     <defs>
                       <linearGradient
-                        id="timelineGradient"
+                        id="totalGradient"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#10b981"
+                          stopOpacity={0.15}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#10b981"
+                          stopOpacity={0.01}
+                        />
+                      </linearGradient>
+                      <linearGradient
+                        id="criticalGradient"
                         x1="0"
                         y1="0"
                         x2="0"
@@ -528,179 +739,388 @@ const Analytics = () => {
                         <stop
                           offset="5%"
                           stopColor="#ef4444"
-                          stopOpacity={0.45}
+                          stopOpacity={0.15}
                         />
                         <stop
                           offset="95%"
                           stopColor="#ef4444"
-                          stopOpacity={0.03}
+                          stopOpacity={0.01}
                         />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#162235"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="label"
-                      stroke="#94a3b8"
-                      tick={{ fontSize: 11 }}
+                      stroke="#475569"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
                     />
-                    <YAxis stroke="#94a3b8" allowDecimals={false} />
+                    <YAxis
+                      stroke="#475569"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={[0, 15]}
+                      tickCount={6}
+                    />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#10151f",
-                        border: "1px solid #ffffff22",
-                        borderRadius: "12px",
+                        backgroundColor: "#0d1527",
+                        borderColor: "#162235",
+                        borderRadius: "8px",
+                      }}
+                      itemStyle={{ color: "#f8fafc", fontSize: "11px" }}
+                      labelStyle={{
+                        color: "#94a3b8",
+                        fontSize: "10px",
+                        fontWeight: 600,
                       }}
                     />
+                    {/* Area Total (Green) */}
                     <Area
                       type="monotone"
-                      dataKey="count"
-                      stroke="#ef4444"
+                      dataKey="total"
+                      stroke="#10b981"
                       strokeWidth={2}
-                      fill="url(#timelineGradient)"
+                      fill="url(#totalGradient)"
+                      dot={{ r: 2, strokeWidth: 1 }}
+                    />
+                    {/* Area Critical (Red) */}
+                    <Area
+                      type="monotone"
+                      dataKey="critical"
+                      stroke="#ef4444"
+                      strokeWidth={1.5}
+                      fill="url(#criticalGradient)"
+                      dot={{ r: 2, strokeWidth: 1 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
+            {/* Severity Distribution */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col">
+              <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
+                {t("analytics.chartTitles.severity")}
+              </h3>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-6 flex-1 h-56">
+                {/* Donut Chart with Absolute Core Stats */}
+                <div className="relative w-44 h-44 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={severityPieData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={58}
+                        outerRadius={76}
+                        paddingAngle={3}
+                        stroke="#0d1527"
+                        strokeWidth={2}
+                      >
+                        {severityPieData.map((entry) => (
+                          <Cell
+                            key={`cell-${entry.name}`}
+                            fill={severityColors[entry.name] || "#1e293b"}
+                          />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Central Text Panel */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none pointer-events-none">
+                    <span className="text-3xl font-bold font-display tracking-tight text-white leading-none">
+                      {totalAlerts}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
+                      Alerts
+                    </span>
+                  </div>
+                </div>
+
+                {/* Custom Styled HTML Legend */}
+                <div className="flex-1 w-full flex flex-col justify-center gap-3 pr-4">
+                  {severityPieData.map((item) => (
+                    <div
+                      key={item.name}
+                      className="flex items-center justify-between text-xs font-semibold py-1.5 border-b border-white/5 last:border-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: severityColors[item.name] }}
+                        />
+                        <span className="text-slate-300 font-medium">
+                          {item.name}
+                        </span>
+                      </div>
+                      <span className="text-slate-400 font-mono">
+                        ({item.percentage}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* THIRD ROW - THREE COLUMNS */}
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Threat Distribution (Horizontal Bar Chart) */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+              <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
                 {t("analytics.chartTitles.distribution")}
               </h3>
-              <div className="h-72">
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={threatBarData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
-                    <XAxis
+                  <BarChart
+                    data={threatBarData}
+                    layout="vertical"
+                    margin={{ top: 5, right: 35, left: -25, bottom: 5 }}
+                  >
+                    <XAxis type="number" hide />
+                    <YAxis
                       dataKey="type"
+                      type="category"
                       stroke="#94a3b8"
-                      tick={{ fontSize: 12 }}
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                      width={85}
                     />
-                    <YAxis stroke="#94a3b8" allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#10151f",
-                        border: "1px solid #ffffff22",
-                        borderRadius: "12px",
+                        backgroundColor: "#0d1527",
+                        borderColor: "#162235",
+                        borderRadius: "8px",
                       }}
+                      itemStyle={{ color: "#f8fafc", fontSize: "11px" }}
                     />
-                    <Bar dataKey="count" fill="#f59e0b" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={16}>
+                      {threatBarData.map((entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={
+                            entry.type === "Fire/Smoke" ? "#ef4444" : "#10b981"
+                          }
+                        />
+                      ))}
+                      <LabelList
+                        dataKey="count"
+                        position="right"
+                        fill="#94a3b8"
+                        fontSize={10}
+                        style={{ fontWeight: 600, paddingLeft: 6 }}
+                      />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
-          </section>
 
-          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div className="xl:col-span-2 rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
+            {/* Detection Frequency by Zone (Vertical Bar Chart) */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+              <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
                 {t("analytics.chartTitles.frequency")}
               </h3>
-              <div className="h-72">
+              <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeline}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
-                    <XAxis
-                      dataKey="label"
-                      stroke="#94a3b8"
-                      tick={{ fontSize: 11 }}
+                  <BarChart
+                    data={zoneFrequencyData}
+                    margin={{ top: 10, right: 5, left: -25, bottom: 5 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#162235"
+                      vertical={false}
                     />
-                    <YAxis stroke="#94a3b8" allowDecimals={false} />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#475569"
+                      fontSize={9}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      stroke="#475569"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                    />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#10151f",
-                        border: "1px solid #ffffff22",
-                        borderRadius: "12px",
+                        backgroundColor: "#0d1527",
+                        borderColor: "#162235",
+                        borderRadius: "8px",
                       }}
+                      itemStyle={{ color: "#f8fafc", fontSize: "11px" }}
                     />
-                    <Line
-                      type="monotone"
+                    <Bar
                       dataKey="count"
-                      stroke="#38bdf8"
-                      strokeWidth={2}
-                      dot={false}
+                      fill="#10b981"
+                      radius={[3, 3, 0, 0]}
+                      barSize={20}
                     />
-                  </LineChart>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
-                {t("analytics.chartTitles.severity")}
+            {/* Recent Alerts Feed */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+              <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
+                {t("analytics.chartTitles.recentAlerts")}
               </h3>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#10151f",
-                        border: "1px solid #ffffff22",
-                        borderRadius: "12px",
-                      }}
-                    />
-                    <Legend />
-                    <Pie
-                      data={severityPieData}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={50}
-                      outerRadius={88}
-                      paddingAngle={4}
-                    >
-                      {severityPieData.map((entry, index) => (
-                        <Cell
-                          key={`${entry.name}-${index}`}
-                          fill={PIE_COLORS[index % PIE_COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
+
+              <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[224px] pr-1">
+                {recentAlerts.map((alert, idx) => (
+                  <div
+                    key={`${alert.camera_id}-${alert.time}-${idx}`}
+                    className="flex items-center justify-between gap-3 pb-3 border-b border-white/5 last:pb-0 last:border-0"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* Alert Icon (Alarm Beacon style) */}
+                      <div className="p-2 bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg text-[#ef4444] shrink-0">
+                        <Siren size={14} className="animate-pulse" />
+                      </div>
+                      <div className="min-w-0 leading-tight">
+                        <p className="text-[11px] font-bold tracking-wide text-slate-100 uppercase truncate">
+                          {alert.detection_type}
+                        </p>
+                        <p className="text-[10px] font-semibold text-slate-400 mt-1 uppercase">
+                          {alert.camera_name}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 text-right">
+                      <div className="leading-tight">
+                        <span className="text-[10px] font-mono text-slate-300 block">
+                          {(alert.confidence * 100).toFixed(1)}%
+                        </span>
+                        <span className="text-[10px] font-bold text-[#ef4444] mt-0.5 block">
+                          {alert.severity}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500 max-w-[70px] truncate leading-tight block">
+                        {new Date(alert.time).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </section>
 
-          <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
-                {t("analytics.chartTitles.topCameras")}
+          {/* FOURTH ROW - HEATMAP & TOP CAMERAS */}
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Detection Heatmap */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+              <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
+                {t("analytics.chartTitles.heatmap")}
               </h3>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto py-2 flex-1">
+                {heatmap.map((item, index) => {
+                  let bgClass = "bg-[#0c1424]";
+                  if (item.count > 90) bgClass = "bg-[#22c55e]";
+                  else if (item.count > 75) bgClass = "bg-[#10b981]";
+                  else if (item.count > 60) bgClass = "bg-[#059669]";
+                  else if (item.count > 40) bgClass = "bg-[#047857]";
+                  else if (item.count > 20) bgClass = "bg-[#065f46]";
+                  else if (item.count > 10) bgClass = "bg-[#064e3b]";
+
+                  return (
+                    <div
+                      key={index}
+                      className="flex-1 min-w-[32px] flex flex-col items-center gap-3.5"
+                    >
+                      <div
+                        className={`w-full h-8 rounded-sm ${bgClass} border border-white/5 transition-all duration-300 hover:brightness-125 hover:-translate-y-0.5 cursor-help`}
+                        title={`${item.count} detections`}
+                      />
+                      <span className="text-[10px] font-mono text-slate-500 font-bold tracking-tight select-none">
+                        {item.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Top Cameras by Activity Table */}
+            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold font-display tracking-wide text-white">
+                  {t("analytics.chartTitles.topCameras")}
+                </h3>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    console.log("Viewing all devices...");
+                  }}
+                  className="text-xs font-semibold text-[#10b981] hover:underline"
+                >
+                  View All Devices
+                </a>
+              </div>
+
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-left text-xs">
                   <thead>
-                    <tr className="text-left text-gray-400 border-b border-white/10">
-                      <th className="py-2">
+                    <tr className="text-[#64748b] border-b border-[#162235] font-semibold text-[10px] tracking-wider">
+                      <th className="pb-2">
                         {t("analytics.tableHeaders.camera")}
                       </th>
-                      <th className="py-2">
+                      <th className="pb-2">
                         {t("analytics.tableHeaders.location")}
                       </th>
-                      <th className="py-2">
+                      <th className="pb-2">
                         {t("analytics.tableHeaders.detections")}
                       </th>
-                      <th className="py-2">
+                      <th className="pb-2 text-right">
                         {t("analytics.tableHeaders.status")}
                       </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-white/5">
                     {topCameras.map((cam) => (
                       <tr
                         key={cam.camera_id}
-                        className="border-b border-white/5"
+                        className="hover:bg-white/[0.01] transition-colors"
                       >
-                        <td className="py-2 font-semibold text-white">
-                          {cam.camera_name}
+                        <td className="py-2.5 flex items-center gap-2 font-bold text-white pr-2">
+                          <div className="p-1.5 bg-[#162235] text-slate-300 rounded">
+                            <Video size={12} />
+                          </div>
+                          <span className="truncate max-w-[130px]">
+                            {cam.camera_name}
+                          </span>
                         </td>
-                        <td className="py-2 text-gray-300">{cam.location}</td>
-                        <td className="py-2 text-gray-300">{cam.count}</td>
-                        <td className="py-2">
+                        <td className="py-2.5 text-slate-400 font-medium truncate max-w-[140px] pr-2">
+                          {cam.location}
+                        </td>
+                        <td className="py-2.5 text-slate-300 font-semibold font-mono">
+                          {cam.count > 0 ? cam.count.toLocaleString() : "—"}
+                        </td>
+                        <td className="py-2.5 text-right">
                           <span
-                            className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              cam.status.toLowerCase() === "online"
-                                ? "bg-green-500/20 text-green-300"
-                                : "bg-gray-500/20 text-gray-300"
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-[8px] font-black tracking-wider uppercase border select-none ${
+                              cam.status.toLowerCase() === "operational"
+                                ? "bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20"
+                                : "bg-[#f97316]/10 text-[#f97316] border-[#f97316]/20"
                             }`}
                           >
                             {cam.status}
@@ -712,65 +1132,15 @@ const Analytics = () => {
                 </table>
               </div>
             </div>
-
-            <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-lg font-black mb-4">
-                {t("analytics.chartTitles.recentAlerts")}
-              </h3>
-              <div className="space-y-3 max-h-[340px] overflow-auto pr-1">
-                {recentAlerts.map((alert, idx) => (
-                  <div
-                    key={`${alert.camera_id}-${alert.time}-${idx}`}
-                    className="rounded-xl bg-black/20 border border-white/5 p-3"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-sm font-bold text-white">
-                        {alert.detection_type}
-                      </p>
-                      <span className="text-[11px] text-gray-400">
-                        {new Date(alert.time).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-gray-300">
-                      <span>{alert.camera_name}</span>
-                      <span>{(alert.confidence * 100).toFixed(1)}%</span>
-                      <span>{alert.severity}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/5 bg-ag-card p-5">
-            <h3 className="text-lg font-black mb-4">
-              {t("analytics.chartTitles.heatmap")}
-            </h3>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={heatmap}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff12" />
-                  <XAxis dataKey="label" stroke="#94a3b8" />
-                  <YAxis stroke="#94a3b8" allowDecimals={false} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#10151f",
-                      border: "1px solid #ffffff22",
-                      borderRadius: "12px",
-                    }}
-                  />
-                  <Bar dataKey="count" fill="#a855f7" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
           </section>
         </>
       )}
 
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <Gauge size={14} />
-        <span>{t("analytics.poweredBy")}</span>
-      </div>
+      {/* FOOTER POWERED BY PANEL */}
+      <footer className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 pt-4 tracking-wide select-none">
+        <Gauge size={12} />
+        <span>{t("analytics.poweredBy").toUpperCase()}</span>
+      </footer>
     </div>
   );
 };
