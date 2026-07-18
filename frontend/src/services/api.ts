@@ -13,9 +13,6 @@ export interface ZoneCreateData {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 export const getStoredAuthToken = () => {
@@ -177,10 +174,7 @@ export const cameraService = {
   getAll: () => api.get("/cameras/"),
 
   // دالة شاملة لرفع الفيديو أو ربط البث الحي عبر FormData (صفحة 206)
-  create: (formData: FormData) =>
-    api.post("/cameras/", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
+  create: (formData: FormData) => api.post("/cameras/", formData),
 
   start: (id: string) => api.post(`/cameras/${id}/start`),
 
