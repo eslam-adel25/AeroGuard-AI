@@ -19,6 +19,7 @@ export type DashboardStats = {
   persons: number;
   bags: number;
   cars: number;
+  critical_alerts?: number;
   camera_id?: string;
 };
 

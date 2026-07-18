@@ -56,12 +56,18 @@ const Dashboard = () => {
   const [detectionCount, setDetectionCount] = useState(0);
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
-  const [bagCount, setBagCount] = useState(0);
+  const [criticalAlertCount, setCriticalAlertCount] = useState(0);
+  const [cameraStatus, setCameraStatus] = useState<
+    "Running" | "Offline" | "Processing"
+  >("Offline");
+  const selectedCameraName =
+    cameras.find((c) => c.camera_id === selectedCamera)?.camera_name || "";
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLImageElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const selectedCameraRef = useRef<string | null>(null);
   const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -76,12 +82,17 @@ const Dashboard = () => {
 
   // --- AI Operations ---
   const startCameraAI = useCallback(async (id: string) => {
+    setCameraStatus("Processing");
     try {
       await cameraService.start(id);
     } catch {
       console.log("AI initializing...");
     }
   }, []);
+
+  useEffect(() => {
+    selectedCameraRef.current = selectedCamera;
+  }, [selectedCamera]);
 
   useEffect(() => {
     const token = getStoredAuthToken();
@@ -92,18 +103,41 @@ const Dashboard = () => {
     const handleMessage = (message: WSMessage) => {
       if (message.event === "new_alert") {
         setAlerts((prev) => [message.data, ...prev].slice(0, 3));
-        setDetectionCount((c) => c + 1);
         setTimeout(
           () => setAlerts((prev) => prev.filter((a) => a !== message.data)),
           5000,
         );
       }
       if (message.event === "ai_status") {
-        setFps(message.data.fps || 0);
-        setDetectionCount(message.data.objects || 0);
-        setPeopleCount(message.data.persons || 0);
-        setBagCount(message.data.bags || 0);
-        setCarCount(message.data.cars || 0);
+        if (
+          message.data.camera_id &&
+          selectedCameraRef.current &&
+          message.data.camera_id !== selectedCameraRef.current
+        ) {
+          return;
+        }
+        setFps(message.data.fps ?? 0);
+        setDetectionCount(message.data.objects ?? 0);
+        setPeopleCount(message.data.persons ?? 0);
+        setCarCount(message.data.cars ?? 0);
+        if (message.data.critical_alerts !== undefined) {
+          setCriticalAlertCount(message.data.critical_alerts);
+        }
+        setCameraStatus("Running");
+      }
+
+      if (message.event === "camera_status") {
+        if (
+          message.data.camera_id &&
+          selectedCameraRef.current &&
+          message.data.camera_id !== selectedCameraRef.current
+        ) {
+          return;
+        }
+        setCameraStatus(
+          (message.data.status as "Running" | "Offline" | "Processing") ||
+            "Offline",
+        );
       }
 
       if (message.event === "ai_event") {
@@ -441,21 +475,19 @@ const Dashboard = () => {
               <span className="flex items-center gap-2">
                 <span className="text-[14px]">📹</span>
                 <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
-                  {cameras.find((c) => c.camera_id === selectedCamera)
-                    ?.camera_name || t("dashboard.provisioning")}
+                  {selectedCameraName}
                 </span>
               </span>
 
               <span className="text-white/50">|</span>
               <span className="flex items-center gap-2 text-[14px] text-white">
                 <span className="h-2 w-2 rounded-full bg-ag-success" />
-                {t("common.active")}
+                {cameraStatus}
               </span>
 
               <span className="text-white/50">|</span>
               <span className="flex items-center gap-1 text-white/90">
-                FPS:{" "}
-                <span className="font-black text-ag-success">{fps || 30}</span>
+                FPS: <span className="font-black text-ag-success">{fps}</span>
               </span>
 
               <span className="text-white/50">|</span>
@@ -472,8 +504,8 @@ const Dashboard = () => {
 
               <span className="text-white/50">|</span>
               <span className="flex items-center gap-1 text-white/90">
-                <span>🎒</span>
-                <span className="font-black">{bagCount}</span>
+                <span>🚨</span>
+                <span className="font-black">{criticalAlertCount}</span>
               </span>
 
               <span className="text-white/50">|</span>

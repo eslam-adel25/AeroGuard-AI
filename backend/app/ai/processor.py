@@ -37,6 +37,7 @@ class AIProcessor:
         self.crowd_cooldown = {}  # camera_id -> last_alert_time
         self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
         self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
+        self.active_critical_alerts = {}  # camera_id -> [alert_timestamps]
         self._stop_flags = {}
         self._active_cameras = set()
         self._active_camera_lock = threading.Lock()
@@ -83,6 +84,21 @@ class AIProcessor:
                 ultralytics_tasks.torch_safe_load = patched_torch_safe_load
         except Exception:
             pass
+
+    def _get_active_critical_alert_count(self, camera_id) -> int:
+        camera_key = str(camera_id)
+        now = time.time()
+        alerts = self.active_critical_alerts.get(camera_key, [])
+        active = [ts for ts in alerts if now - ts < 5]
+        self.active_critical_alerts[camera_key] = active
+        return len(active)
+
+    def _register_critical_alert(self, camera_id) -> None:
+        camera_key = str(camera_id)
+        alerts = self.active_critical_alerts.setdefault(camera_key, [])
+        alerts.append(time.time())
+        now = time.time()
+        self.active_critical_alerts[camera_key] = [ts for ts in alerts if now - ts < 5]
 
     def update_config(self, settings_model: SystemSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
@@ -336,7 +352,15 @@ class AIProcessor:
         self._stop_flags[camera_id_str] = False
         consecutive_read_failures = 0
         last_frame_pos = -1
+        status_broadcasted = False
         try:
+            await manager.broadcast({
+                "event": "camera_status",
+                "data": {
+                    "camera_id": str(camera_id),
+                    "status": "Processing",
+                }
+            })
             # 1. تحديد نوع المصدر ومعالجته
             source = 0 if str(rtsp_url) == "0" else rtsp_url
             is_file_source = False
@@ -392,6 +416,13 @@ class AIProcessor:
 
             if not cap.isOpened():
                 print(f"❌ Critical: Could not open camera/video {camera_id}")
+                await manager.broadcast({
+                    "event": "camera_status",
+                    "data": {
+                        "camera_id": str(camera_id),
+                        "status": "Offline",
+                    }
+                })
                 return
 
             repo = DetectionRepository(local_db)
@@ -449,6 +480,16 @@ class AIProcessor:
                 consecutive_read_failures = 0
                 frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
                 last_frame_pos = frame_pos
+
+                if not status_broadcasted:
+                    await manager.broadcast({
+                        "event": "camera_status",
+                        "data": {
+                            "camera_id": str(camera_id),
+                            "status": "Running",
+                        }
+                    })
+                    status_broadcasted = True
 
                 if last_valid_frame == 0:
                     print(f"📌 [{camera_id}] first frame decoded successfully")
@@ -818,6 +859,7 @@ class AIProcessor:
                             except Exception:
                                 img_bytes = None
 
+                            self._register_critical_alert(camera_id)
                             ai_service.register_event(
                                 camera_id=camera_id,
                                 detection_type=display_label,
@@ -841,6 +883,7 @@ class AIProcessor:
 
                 elapsed = time.time() - start_time
                 current_fps = int(1.0 / elapsed) if elapsed > 0 else 30
+                critical_alert_count = self._get_active_critical_alert_count(camera_id)
 
                 await manager.broadcast({
                     "event": "ai_status",
@@ -850,6 +893,7 @@ class AIProcessor:
                         "persons": person_count,
                         "bags": bag_count,
                         "cars": vehicle_count,
+                        "critical_alerts": critical_alert_count,
                         "camera_id": str(camera_id)
                    }
                 })
@@ -862,6 +906,13 @@ class AIProcessor:
             if cap is not None:
                 cap.release()
                 print(f"📌 [{camera_id}] cap released and processing ended")
+            await manager.broadcast({
+                "event": "camera_status",
+                "data": {
+                    "camera_id": str(camera_id),
+                    "status": "Offline",
+                }
+            })
             self.last_frames.pop(str(camera_id), None)
             self._stop_flags.pop(camera_id_str, None)
             with self._active_camera_lock:
