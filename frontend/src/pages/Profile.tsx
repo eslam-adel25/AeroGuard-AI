@@ -154,6 +154,12 @@ const Profile: React.FC = () => {
     }
   };
 
+  const sortedSessions = [...sessions].sort((a, b) => {
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
+
   if (isLoading)
     return (
       <div className="h-screen flex items-center justify-center bg-[#0c0e12]">
@@ -569,7 +575,7 @@ const Profile: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {sessions.length === 0 ? (
+                {sortedSessions.length === 0 ? (
                   <tr>
                     <td
                       colSpan={4}
@@ -579,7 +585,7 @@ const Profile: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  sessions.map((s, idx) => (
+                  sortedSessions.map((s, idx) => (
                     <tr
                       key={s.token}
                       className="text-xs group hover:bg-white/[0.02] transition-colors"
