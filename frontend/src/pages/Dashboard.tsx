@@ -20,7 +20,10 @@ import {
   ShieldAlert,
   Box,
   Loader2,
+  ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
+import { motion } from "framer-motion";
 
 interface AlertData {
   camera_id: string;
@@ -52,10 +55,12 @@ const Dashboard = () => {
   const [bagCount, setBagCount] = useState(0);
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
+  const videoWrapperRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLImageElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [drawingPoints, setDrawingPoints] = useState<Array<[number, number]>>(
     [],
   );
@@ -174,10 +179,10 @@ const Dashboard = () => {
   const updateOverlayCanvas = useCallback(() => {
     const canvas = overlayCanvasRef.current;
     const video = videoRef.current;
-    if (!canvas || !video || !videoContainerRef.current) return;
+    if (!canvas || !video || !videoWrapperRef.current) return;
 
     const rect = video.getBoundingClientRect();
-    const containerRect = videoContainerRef.current.getBoundingClientRect();
+    const containerRect = videoWrapperRef.current.getBoundingClientRect();
 
     canvas.width = rect.width;
     canvas.height = rect.height;
@@ -276,6 +281,7 @@ const Dashboard = () => {
     setDrawingPoints([]);
     setDrawingMode("restricted");
     setIsDrawing(true);
+    setIsSidebarOpen(true);
     setDrawingInstructions(t("dashboard.drawingInstructions.initial"));
   }, [t]);
 
@@ -370,276 +376,332 @@ const Dashboard = () => {
       <div className="grid grid-rows-[minmax(0,1fr)_auto] gap-2 h-[calc(100vh-1.5rem)] min-h-0">
         <div
           ref={videoContainerRef}
-          className="relative group rounded-lg overflow-hidden border border-white/8 shadow-[0_18px_60px_rgba(0,0,0,0.45)] bg-black ring-1 ring-white/8 min-h-0"
+          className="relative group rounded-lg overflow-hidden border border-white/8 shadow-[0_18px_60px_rgba(0,0,0,0.45)] bg-black ring-1 ring-white/8 min-h-0 flex flex-row items-stretch w-full h-full"
         >
-          {/* Compact Top-Center Status Bar */}
-          <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2 pointer-events-none inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
-            <span className="flex items-center gap-2">
-              <span className="text-[14px]">📹</span>
-              <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
-                {cameras.find((c) => c.camera_id === selectedCamera)
-                  ?.camera_name || t("dashboard.provisioning")}
+          {/* Main Video Area */}
+          <div
+            ref={videoWrapperRef}
+            className="relative flex-1 min-w-0 h-full overflow-hidden"
+          >
+            {/* Compact Top-Center Status Bar */}
+            <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2 pointer-events-none inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
+              <span className="flex items-center gap-2">
+                <span className="text-[14px]">📹</span>
+                <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
+                  {cameras.find((c) => c.camera_id === selectedCamera)
+                    ?.camera_name || t("dashboard.provisioning")}
+                </span>
               </span>
-            </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-2 text-[14px] text-white">
-              <span className="h-2 w-2 rounded-full bg-ag-success" />
-              {t("common.active")}
-            </span>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-2 text-[14px] text-white">
+                <span className="h-2 w-2 rounded-full bg-ag-success" />
+                {t("common.active")}
+              </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-1 text-white/90">
-              FPS:{" "}
-              <span className="font-black text-ag-success">{fps || 30}</span>
-            </span>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                FPS:{" "}
+                <span className="font-black text-ag-success">{fps || 30}</span>
+              </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-1 text-white/90">
-              <span>🎯</span>
-              <span className="font-black">{detectionCount}</span>
-            </span>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                <span>🎯</span>
+                <span className="font-black">{detectionCount}</span>
+              </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-1 text-white/90">
-              <span>👤</span>
-              <span className="font-black">{peopleCount}</span>
-            </span>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                <span>👤</span>
+                <span className="font-black">{peopleCount}</span>
+              </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-1 text-white/90">
-              <span>🎒</span>
-              <span className="font-black">{bagCount}</span>
-            </span>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                <span>🎒</span>
+                <span className="font-black">{bagCount}</span>
+              </span>
 
-            <span className="text-white/50">|</span>
-            <span className="flex items-center gap-1 text-white/90">
-              <span>🚗</span>
-              <span className="font-black">{carCount}</span>
-            </span>
-          </div>
-
-          {/* Floating Violation Alerts */}
-          <div className="absolute left-1/2 top-[12%] z-50 flex w-full -translate-x-1/2 flex-col items-center gap-2 pointer-events-none px-3 md:px-6">
-            {alerts.map((alert, idx) => (
-              <div
-                key={idx}
-                className="max-w-[92%] rounded-xl border border-ag-danger/40 bg-ag-danger/12 backdrop-blur-lg px-4 py-3 flex items-center gap-3 animate-in slide-in-from-top zoom-in duration-300 shadow-[0_6px_30px_rgba(239,68,68,0.12)]"
-              >
-                <div className="bg-ag-danger/90 p-2.5 rounded-xl shadow-lg">
-                  <ShieldAlert size={20} className="text-white" />
-                </div>
-                <div>
-                  <p className="text-[9px] font-black text-ag-danger uppercase tracking-[0.3em]">
-                    {t("dashboard.criticalAlert")}
-                  </p>
-                  <h4 className="text-base md:text-lg font-black text-white uppercase tracking-tighter">
-                    {alert.type} {t("dashboard.detectLabel")}
-                  </h4>
-                </div>
-                {alert.event_id ? (
-                  <div className="ml-auto flex items-center gap-2 pointer-events-auto">
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await (
-                            await import("../services/api")
-                          ).aiService.downloadScreenshot(
-                            alert.event_id as string,
-                          );
-                          const blob = res.data as Blob;
-                          const url = window.URL.createObjectURL(blob);
-                          window.open(url, "_blank");
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className="rounded-full bg-white/6 px-3 py-2 text-xs text-white"
-                    >
-                      View
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await (
-                            await import("../services/api")
-                          ).aiService.downloadScreenshot(
-                            alert.event_id as string,
-                          );
-                          const blob = res.data as Blob;
-                          const url = window.URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = `ai_event_${alert.event_id}.jpg`;
-                          a.click();
-                          window.URL.revokeObjectURL(url);
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className="rounded-full bg-white/6 px-3 py-2 text-xs text-white"
-                    >
-                      Download
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {/* Video Stream Implementation */}
-          {selectedCamera ? (
-            <>
-              <img
-                ref={videoRef}
-                src={
-                  isPaused || !selectedCamera
-                    ? ""
-                    : streamToken
-                      ? `/api/v1/cameras/${selectedCamera}/stream?token=${encodeURIComponent(streamToken)}`
-                      : `/api/v1/cameras/${selectedCamera}/stream`
-                }
-                alt="AeroGuard Engine"
-                onLoad={() => {
-                  updateOverlayCanvas();
-                  drawOverlay();
-                }}
-                className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
-              />
-              <canvas
-                ref={overlayCanvasRef}
-                onClick={onCanvasClick}
-                onDoubleClick={onCanvasDoubleClick}
-                onContextMenu={onCanvasContextMenu}
-                onMouseMove={onCanvasMouseMove}
-                className={`absolute left-0 top-0 z-30 ${isDrawing ? "pointer-events-auto" : "pointer-events-none"}`}
-              />
-            </>
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-ag-dark">
-              <Loader2 className="animate-spin text-ag-danger mb-4" size={52} />
-              <p className="text-gray-500 font-black uppercase tracking-[0.35em] text-[11px]">
-                {t("dashboard.controls.awaitingLink")}
-              </p>
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                <span>🚗</span>
+                <span className="font-black">{carCount}</span>
+              </span>
             </div>
-          )}
 
-          {/* Compact Control Bar */}
-          <div className="absolute left-1/2 bottom-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 shadow-md backdrop-blur-lg opacity-95 transition-all duration-250 group-hover:scale-[1.02]">
-            <button
-              onClick={() => setIsPaused(!isPaused)}
-              className="p-2.5 bg-white/6 hover:bg-ag-danger rounded-full text-white transition-transform hover:scale-105"
-            >
-              {isPaused ? (
-                <Play size={20} fill="white" />
-              ) : (
-                <Pause size={20} fill="white" />
-              )}
-            </button>
-            <div className="w-px h-6 bg-white/10" />
-            <button
-              onClick={takeSnapshot}
-              className="p-2.5 bg-white/6 hover:bg-ag-success rounded-full text-white transition-transform hover:scale-105"
-              title={t("dashboard.captureIncident")}
-            >
-              <SnapshotIcon size={18} />
-            </button>
-            <button
-              onClick={enterDrawingMode}
-              className="p-2.5 bg-white/6 hover:bg-blue-600 rounded-full text-white transition-transform hover:scale-105"
-              title={t("dashboard.controls.enterDrawing")}
-            >
-              <Box size={18} />
-            </button>
-            <div className="w-px h-6 bg-white/10" />
-            <button
-              onClick={toggleFullscreen}
-              className="p-2.5 bg-white/6 hover:bg-white/10 rounded-full text-white transition-transform hover:scale-105"
-            >
-              {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-            </button>
-          </div>
-
-          {isDrawing && (
-            <div className="absolute right-4 bottom-24 z-50 w-[min(320px,calc(100%-2rem))] rounded-3xl border border-white/10 bg-black/70 backdrop-blur-xl p-4 shadow-2xl shadow-black/40 text-white">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.32em] text-gray-400">
-                    {t("dashboard.drawingMode")}
-                  </p>
-                  <h3 className="text-sm font-bold uppercase tracking-[0.14em]">
-                    {t("dashboard.inCameraAnnotation")}
-                  </h3>
-                </div>
-                <button
-                  onClick={exitDrawingMode}
-                  className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
+            {/* Floating Violation Alerts */}
+            <div className="absolute left-1/2 top-[12%] z-50 flex w-full -translate-x-1/2 flex-col items-center gap-2 pointer-events-none px-3 md:px-6">
+              {alerts.map((alert, idx) => (
+                <div
+                  key={idx}
+                  className="max-w-[92%] rounded-xl border border-ag-danger/40 bg-ag-danger/12 backdrop-blur-lg px-4 py-3 flex items-center gap-3 animate-in slide-in-from-top zoom-in duration-300 shadow-[0_6px_30px_rgba(239,68,68,0.12)]"
                 >
-                  {t("common.cancel")}
-                </button>
+                  <div className="bg-ag-danger/90 p-2.5 rounded-xl shadow-lg">
+                    <ShieldAlert size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-ag-danger uppercase tracking-[0.3em]">
+                      {t("dashboard.criticalAlert")}
+                    </p>
+                    <h4 className="text-base md:text-lg font-black text-white uppercase tracking-tighter">
+                      {alert.type} {t("dashboard.detectLabel")}
+                    </h4>
+                  </div>
+                  {alert.event_id ? (
+                    <div className="ml-auto flex items-center gap-2 pointer-events-auto">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await (
+                              await import("../services/api")
+                            ).aiService.downloadScreenshot(
+                              alert.event_id as string,
+                            );
+                            const blob = res.data as Blob;
+                            const url = window.URL.createObjectURL(blob);
+                            window.open(url, "_blank");
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="rounded-full bg-white/6 px-3 py-2 text-xs text-white cursor-pointer"
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await (
+                              await import("../services/api")
+                            ).aiService.downloadScreenshot(
+                              alert.event_id as string,
+                            );
+                            const blob = res.data as Blob;
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = `ai_event_${alert.event_id}.jpg`;
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="rounded-full bg-white/6 px-3 py-2 text-xs text-white cursor-pointer"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+
+            {/* Video Stream Implementation */}
+            {selectedCamera ? (
+              <>
+                <img
+                  ref={videoRef}
+                  src={
+                    isPaused || !selectedCamera
+                      ? ""
+                      : streamToken
+                        ? `/api/v1/cameras/${selectedCamera}/stream?token=${encodeURIComponent(streamToken)}`
+                        : `/api/v1/cameras/${selectedCamera}/stream`
+                  }
+                  alt="AeroGuard Engine"
+                  onLoad={() => {
+                    updateOverlayCanvas();
+                    drawOverlay();
+                  }}
+                  className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
+                />
+                <canvas
+                  ref={overlayCanvasRef}
+                  onClick={onCanvasClick}
+                  onDoubleClick={onCanvasDoubleClick}
+                  onContextMenu={onCanvasContextMenu}
+                  onMouseMove={onCanvasMouseMove}
+                  className={`absolute left-0 top-0 z-30 ${isDrawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
+                />
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-ag-dark">
+                <Loader2
+                  className="animate-spin text-ag-danger mb-4"
+                  size={52}
+                />
+                <p className="text-gray-500 font-black uppercase tracking-[0.35em] text-[11px]">
+                  {t("dashboard.controls.awaitingLink")}
+                </p>
               </div>
-              <p className="text-[12px] leading-5 text-gray-300 mb-3">
-                {drawingInstructions}
-              </p>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {(["restricted", "direction", "tripwire"] as const).map(
-                  (mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => {
-                        setDrawingMode(mode);
-                        setDrawingInstructions(
-                          mode === "restricted"
-                            ? t("dashboard.drawingInstructions.restricted")
-                            : mode === "direction"
-                              ? t("dashboard.drawingInstructions.direction")
-                              : t("dashboard.drawingInstructions.tripwire"),
-                        );
-                      }}
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                        drawingMode === mode
-                          ? "bg-ag-success text-black"
-                          : "bg-white/10 text-gray-300 hover:bg-white/15"
-                      }`}
-                    >
-                      {mode.toUpperCase()}
-                    </button>
-                  ),
+            )}
+
+            {/* Compact Control Bar */}
+            <div className="absolute left-1/2 bottom-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-2 shadow-md backdrop-blur-lg opacity-95 transition-all duration-250 group-hover:scale-[1.02]">
+              <button
+                onClick={() => setIsPaused(!isPaused)}
+                className="p-2.5 bg-white/6 hover:bg-ag-danger rounded-full text-white transition-transform hover:scale-105 cursor-pointer"
+              >
+                {isPaused ? (
+                  <Play size={20} fill="white" />
+                ) : (
+                  <Pause size={20} fill="white" />
                 )}
-              </div>
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="text-[11px] text-gray-400">
-                  {t("common.points")}:{" "}
-                  <span className="text-white">{drawingPoints.length}</span>
+              </button>
+              <div className="w-px h-6 bg-white/10" />
+              <button
+                onClick={takeSnapshot}
+                className="p-2.5 bg-white/6 hover:bg-ag-success rounded-full text-white transition-transform hover:scale-105 cursor-pointer"
+                title={t("dashboard.captureIncident")}
+              >
+                <SnapshotIcon size={18} />
+              </button>
+              <button
+                onClick={enterDrawingMode}
+                className={`p-2.5 rounded-full text-white transition-transform hover:scale-105 cursor-pointer ${isDrawing ? "bg-ag-success" : "bg-white/6 hover:bg-blue-600"}`}
+                title={t("dashboard.controls.enterDrawing")}
+              >
+                <Box size={18} />
+              </button>
+              <div className="w-px h-6 bg-white/10" />
+              <button
+                onClick={toggleFullscreen}
+                className="p-2.5 bg-white/6 hover:bg-white/10 rounded-full text-white transition-transform hover:scale-105 cursor-pointer"
+              >
+                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Right Collapsible Sidebar Panel */}
+          {isDrawing && (
+            <div className="relative shrink-0 flex items-stretch">
+              {/* Arrow Control Button */}
+              <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="absolute top-1/2 -translate-y-1/2 -left-3.5 z-50 w-7 h-11 bg-[#0c1322] border border-white/10 border-r-0 rounded-l-md flex items-center justify-center cursor-pointer text-gray-400 hover:text-white hover:bg-white/5 transition-colors shadow-lg"
+                style={{
+                  transform: isSidebarOpen
+                    ? "translateY(-50%)"
+                    : "translateY(-50%) translateX(14px)",
+                }}
+              >
+                {isSidebarOpen ? (
+                  <ChevronRight size={14} />
+                ) : (
+                  <ChevronLeft size={14} />
+                )}
+              </button>
+
+              {/* Sidebar Panel Container */}
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: isSidebarOpen ? 320 : 0 }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                className="h-full border-l border-white/10 bg-[#0c1322] flex flex-col text-white overflow-hidden"
+              >
+                <div className="w-[320px] flex-1 p-6 flex flex-col justify-between h-full">
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.32em] text-gray-400">
+                          {t("dashboard.drawingMode")}
+                        </p>
+                        <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-white">
+                          {t("dashboard.inCameraAnnotation")}
+                        </h3>
+                      </div>
+                      <button
+                        onClick={exitDrawingMode}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+
+                    {/* Mode Selector */}
+                    <div className="flex flex-wrap gap-2">
+                      {(["restricted", "direction", "tripwire"] as const).map(
+                        (mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => {
+                              setDrawingMode(mode);
+                              setDrawingInstructions(
+                                mode === "restricted"
+                                  ? t(
+                                      "dashboard.drawingInstructions.restricted",
+                                    )
+                                  : mode === "direction"
+                                    ? t(
+                                        "dashboard.drawingInstructions.direction",
+                                      )
+                                    : t(
+                                        "dashboard.drawingInstructions.tripwire",
+                                      ),
+                              );
+                            }}
+                            className={`rounded-full px-3 py-1 text-[11px] font-semibold transition cursor-pointer ${
+                              drawingMode === mode
+                                ? "bg-ag-success text-black"
+                                : "bg-white/10 text-gray-300 hover:bg-white/15"
+                            }`}
+                          >
+                            {mode.toUpperCase()}
+                          </button>
+                        ),
+                      )}
+                    </div>
+
+                    {/* Instructions */}
+                    <p className="text-[12px] leading-5 text-gray-300">
+                      {drawingInstructions}
+                    </p>
+
+                    {/* Points Counter */}
+                    <div className="text-[11px] text-gray-400">
+                      {t("common.points")}:{" "}
+                      <span className="text-white font-bold">
+                        {drawingPoints.length}
+                      </span>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={undoLastPoint}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
+                      >
+                        {t("common.undo")}
+                      </button>
+                      <button
+                        onClick={clearDrawing}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
+                      >
+                        {t("common.clear")}
+                      </button>
+                      <button
+                        onClick={saveDrawing}
+                        className="rounded-full bg-ag-success px-4 py-1.5 text-[11px] font-semibold text-black hover:bg-lime-400 transition cursor-pointer ml-auto"
+                      >
+                        {t("common.save")}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bottom Hint */}
+                  <div className="pt-6 border-t border-white/5">
+                    <p className="text-[10px] uppercase tracking-[0.28em] text-gray-500 leading-relaxed">
+                      {t("dashboard.controls.doubleClickHint")}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={undoLastPoint}
-                    className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
-                  >
-                    {t("common.undo")}
-                  </button>
-                  <button
-                    onClick={clearDrawing}
-                    className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10"
-                  >
-                    {t("common.clear")}
-                  </button>
-                  <button
-                    onClick={saveDrawing}
-                    className="rounded-full bg-ag-success px-3 py-1 text-[11px] font-semibold text-black hover:bg-lime-400"
-                  >
-                    {t("common.save")}
-                  </button>
-                </div>
-              </div>
-              <p className="mt-3 text-[10px] uppercase tracking-[0.28em] text-gray-500">
-                {t("dashboard.controls.doubleClickHint")}
-              </p>
+              </motion.div>
             </div>
           )}
-
-          {/* Recording indicator removed from overlay per request */}
         </div>
 
         {/* Camera Strip */}
@@ -653,7 +715,7 @@ const Dashboard = () => {
                   setIsPaused(false);
                   startCameraAI(cam.camera_id);
                 }}
-                className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest
+                className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest cursor-pointer
                     ${
                       selectedCamera === cam.camera_id
                         ? "bg-ag-danger border-ag-danger text-white shadow-lg shadow-red-900/25 scale-[0.98]"
