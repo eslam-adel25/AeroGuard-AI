@@ -133,6 +133,12 @@ class RefreshToken(Base):
     expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
     revoked = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    user_agent = Column(String(500), nullable=True)
+    operating_system = Column(String(100), nullable=True)
+    browser = Column(String(100), nullable=True)
+    device_category = Column(String(50), nullable=True)
+    device_type = Column(String(200), nullable=True)
+    device_model = Column(String(100), nullable=True)
 
 
 class ActivityLog(Base):

@@ -263,6 +263,12 @@ def my_sessions(db: Session = Depends(get_db), current_user: dict = Depends(get_
             "expires_at": t.expires_at,
             "revoked": t.revoked,
             "created_at": t.created_at,
+            "user_agent": t.user_agent,
+            "operating_system": t.operating_system,
+            "browser": t.browser,
+            "device_category": t.device_category,
+            "device_type": t.device_type,
+            "device_model": t.device_model,
         }
         for t in tokens
     ]

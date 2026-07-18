@@ -24,6 +24,12 @@ interface UserSession {
   expires_at: string | null;
   revoked: boolean;
   created_at: string | null;
+  user_agent?: string | null;
+  operating_system?: string | null;
+  browser?: string | null;
+  device_category?: string | null;
+  device_type?: string | null;
+  device_model?: string | null;
 }
 
 const Profile: React.FC = () => {
@@ -599,7 +605,7 @@ const Profile: React.FC = () => {
                           : "—"}
                       </td>
                       <td className="py-6 text-gray-400">
-                        {idx % 2 === 0 ? "Desktop - Chrome" : "Mobile - Safari"}
+                        {s.device_type || "Unknown device"}
                       </td>
                       <td className="py-6 text-right">
                         <span

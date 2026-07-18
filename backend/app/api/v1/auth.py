@@ -10,6 +10,7 @@ from ...database.session import get_db
 from ...models.models import User, Role
 from ...schemas.schemas import UserRegister, UserLogin
 from ...core.security import hash_password, verify_password, create_access_token
+from ...utils.device_info import parse_user_agent
 from ...core.security import create_refresh_token_string
 from ...repositories.token_repository import TokenRepository
 from ...repositories.activity_repository import ActivityRepository
@@ -180,7 +181,18 @@ def login(payload: UserLogin, db: Session = Depends(get_db), request: Request = 
     token_repo = TokenRepository(db)
     refresh_str = create_refresh_token_string(48)
     rt_expires = datetime.utcnow() + timedelta(days=7)
-    rt = RefreshToken(user_id=user.user_id, token=refresh_str, expires_at=rt_expires)
+    device_info = parse_user_agent(request.headers.get("user-agent") if request else None)
+    rt = RefreshToken(
+        user_id=user.user_id,
+        token=refresh_str,
+        expires_at=rt_expires,
+        user_agent=request.headers.get("user-agent") if request else None,
+        operating_system=device_info.get("operating_system"),
+        browser=device_info.get("browser"),
+        device_category=device_info.get("device_category"),
+        device_type=device_info.get("device_type"),
+        device_model=device_info.get("device_model"),
+    )
     token_repo.create_refresh_token(rt)
 
     # Log activity
