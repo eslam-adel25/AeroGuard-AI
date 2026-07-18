@@ -204,8 +204,30 @@ const Settings = () => {
                   className="w-full bg-[#0d0e14] border border-[#1e212b] p-3 rounded-lg text-sm font-semibold outline-none focus:border-blue-500/50 appearance-none"
                 >
                   <option value="UTC">UTC (GMT+0)</option>
-                  <option value="GST">GST (GMT+4)</option>
-                  <option value="EST">EST (GMT-5)</option>
+                  <option value="Africa/Cairo">Africa/Cairo (GMT+2)</option>
+                  <option value="Europe/London">Europe/London (GMT+0)</option>
+                  <option value="Europe/Paris">Europe/Paris (GMT+1)</option>
+                  <option value="Europe/Istanbul">
+                    Europe/Istanbul (GMT+3)
+                  </option>
+                  <option value="Asia/Riyadh">Asia/Riyadh (GMT+3)</option>
+                  <option value="Asia/Dubai">Asia/Dubai (GST, GMT+4)</option>
+                  <option value="Asia/Karachi">Asia/Karachi (GMT+5)</option>
+                  <option value="Asia/Kolkata">Asia/Kolkata (GMT+5:30)</option>
+                  <option value="Asia/Singapore">Asia/Singapore (GMT+8)</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo (GMT+9)</option>
+                  <option value="Australia/Sydney">
+                    Australia/Sydney (GMT+10)
+                  </option>
+                  <option value="America/New_York">
+                    America/New_York (EST, GMT-5)
+                  </option>
+                  <option value="America/Chicago">
+                    America/Chicago (CST, GMT-6)
+                  </option>
+                  <option value="America/Los_Angeles">
+                    America/Los_Angeles (PST, GMT-8)
+                  </option>
                 </select>
               </div>
             </div>
