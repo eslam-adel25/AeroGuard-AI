@@ -355,7 +355,7 @@ class AIProcessor:
             cap = cv2.VideoCapture(source, cv2.CAP_DSHOW) if source == 0 else cv2.VideoCapture(source)
             print(f"📌 [{camera_id}] cap created, isOpened={cap.isOpened()}")
 
-            # 2. تحميل إعدادات المناطق المحظورة
+            # 2. تحميل إعدادات المناطق المحظورة (نُحمّلها أولياً ونقوم بتحديثها دورياً داخل الحلقة)
             zones = []
             try:
                 zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
@@ -363,6 +363,10 @@ class AIProcessor:
                 print(f"⚠️ [{camera_id}] failed to load restricted zones: {type(zone_exc).__name__}: {zone_exc}")
                 zones = []
                 local_db.rollback()
+            # helper to compute side of point relative to a line
+            def _point_side(a, b, p):
+                # cross product (b-a) x (p-a)
+                return (b[0]-a[0])*(p[1]-a[1]) - (b[1]-a[1])*(p[0]-a[0])
 
             # 3. التحقق من الإعدادات
             try:
@@ -409,6 +413,7 @@ class AIProcessor:
 
                 if not ret:
                     if isinstance(source, str) and not source.isdigit():
+                        
                         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
                         frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
                         consecutive_read_failures += 1
@@ -515,6 +520,14 @@ class AIProcessor:
                 display_ids = self._assign_display_ids(camera_id, active_tracks)
                 bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
 
+                # Periodically refresh zones from DB so saved annotations are applied to live inference
+                try:
+                    if iteration % 30 == 0:
+                        zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+                except Exception as zone_reload_exc:
+                    print(f"⚠️ [{camera_id}] failed to reload restricted zones: {type(zone_reload_exc).__name__}: {zone_reload_exc}")
+                    local_db.rollback()
+
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
                         print(f"📌 [{camera_id}] track loop break due to max_objs={max_objs}")
@@ -537,15 +550,105 @@ class AIProcessor:
 
                     in_restricted = False
                     for zone in zones:
-                        polygon = np.array(zone.polygon_coords, np.int32)
-                        cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
-                        if cv2.pointPolygonTest(polygon, base_point, False) >= 0:
-                            in_restricted = True
-                            status = "DANGER"
-                            box_color = (0, 0, 255)
-                            display_label = f"RESTRICTED AREA"
-                            break
+                        try:
+                            coords = zone.polygon_coords or []
+                            if not coords:
+                                continue
+                            ztype = (zone.zone_type or "").lower()
 
+                            # Direction rule (line): detect crossing and check allowed direction
+                            if "direction" in ztype:
+                                prev_point = self.object_history.get(obj_id)
+                                a = tuple(coords[0])
+                                b = tuple(coords[-1])
+                                cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (200, 200, 200), 1)
+                                if prev_point is not None:
+                                    side_prev = _point_side(a, b, prev_point)
+                                    side_curr = _point_side(a, b, base_point)
+                                    if side_prev * side_curr < 0:
+                                        # crossed the direction line this frame
+                                        move_vec = (base_point[0] - prev_point[0], base_point[1] - prev_point[1])
+                                        dir_vec = (b[0] - a[0], b[1] - a[1])
+                                        dot = move_vec[0] * dir_vec[0] + move_vec[1] * dir_vec[1]
+                                        # if dot < 0 => moving opposite to defined direction => violation
+                                        if dot < 0:
+                                            status = "DANGER"
+                                            box_color = (0, 0, 255)
+                                            display_label = "WRONG DIRECTION"
+                                            alert_key = f"{camera_id}_{obj_id}_WRONG_DIR_{getattr(zone, 'zone_id', '')}"
+                                            if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                                                try:
+                                                    _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                                    img_bytes = jpg.tobytes() if jpg is not None else None
+                                                except Exception:
+                                                    img_bytes = None
+                                                ai_service.register_event(
+                                                    camera_id=camera_id,
+                                                    detection_type=display_label,
+                                                    severity="Critical",
+                                                    confidence=float(conf),
+                                                    track_id=str(obj_id),
+                                                    user_id=None,
+                                                    metadata={"bbox": [x1, y1, x2, y2]},
+                                                    screenshot_bytes=img_bytes,
+                                                )
+                                                await manager.broadcast({
+                                                    "event": "new_alert",
+                                                    "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
+                                                })
+                                                self.last_alert_time[alert_key] = time.time()
+
+                            # Tripwire: any crossing of the defined line triggers one alert per crossing
+                            elif "tripwire" in ztype:
+                                prev_point = self.object_history.get(obj_id)
+                                a = tuple(coords[0])
+                                b = tuple(coords[-1])
+                                cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
+                                if prev_point is not None:
+                                    side_prev = _point_side(a, b, prev_point)
+                                    side_curr = _point_side(a, b, base_point)
+                                    if side_prev * side_curr < 0:
+                                        status = "DANGER"
+                                        box_color = (0, 0, 255)
+                                        display_label = "TRIPWIRE"
+                                        alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
+                                        if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                                            try:
+                                                _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                                img_bytes = jpg.tobytes() if jpg is not None else None
+                                            except Exception:
+                                                img_bytes = None
+                                            ai_service.register_event(
+                                                camera_id=camera_id,
+                                                detection_type=display_label,
+                                                severity="Critical",
+                                                confidence=float(conf),
+                                                track_id=str(obj_id),
+                                                user_id=None,
+                                                metadata={"bbox": [x1, y1, x2, y2]},
+                                                screenshot_bytes=img_bytes,
+                                            )
+                                            await manager.broadcast({
+                                                "event": "new_alert",
+                                                "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
+                                            })
+                                            self.last_alert_time[alert_key] = time.time()
+
+                            # Default: restricted polygon area
+                            else:
+                                polygon = np.array(coords, np.int32)
+                                cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
+                                if cv2.pointPolygonTest(polygon, base_point, False) >= 0:
+                                    in_restricted = True
+                                    status = "DANGER"
+                                    box_color = (0, 0, 255)
+                                    display_label = f"RESTRICTED AREA"
+                                    break
+                        except Exception:
+                            # ignore malformed zone data for robustness
+                            continue
+
+                    # legacy wrong-direction vertical heuristic (kept for backward compatibility)
                     if obj_id in self.object_history and not in_restricted:
                         prev_point = self.object_history[obj_id]
                         prev_y = prev_point[1]

@@ -6,7 +6,11 @@ import {
   useLayoutEffect,
   type MouseEvent,
 } from "react";
-import { cameraService, getStoredAuthToken } from "../services/api";
+import {
+  cameraService,
+  getStoredAuthToken,
+  type ZoneCreateData,
+} from "../services/api";
 
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
@@ -306,12 +310,61 @@ const Dashboard = () => {
     setTimeout(() => setDrawingInstructions(""), 1800);
   }, [t]);
 
-  const saveDrawing = useCallback(() => {
-    setIsDrawing(false);
-    setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
-    setHoverPoint(null);
-    setTimeout(() => setDrawingInstructions(""), 2200);
-  }, [t]);
+  const saveDrawing = useCallback(async () => {
+    // Persist the drawing as a zone to backend (scaled to native video size if available)
+    try {
+      setIsDrawing(false);
+      setDrawingInstructions(
+        t("dashboard.drawingInstructions.saving") ||
+          t("dashboard.drawingInstructions.saved"),
+      );
+      const vid = videoRef.current;
+      const canvas = overlayCanvasRef.current;
+      if (!selectedCamera) throw new Error("No camera selected");
+      if (!canvas) throw new Error("No canvas available");
+
+      const rect = canvas.getBoundingClientRect();
+      const nativeW =
+        (vid && (vid as HTMLImageElement).naturalWidth) || rect.width;
+      const nativeH =
+        (vid && (vid as HTMLImageElement).naturalHeight) || rect.height;
+      const scaleX = nativeW / rect.width;
+      const scaleY = nativeH / rect.height;
+
+      const coords = drawingPoints.map(([x, y]) => [
+        Math.round(x * scaleX),
+        Math.round(y * scaleY),
+      ]) as [number, number][];
+
+      const zoneType =
+        drawingMode === "restricted"
+          ? "Restricted Area"
+          : drawingMode === "direction"
+            ? "Direction"
+            : "Tripwire";
+      const zoneName = `${t("dashboard.inCameraAnnotation")} - ${zoneType}`;
+
+      try {
+        const payload: ZoneCreateData = {
+          zone_name: zoneName,
+          zone_type: zoneType,
+          polygon_coords: coords,
+        };
+        await cameraService.addZone(selectedCamera, payload);
+        setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
+      } catch (err) {
+        console.error("Failed to save zone:", err);
+        setDrawingInstructions(
+          t("dashboard.drawingInstructions.saveFailed") ||
+            "Failed to save zone",
+        );
+      }
+    } finally {
+      setHoverPoint(null);
+      setIsSidebarOpen(false);
+      setTimeout(() => setDrawingInstructions(""), 2200);
+    }
+  }, [t, drawingPoints, drawingMode, selectedCamera]);
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;

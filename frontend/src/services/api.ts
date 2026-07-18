@@ -5,7 +5,7 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(
   "",
 );
 
-interface ZoneCreateData {
+export interface ZoneCreateData {
   zone_name: string;
   zone_type: string;
   polygon_coords: [number, number][]; // مصفوفة من الإحداثيات [x, y]
