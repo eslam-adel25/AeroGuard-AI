@@ -32,6 +32,30 @@ interface UserSession {
   device_model?: string | null;
 }
 
+const getSessionDeviceLabel = (session: UserSession) => {
+  const deviceType = session.device_type?.trim();
+  if (deviceType && deviceType !== "Unknown device") {
+    return deviceType;
+  }
+
+  const operatingSystem = session.operating_system?.trim();
+  const browser = session.browser?.trim();
+  if (operatingSystem && browser) {
+    return `${operatingSystem} • ${browser}`;
+  }
+  if (operatingSystem) {
+    return operatingSystem;
+  }
+  if (browser) {
+    return browser;
+  }
+  if (session.device_model?.trim()) {
+    return session.device_model.trim();
+  }
+
+  return "Unknown device";
+};
+
 const Profile: React.FC = () => {
   const { t } = useTranslation();
 
@@ -610,7 +634,7 @@ const Profile: React.FC = () => {
                             : "—"}
                         </td>
                         <td className="py-6 px-4 text-gray-400">
-                          {s.device_type || "Unknown device"}
+                          {getSessionDeviceLabel(s)}
                         </td>
                         <td className="py-6 px-4 text-right">
                           <span
