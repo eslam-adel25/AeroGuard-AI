@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from ..repositories.ai_repository import AIRepository
 from ..websocket.manager import manager
+from ..models.models import Camera
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "ai_events")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -20,15 +21,24 @@ class AIService:
         # return relative path from project root
         return path
 
-    def register_event(self, camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, track_id: Optional[str] = None, user_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, screenshot_bytes: Optional[bytes] = None):
+    def register_event(self, camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, track_id: Optional[str] = None, user_id: Optional[str] = None, owner_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, screenshot_bytes: Optional[bytes] = None):
         payload = {
             "camera_id": camera_id,
-            "detected_by": user_id,
+            "detected_by": user_id or owner_id,
             "detection_type": detection_type,
             "severity": severity,
             "confidence": confidence,
             "metadata": metadata or {},
         }
+        if owner_id is not None and hasattr(self.repo.db, "query"):
+            try:
+                camera = self.repo.db.query(Camera).filter(Camera.camera_id == camera_id).first()
+            except Exception:
+                camera = None
+            if not camera:
+                raise ValueError("Camera not found")
+            if str(getattr(camera, "owner_id", None)) != str(owner_id):
+                raise PermissionError("Camera ownership mismatch")
         if track_id is not None:
             try:
                 payload["track_id"] = str(track_id)

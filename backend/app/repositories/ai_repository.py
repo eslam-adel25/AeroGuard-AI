@@ -6,7 +6,7 @@ from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, desc
 
-from ..models.models import AIEvent, Tracking
+from ..models.models import AIEvent, Tracking, Camera
 
 
 class AIRepository:
@@ -125,6 +125,7 @@ class AIRepository:
         self,
         camera_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
         detection_type: Optional[str] = None,
         severity: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -138,6 +139,9 @@ class AIRepository:
             filters.append(AIEvent.camera_id == camera_id)
         if user_id:
             filters.append(AIEvent.detected_by == user_id)
+        if owner_id:
+            q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
+            filters.append(Camera.owner_id == owner_id)
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
         if severity:
@@ -155,6 +159,7 @@ class AIRepository:
     def query_events_for_report(
         self,
         camera_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
         detection_type: Optional[str] = None,
         severity: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -166,6 +171,9 @@ class AIRepository:
         filters = []
         if camera_id:
             filters.append(AIEvent.camera_id == camera_id)
+        if owner_id:
+            q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
+            filters.append(Camera.owner_id == owner_id)
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
         if severity:

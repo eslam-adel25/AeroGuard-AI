@@ -110,6 +110,9 @@ class ReportRepository:
         if owner_id and not is_admin:
             query = query.filter(Detection.owner_id == owner_id)
 
+        if owner_id and not is_admin:
+            query = query.join(Camera, Camera.camera_id == Detection.camera_id).filter(Camera.owner_id == owner_id)
+
         total_detections = query.count()
 
         critical_alerts = query.filter(

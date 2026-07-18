@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from ..models.models import Camera
 
+
 class CameraRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -18,3 +19,9 @@ class CameraRepository:
         if not is_admin and owner_id:
             query = query.filter(Camera.owner_id == owner_id)
         return query.all()
+
+    def get_camera_for_user(self, camera_id, user_id=None, is_admin: bool = False):
+        query = self.db.query(Camera).filter(Camera.camera_id == camera_id)
+        if not is_admin and user_id:
+            query = query.filter(Camera.owner_id == user_id)
+        return query.first()

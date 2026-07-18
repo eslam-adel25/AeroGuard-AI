@@ -1,9 +1,11 @@
 import uuid
 from sqlalchemy import Column, String, ForeignKey, TIMESTAMP, Text, Float, Integer, Boolean, JSON
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..database.session import Base
+
+JSONB = JSON
 
 class Role(Base):
     __tablename__ = "roles"
@@ -29,8 +31,12 @@ class User(Base):
     updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now(), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
-    
+
     role = relationship("Role", back_populates="users")
+    cameras = relationship("Camera", back_populates="owner", foreign_keys="Camera.owner_id")
+    detections = relationship("Detection", back_populates="owner", foreign_keys="Detection.owner_id")
+    reports = relationship("Report", back_populates="owner", foreign_keys="Report.owner_id")
+    ai_events = relationship("AIEvent", back_populates="owner", foreign_keys="AIEvent.detected_by")
 
 class SystemSettings(Base):
     __tablename__ = "system_settings"
@@ -75,8 +81,10 @@ class Camera(Base):
     status = Column(String(20), default="Offline")
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    owner = relationship("User", back_populates="cameras", foreign_keys="Camera.owner_id")
     zones = relationship("RestrictedZone", back_populates="camera", cascade="all, delete-orphan")
     detections = relationship("Detection", back_populates="camera", cascade="all, delete-orphan")
+    ai_events = relationship("AIEvent", back_populates="camera", cascade="all, delete-orphan", foreign_keys="AIEvent.camera_id")
 
 class RestrictedZone(Base):
     __tablename__ = "restricted_zones"
@@ -100,6 +108,7 @@ class Detection(Base):
     violation_type = Column(String(50)) # Restricted, Wrong Direction
     detected_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     camera = relationship("Camera", back_populates="detections")
+    owner = relationship("User", back_populates="detections", foreign_keys="Detection.owner_id")
 
 
 class EmailVerificationToken(Base):
@@ -238,6 +247,8 @@ class Report(Base):
     details = Column(JSONB, nullable=True)
     export_history = Column(JSONB, nullable=True)  # list of exports with metadata
 
+    owner = relationship("User", back_populates="reports", foreign_keys="Report.owner_id")
+
 
 class Tracking(Base):
     __tablename__ = "trackings"
@@ -263,4 +274,7 @@ class AIEvent(Base):
     screenshot_path = Column(String(400), nullable=True)
     event_metadata = Column("metadata", JSONB, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    camera = relationship("Camera", back_populates="ai_events", foreign_keys="AIEvent.camera_id")
+    owner = relationship("User", back_populates="ai_events", foreign_keys="AIEvent.detected_by")
 

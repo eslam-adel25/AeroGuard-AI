@@ -318,6 +318,7 @@ async def export_report_excel(report_id: str = Query(...), db: Session = Depends
 
         _, ai_items = ai_repo.query_events_for_report(
             camera_id=f.get("camera_id"),
+            owner_id=owner_id if not is_admin else None,
             detection_type=f.get("detection_type"),
             severity=f.get("severity"),
             start_date=sd,
@@ -391,6 +392,7 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
         ai_repo = AIRepository(db)
         _, ai_items = ai_repo.query_events_for_report(
             camera_id=f.get("camera_id"),
+            owner_id=owner_id if not is_admin else None,
             detection_type=f.get("detection_type"),
             severity=f.get("severity"),
             start_date=sd,

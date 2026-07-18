@@ -19,7 +19,8 @@ def list_ai_events(camera_id: Optional[str] = None, limit: int = 100, offset: in
         camera = db.query(Camera).filter(Camera.camera_id == camera_id).first()
         if not camera or camera.owner_id != current_user.get("user_id"):
             raise HTTPException(status_code=403, detail="Forbidden")
-    items = repo.list_events(camera_id=camera_id, limit=limit, offset=offset)
+    owner_id = None if is_admin else current_user.get("user_id")
+    items = repo.list_events(camera_id=camera_id, owner_id=owner_id, limit=limit, offset=offset)
     return {"items": [
         {
             "event_id": str(i.event_id),
@@ -57,11 +58,26 @@ def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dic
 
 @router.post("/ai/events/manual")
 async def create_ai_event_manual(camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, file: Optional[UploadFile] = File(None), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    from ...models.models import Camera
+    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    if current_user.get("role") != "Administrator" and cam.owner_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     svc = AIService(db)
     image_bytes = None
     if file:
         image_bytes = await file.read()
-    ev = svc.register_event(camera_id=camera_id, detection_type=detection_type, severity=severity, confidence=confidence, user_id=current_user.get("user_id"), screenshot_bytes=image_bytes)
+    ev = svc.register_event(
+        camera_id=camera_id,
+        detection_type=detection_type,
+        severity=severity,
+        confidence=confidence,
+        user_id=current_user.get("user_id"),
+        owner_id=current_user.get("user_id"),
+        screenshot_bytes=image_bytes,
+    )
     return {"event_id": str(ev.event_id)}
 
 
@@ -72,7 +88,7 @@ def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), curren
     ev = repo.get_event(event_id)
     if not ev or not ev.screenshot_path:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    if current_user.get("role") != "Administrator" and ev.camera_id and ev.detected_by != current_user.get("user_id"):
+    if current_user.get("role") != "Administrator" and ev.camera_id:
         from ...models.models import Camera
         camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
         if not camera or camera.owner_id != current_user.get("user_id"):
