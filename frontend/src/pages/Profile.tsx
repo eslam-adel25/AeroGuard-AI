@@ -548,8 +548,8 @@ const Profile: React.FC = () => {
         </div>
 
         {/* Bottom Section: Active Sessions */}
-        <section className="lg:col-span-12 bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl mb-10">
-          <header className="flex justify-between items-center mb-10">
+        <section className="lg:col-span-12 bg-[#16191f] rounded-2xl p-6 border border-white/5 shadow-xl mb-10 flex flex-col">
+          <header className="flex justify-between items-center mb-4 shrink-0">
             <div className="flex items-center gap-3">
               <Activity size={18} className="text-blue-400" />
               <h2 className="text-sm font-bold">Active sessions</h2>
@@ -570,55 +570,61 @@ const Profile: React.FC = () => {
             </div>
           </header>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-[10px] text-gray-500 font-bold uppercase border-b border-white/5 tracking-wider">
-                  <th className="pb-4 font-bold">Session ID</th>
-                  <th className="pb-4 font-bold">Login date & time</th>
-                  <th className="pb-4 font-bold">Device type</th>
-                  <th className="pb-4 text-right font-bold">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {sortedSessions.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="py-8 text-center text-gray-600 text-sm"
-                    >
-                      No active sessions found.
-                    </td>
+          <div className="overflow-hidden rounded-xl border border-white/5 bg-[#0c0e12]">
+            <div className="max-h-[420px] overflow-y-auto overflow-x-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10 bg-[#0c0e12]">
+                  <tr className="text-[10px] text-gray-500 font-bold uppercase border-b border-white/5 tracking-wider">
+                    <th className="pb-4 pt-4 px-4 font-bold">Session ID</th>
+                    <th className="pb-4 pt-4 px-4 font-bold">
+                      Login date & time
+                    </th>
+                    <th className="pb-4 pt-4 px-4 font-bold">Device type</th>
+                    <th className="pb-4 pt-4 px-4 text-right font-bold">
+                      Status
+                    </th>
                   </tr>
-                ) : (
-                  sortedSessions.map((s, idx) => (
-                    <tr
-                      key={s.token}
-                      className="text-xs group hover:bg-white/[0.02] transition-colors"
-                    >
-                      <td className="py-6 font-mono text-gray-400">
-                        sess_{s.token.slice(0, 4)}...{s.token.slice(-3)}
-                      </td>
-                      <td className="py-6 text-gray-400">
-                        {s.created_at
-                          ? new Date(s.created_at).toLocaleString()
-                          : "—"}
-                      </td>
-                      <td className="py-6 text-gray-400">
-                        {s.device_type || "Unknown device"}
-                      </td>
-                      <td className="py-6 text-right">
-                        <span
-                          className={`px-3 py-1 rounded-md text-[10px] font-bold ${idx === 0 ? "bg-blue-600/20 text-blue-400" : "bg-gray-800 text-gray-500"}`}
-                        >
-                          {idx === 0 ? "Active" : "Idle"}
-                        </span>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {sortedSessions.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="py-8 text-center text-gray-600 text-sm"
+                      >
+                        No active sessions found.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    sortedSessions.map((s, idx) => (
+                      <tr
+                        key={s.token}
+                        className="text-xs group hover:bg-white/[0.02] transition-colors"
+                      >
+                        <td className="py-6 px-4 font-mono text-gray-400">
+                          sess_{s.token.slice(0, 4)}...{s.token.slice(-3)}
+                        </td>
+                        <td className="py-6 px-4 text-gray-400">
+                          {s.created_at
+                            ? new Date(s.created_at).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="py-6 px-4 text-gray-400">
+                          {s.device_type || "Unknown device"}
+                        </td>
+                        <td className="py-6 px-4 text-right">
+                          <span
+                            className={`px-3 py-1 rounded-md text-[10px] font-bold ${idx === 0 ? "bg-blue-600/20 text-blue-400" : "bg-gray-800 text-gray-500"}`}
+                          >
+                            {idx === 0 ? "Active" : "Idle"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
