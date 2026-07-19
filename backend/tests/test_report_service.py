@@ -58,5 +58,7 @@ def test_get_report_stats_returns_dashboard_payload():
         assert payload["summary"]["weapons"] == 1
         assert payload["summary"]["persons"] == 1
         assert payload["summary"]["active_cameras"] == 1
-        assert payload["summary"]["ai_accuracy"] is not None
+        assert payload["summary"]["average_confidence"] == 87.5
+        assert payload["summary"]["fire"] == 0
+        assert payload["summary"]["suspicious_objects"] == 0
         assert payload["charts"]["frequency_by_zone"][0]["name"] == "Front Gate"

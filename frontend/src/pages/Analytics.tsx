@@ -5,7 +5,6 @@ import { cameraService, reportService } from "../services/api";
 import { createSocket, type WSMessage } from "../services/socket";
 import {
   AlertTriangle,
-  Brain,
   Car,
   Crosshair,
   Flame,
@@ -54,11 +53,11 @@ type SummaryPayload = {
   medium_alerts?: number;
   low_alerts?: number;
   weapons?: number;
+  suspicious_objects?: number;
   fire?: number;
   persons?: number;
   vehicles?: number;
   active_cameras?: number;
-  ai_accuracy?: number | null;
   fire_detections?: number;
   smoke_detections?: number;
   weapon_detections?: number;
@@ -340,6 +339,16 @@ const Analytics = () => {
     return (summary.total_detections ?? summary.total ?? 0) > 0;
   }, [summary]);
 
+  const selectedCameraName = useMemo(() => {
+    if (!filters.camera_id) {
+      return t("analytics.allCameras");
+    }
+    return (
+      cameraOptions.find((cam) => cam.camera_id === filters.camera_id)
+        ?.camera_name ?? t("analytics.allCameras")
+    );
+  }, [cameraOptions, filters.camera_id, t]);
+
   // Map and style KPIs according to reference screenshot layout
   const kpis = useMemo<KPIItem[]>(() => {
     const total = summary?.total_detections ?? summary?.total ?? 0;
@@ -347,13 +356,12 @@ const Analytics = () => {
     const high = summary?.high_alerts ?? 0;
     const medium = summary?.medium_alerts ?? 0;
     const low = summary?.low_alerts ?? 0;
-    const weapons = summary?.weapons ?? 0;
+    const suspiciousObjects = summary?.suspicious_objects ?? 0;
     const fire = summary?.fire ?? 0;
     const persons = summary?.persons ?? 0;
     const vehicles = summary?.vehicles ?? 0;
     const avgConf = summary?.average_confidence ?? 0;
     const active = summary?.active_cameras ?? 0;
-    const accuracy = summary?.ai_accuracy;
 
     return [
       {
@@ -362,7 +370,7 @@ const Analytics = () => {
         value: total.toLocaleString(),
         icon: Radar,
         tone: "text-[#10b981]",
-        trend: "↑ 12% vs last week",
+        trend: `${total.toLocaleString()} detections in the selected window`,
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
@@ -372,7 +380,7 @@ const Analytics = () => {
         value: critical.toLocaleString(),
         icon: Siren,
         tone: "text-[#ef4444]",
-        trend: "Requires immediate action",
+        trend: `${critical.toLocaleString()} critical alerts from the database`,
         trendColor: "text-[#ef4444]/90",
         iconColor: "text-[#ef4444]",
         valueColor: "text-[#ef4444]",
@@ -383,7 +391,7 @@ const Analytics = () => {
         value: high.toLocaleString(),
         icon: ShieldAlert,
         tone: "text-[#f97316]",
-        trend: "Under investigation",
+        trend: `${high.toLocaleString()} high-severity detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#f97316]",
       },
@@ -393,7 +401,7 @@ const Analytics = () => {
         value: medium.toLocaleString(),
         icon: AlertTriangle,
         tone: "text-[#f59e0b]",
-        trend: "Pattern matching active",
+        trend: `${medium.toLocaleString()} medium-severity detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#f59e0b]",
       },
@@ -403,18 +411,18 @@ const Analytics = () => {
         value: low.toLocaleString(),
         icon: ShieldCheck,
         tone: "text-[#3b82f6]",
-        trend: "Automated logs only",
+        trend: `${low.toLocaleString()} low-severity detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#3b82f6]",
       },
       {
-        key: "weapons",
-        title: t("analytics.kpis.weapons"),
-        value: weapons.toLocaleString(),
+        key: "suspicious",
+        title: "Suspicious Objects",
+        value: suspiciousObjects.toLocaleString(),
         icon: Shield,
         tone: "text-[#ef4444]",
-        trend: "Cleared status",
-        trendColor: "text-[#10b981]",
+        trend: `${suspiciousObjects.toLocaleString()} unknown or suspicious objects`,
+        trendColor: "text-slate-400",
         iconColor: "text-[#ef4444]",
       },
       {
@@ -423,7 +431,7 @@ const Analytics = () => {
         value: fire.toLocaleString(),
         icon: Flame,
         tone: "text-[#ef4444]",
-        trend: "Controlled exhaust sites",
+        trend: `${fire.toLocaleString()} fire or smoke detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#ef4444]",
       },
@@ -433,7 +441,7 @@ const Analytics = () => {
         value: persons.toLocaleString(),
         icon: Users,
         tone: "text-[#10b981]",
-        trend: "Active tracking",
+        trend: `${persons.toLocaleString()} person detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#10b981]",
       },
@@ -443,7 +451,7 @@ const Analytics = () => {
         value: vehicles.toLocaleString(),
         icon: Car,
         tone: "text-[#10b981]",
-        trend: "Gate entries: 1,204",
+        trend: `${vehicles.toLocaleString()} vehicle detections`,
         trendColor: "text-slate-400",
         iconColor: "text-[#10b981]",
       },
@@ -453,7 +461,7 @@ const Analytics = () => {
         value: `${avgConf.toFixed(1)}%`,
         icon: Crosshair,
         tone: "text-[#10b981]",
-        trend: "↑ 0.5% optimization",
+        trend: `${avgConf.toFixed(1)}% average confidence from detections`,
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
@@ -463,25 +471,12 @@ const Analytics = () => {
         value: active.toLocaleString(),
         icon: Video,
         tone: "text-[#10b981]",
-        trend: "99.8% Uptime",
+        trend: `${active.toLocaleString()} connected cameras for ${selectedCameraName}`,
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
-      {
-        key: "accuracy",
-        title: t("analytics.kpis.aiAccuracy"),
-        value:
-          accuracy === null || accuracy === undefined
-            ? "N/A"
-            : `${accuracy.toFixed(1)}%`,
-        icon: Brain,
-        tone: "text-[#3b82f6]",
-        trend: "Verified by Human-in-loop",
-        trendColor: "text-slate-400",
-        iconColor: "text-[#3b82f6]",
-      },
     ];
-  }, [summary, t]);
+  }, [selectedCameraName, summary, t]);
 
   // Construct donut pie chart data with ordered categories and precise colors
   const severityPieData = useMemo(() => {
@@ -514,11 +509,10 @@ const Analytics = () => {
     [details],
   );
 
-  const timelineDataWithCritical = useMemo(() => {
+  const timelineData = useMemo(() => {
     return timeline.map((item) => ({
       ...item,
-      total: item.count,
-      critical: item.critical ?? 0,
+      count: item.count,
     }));
   }, [timeline]);
 
@@ -707,7 +701,7 @@ const Analytics = () => {
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
-                    data={timelineDataWithCritical}
+                    data={timelineData}
                     margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
                   >
                     <defs>
@@ -729,24 +723,6 @@ const Analytics = () => {
                           stopOpacity={0.01}
                         />
                       </linearGradient>
-                      <linearGradient
-                        id="criticalGradient"
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop
-                          offset="5%"
-                          stopColor="#ef4444"
-                          stopOpacity={0.15}
-                        />
-                        <stop
-                          offset="95%"
-                          stopColor="#ef4444"
-                          stopOpacity={0.01}
-                        />
-                      </linearGradient>
                     </defs>
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -765,7 +741,7 @@ const Analytics = () => {
                       fontSize={10}
                       tickLine={false}
                       axisLine={false}
-                      domain={[0, 15]}
+                      domain={[0, "auto"]}
                       tickCount={6}
                     />
                     <Tooltip
@@ -781,22 +757,12 @@ const Analytics = () => {
                         fontWeight: 600,
                       }}
                     />
-                    {/* Area Total (Green) */}
                     <Area
                       type="monotone"
-                      dataKey="total"
+                      dataKey="count"
                       stroke="#10b981"
                       strokeWidth={2}
                       fill="url(#totalGradient)"
-                      dot={{ r: 2, strokeWidth: 1 }}
-                    />
-                    {/* Area Critical (Red) */}
-                    <Area
-                      type="monotone"
-                      dataKey="critical"
-                      stroke="#ef4444"
-                      strokeWidth={1.5}
-                      fill="url(#criticalGradient)"
                       dot={{ r: 2, strokeWidth: 1 }}
                     />
                   </AreaChart>

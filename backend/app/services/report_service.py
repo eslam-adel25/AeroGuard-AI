@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
-from datetime import date
+from datetime import date, datetime, timedelta
 from ..models.models import Detection, Camera
 
 
@@ -28,6 +28,8 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
         return "persons"
     if any(token in value for token in ["vehicle", "car", "truck", "bus"]):
         return "vehicles"
+    if any(token in value for token in ["unknown", "suspicious", "unidentified", "object"]):
+        return "suspicious_objects"
 
     return None
 
@@ -101,6 +103,7 @@ class ReportService:
             "weapons": 0,
             "persons": 0,
             "vehicles": 0,
+            "suspicious_objects": 0,
             "restricted_area_violations": 0,
             "wrong_direction": 0,
             "loitering": 0,
@@ -245,47 +248,73 @@ class ReportService:
             for row in recent_rows
         ]
 
-        # 11. مخطط زمني حسب اليوم
-        timeline_rows = db.query(
-            func.date(Detection.detected_at).label("day"),
-            func.count(Detection.detection_id).label("count"),
-        ).filter(
-            and_(*filters),
-        ).group_by(
-            func.date(Detection.detected_at),
-        ).order_by(
-            func.date(Detection.detected_at),
-        ).all()
+        # 11. مخطط زمني حسب الفترة الزمنية المناسبة
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.max.time())
+        span_days = (end_dt - start_dt).days + 1
 
-        timeline = [
-            {
-                "label": str(row.day),
-                "date": str(row.day),
-                "count": int(row.count or 0),
-            }
-            for row in timeline_rows
-        ]
+        detection_times = db.query(Detection.detected_at).filter(and_(*filters)).all()
 
-        # 12. Heatmap: كثافة حسب الساعة
-        heatmap_rows = db.query(
-            func.extract("hour", Detection.detected_at).label("hour"),
-            func.count(Detection.detection_id).label("count"),
-        ).filter(
-            and_(*filters),
-        ).group_by(
-            func.extract("hour", Detection.detected_at),
-        ).order_by(
-            func.extract("hour", Detection.detected_at),
-        ).all()
+        if span_days <= 1:
+            bucket_counts = {hour: 0 for hour in range(24)}
+            for (detected_at,) in detection_times:
+                bucket_counts[detected_at.hour if detected_at else 0] += 1
+            timeline = [
+                {
+                    "label": f"{hour:02d}:00",
+                    "hour": hour,
+                    "count": bucket_counts[hour],
+                }
+                for hour in range(24)
+            ]
+        elif span_days <= 14:
+            bucket_counts = {}
+            current_day = start_dt.date()
+            while current_day <= end_dt.date():
+                bucket_counts[current_day.strftime("%Y-%m-%d")] = 0
+                current_day += timedelta(days=1)
+            for (detected_at,) in detection_times:
+                day_bucket = detected_at.date().strftime("%Y-%m-%d") if detected_at else start_dt.date().strftime("%Y-%m-%d")
+                bucket_counts[day_bucket] = bucket_counts.get(day_bucket, 0) + 1
+            timeline = [
+                {
+                    "label": day,
+                    "day": day,
+                    "count": bucket_counts[day],
+                }
+                for day in sorted(bucket_counts)
+            ]
+        else:
+            bucket_counts = {}
+            current_day = start_dt.date()
+            while current_day <= end_dt.date():
+                week_start = current_day - timedelta(days=current_day.weekday())
+                week_key = week_start.strftime("%Y-%m-%d")
+                bucket_counts[week_key] = bucket_counts.get(week_key, 0)
+                current_day += timedelta(days=1)
+            for (detected_at,) in detection_times:
+                day_value = detected_at.date() if detected_at else start_dt.date()
+                week_start = day_value - timedelta(days=day_value.weekday())
+                week_key = week_start.strftime("%Y-%m-%d")
+                bucket_counts[week_key] = bucket_counts.get(week_key, 0) + 1
+            timeline = [
+                {
+                    "label": week,
+                    "count": bucket_counts[week],
+                }
+                for week in sorted(bucket_counts)
+            ]
 
-        heatmap = [
-            {
-                "hour": int(row.hour),
-                "label": f"{int(row.hour):02d}:00",
-                "count": int(row.count or 0),
-            }
-            for row in heatmap_rows
-        ]
+        heatmap = []
+        for hour in range(24):
+            hour_count = sum(1 for detected_at in [value[0] for value in detection_times] if detected_at and detected_at.hour == hour)
+            heatmap.append(
+                {
+                    "hour": hour,
+                    "label": f"{hour:02d}:00",
+                    "count": hour_count,
+                }
+            )
 
         # 13. توزيع الشدة بالنسبة المئوية
         severity_distribution = []
@@ -301,10 +330,6 @@ class ReportService:
             )
 
         active_cameras = sum(1 for c in cameras if (c.get("status") or "").lower() in {"online", "running", "processing", "active"})
-
-        accuracy = None
-        if total:
-            accuracy = round((1 - (violations / total)) * 100, 2) if total else None
 
         zone_frequency_rows = db.query(
             Camera.camera_name,
@@ -333,6 +358,7 @@ class ReportService:
                 "medium_alerts": severity_counts["Medium"],
                 "low_alerts": severity_counts["Low"],
                 "fire": categorized_counts["fire"] + categorized_counts["smoke"],
+                "suspicious_objects": categorized_counts["suspicious_objects"],
                 "weapons": categorized_counts["weapons"],
                 "persons": categorized_counts["persons"],
                 "vehicles": categorized_counts["vehicles"],
@@ -348,9 +374,8 @@ class ReportService:
                 "abandoned_bag_events": categorized_counts["abandoned_bag"],
                 "max_confidence": float(max_conf),
                 "min_confidence": float(min_conf),
-                "average_confidence": round(float(avg_conf), 2),
+                "average_confidence": round(float(avg_conf or 0) * 100, 2) if avg_conf is not None else 0,
                 "active_cameras": active_cameras,
-                "ai_accuracy": accuracy,
             },
             "details": details,
             "charts": {
