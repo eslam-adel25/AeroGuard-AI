@@ -360,9 +360,13 @@ class AIProcessor:
             next_point = points[(idx + 1) % len(points)]
             cv2.line(frame, point, next_point, color, thickness, cv2.LINE_AA)
 
-        label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
-        text_width = label_size[0]
-        text_height = label_size[1]
+        lines = str(label).split("\n")
+        line_sizes = [cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness) for line in lines]
+        text_width = max(size[0][0] for size in line_sizes)
+        line_height = max(size[0][1] for size in line_sizes)
+        baseline = max(size[1] for size in line_sizes)
+        line_spacing = max(2, padding // 2)
+        text_height = line_height * len(lines) + line_spacing * max(0, len(lines) - 1)
 
         text_color = AIProcessor._get_text_color(color)
         label_x = max(0, int(x1 + max(1, padding // 2)))
@@ -370,19 +374,21 @@ class AIProcessor:
         label_x1 = max(0, label_x - max(1, padding // 2))
         label_y1 = max(0, label_y - text_height - max(1, padding // 2))
         label_x2 = min(frame.shape[1], label_x + text_width + max(1, padding // 2))
-        label_y2 = min(frame.shape[0], label_y + baseline + max(1, padding // 2))
+        label_y2 = min(frame.shape[0], label_y + baseline + max(1, padding // 2) + text_height - line_height)
 
         cv2.rectangle(frame, (label_x1, label_y1), (label_x2, label_y2), color, -1)
-        cv2.putText(
-            frame,
-            label,
-            (label_x, label_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            text_color,
-            text_thickness,
-            cv2.LINE_AA,
-        )
+        for idx, line in enumerate(lines):
+            line_y = label_y + idx * (line_height + line_spacing)
+            cv2.putText(
+                frame,
+                line,
+                (label_x, line_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                text_color,
+                text_thickness,
+                cv2.LINE_AA,
+            )
 
     async def process_camera(self, camera_id, rtsp_url, db: Session = None):
         """المحرك الشامل: معالجة البث الحي أو الفيديوهات المرفوعة (Section 5 & 13)"""
@@ -636,10 +642,11 @@ class AIProcessor:
                     display_id = display_ids.get(obj_id, 0)
                     if label_name in {"bag", "backpack", "suitcase"}:
                         overlay_owner_id = bag_owner_map.get(obj_id)
-                        overlay_label = f"Owner:{overlay_owner_id:03d} Bag" if overlay_owner_id is not None else f"Bag"
+                        object_label = f"Owner:{overlay_owner_id:03d} Bag" if overlay_owner_id is not None else "Bag"
                     else:
-                        overlay_label = self._format_overlay_label(display_id, label_name)
+                        object_label = self._format_overlay_label(display_id, label_name)
 
+                    overlay_label = object_label
                     in_restricted = False
                     for zone in zones:
                         try:
@@ -667,6 +674,7 @@ class AIProcessor:
                                             status = "DANGER"
                                             box_color = (0, 0, 255)
                                             display_label = "WRONG DIRECTION"
+                                            overlay_label = f"{object_label}\nWRONG DIRECTION"
                                             alert_key = f"{camera_id}_{obj_id}_WRONG_DIR_{getattr(zone, 'zone_id', '')}"
                                             if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
                                                 try:
@@ -703,6 +711,7 @@ class AIProcessor:
                                         status = "DANGER"
                                         box_color = (0, 0, 255)
                                         display_label = "TRIPWIRE"
+                                        overlay_label = f"{object_label}\nTRIPWIRE CROSSED"
                                         alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
                                         if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
                                             try:
@@ -734,7 +743,8 @@ class AIProcessor:
                                     in_restricted = True
                                     status = "DANGER"
                                     box_color = (0, 0, 255)
-                                    display_label = f"RESTRICTED AREA"
+                                    display_label = "RESTRICTED AREA"
+                                    overlay_label = f"{object_label}\nRESTRICTED AREA"
                                     break
                         except Exception:
                             # ignore malformed zone data for robustness
