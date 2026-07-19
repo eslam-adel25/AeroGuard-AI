@@ -880,18 +880,6 @@ class AIProcessor:
                                         })
                                         self.last_alert_time[alert_key] = time.time()
 
-                    draw_settings = self._get_overlay_draw_settings(annotated_frame.shape)
-                    self._draw_detection_overlay(
-                        annotated_frame,
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        overlay_label,
-                        box_color,
-                        draw_settings,
-                    )
-
                     # Fire / Smoke immediate critical events
                     # Check if fire/smoke detection is enabled
                     fire_enabled = getattr(self.active_settings, "fire_detection_enabled", False) or False
@@ -906,8 +894,11 @@ class AIProcessor:
                         status = "DANGER"
                         box_color = (0, 0, 255)
                         display_label = label_name.upper()
+                        overlay_label = f"{object_label}\n{display_label}"
 
                     if status in ["DANGER", "WARNING"]:
+                        if overlay_label == object_label:
+                            overlay_label = f"{object_label}\n{display_label}"
                         alert_key = f"{camera_id}_{obj_id}_{status}"
                         if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
                             # also register AIEvent and broadcast
@@ -939,6 +930,18 @@ class AIProcessor:
                                 }
                             })
                             self.last_alert_time[alert_key] = time.time()
+
+                    draw_settings = self._get_overlay_draw_settings(annotated_frame.shape)
+                    self._draw_detection_overlay(
+                        annotated_frame,
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        overlay_label,
+                        box_color,
+                        draw_settings,
+                    )
 
                 elapsed = time.time() - start_time
                 current_fps = int(1.0 / elapsed) if elapsed > 0 else 30
