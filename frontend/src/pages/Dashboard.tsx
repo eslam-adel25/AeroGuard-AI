@@ -11,7 +11,6 @@ import {
   getStoredAuthToken,
   type ZoneCreateData,
 } from "../services/api";
-
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
 import { useTranslation } from "react-i18next";
@@ -28,6 +27,19 @@ import {
   ChevronLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
+
+function formatLocalDateTime(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getFullYear();
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  const hourString = String(hours).padStart(2, "0");
+  return `${month}/${day}/${year} ${hourString}:${minutes}:${seconds} ${ampm}`;
+}
 
 interface AlertData {
   camera_id: string;
@@ -58,6 +70,9 @@ const Dashboard = () => {
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
+  const [localDateTime, setLocalDateTime] = useState(() =>
+    formatLocalDateTime(new Date()),
+  );
   const [cameraStatus, setCameraStatus] = useState<
     "Running" | "Offline" | "Processing"
   >("Offline");
@@ -122,6 +137,13 @@ const Dashboard = () => {
   useEffect(() => {
     selectedCameraRef.current = selectedCamera;
   }, [selectedCamera]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setLocalDateTime(formatLocalDateTime(new Date()));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const token = getStoredAuthToken();
@@ -508,54 +530,59 @@ const Dashboard = () => {
             className="relative flex-1 min-w-0 h-full overflow-hidden"
           >
             {/* Compact Top-Center Status Bar */}
-            <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2 pointer-events-none inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
-              <span className="flex items-center gap-2">
-                <span className="text-[14px]">📹</span>
-                <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
-                  {selectedCameraName}
+            <div className="absolute top-4 left-1/2 z-40 -translate-x-1/2 pointer-events-none inline-flex items-center gap-4">
+              <div className="inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
+                <span className="flex items-center gap-2">
+                  <span className="text-[14px]">📹</span>
+                  <span className="max-w-[140px] overflow-hidden text-ellipsis text-white/90">
+                    {selectedCameraName}
+                  </span>
                 </span>
-              </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-2 text-[14px] text-white">
-                <span className="h-2 w-2 rounded-full bg-ag-success" />
-                {cameraStatus}
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-2 text-[14px] text-white">
+                  <span className="h-2 w-2 rounded-full bg-ag-success" />
+                  {cameraStatus}
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                FPS: <span className="font-black text-ag-success">{fps}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  FPS: <span className="font-black text-ag-success">{fps}</span>
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                <span>🧳</span>
-                <span className="font-black">{bagCount}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  <span>🧳</span>
+                  <span className="font-black">{bagCount}</span>
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                <span>❓</span>
-                <span className="font-black">{unknownObjectCount}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  <span>❓</span>
+                  <span className="font-black">{unknownObjectCount}</span>
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                <span>👤</span>
-                <span className="font-black">{peopleCount}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  <span>👤</span>
+                  <span className="font-black">{peopleCount}</span>
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                <span>🚨</span>
-                <span className="font-black">{criticalAlertCount}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  <span>🚨</span>
+                  <span className="font-black">{criticalAlertCount}</span>
+                </span>
 
-              <span className="text-white/50">|</span>
-              <span className="flex items-center gap-1 text-white/90">
-                <span>🚗</span>
-                <span className="font-black">{carCount}</span>
-              </span>
+                <span className="text-white/50">|</span>
+                <span className="flex items-center gap-1 text-white/90">
+                  <span>🚗</span>
+                  <span className="font-black">{carCount}</span>
+                </span>
+              </div>
+              <div className="inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
+                {localDateTime}
+              </div>
             </div>
 
             {/* Floating Violation Alerts */}
