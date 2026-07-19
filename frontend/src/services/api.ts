@@ -11,6 +11,10 @@ export interface ZoneCreateData {
   polygon_coords: [number, number][]; // مصفوفة من الإحداثيات [x, y]
 }
 
+export interface ZoneData extends ZoneCreateData {
+  zone_id: string;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
@@ -180,13 +184,15 @@ export const cameraService = {
 
   stop: (id: string) => api.post(`/cameras/${id}/stop`),
 
-  getZones: (id: string) => api.get(`/cameras/${id}/zones`),
+  getZones: (id: string) => api.get<ZoneData[]>(`/cameras/${id}/zones`),
+  deleteZone: (cameraId: string, zoneId: string) =>
+    api.delete(`/cameras/${cameraId}/zones/${zoneId}`),
 
   delete: (id: string) => api.delete(`/cameras/${id}`),
 
   // تم استبدال any بـ ZoneCreateData لحل الخطأ الثاني
   addZone: (id: string, data: ZoneCreateData) =>
-    api.post(`/cameras/${id}/zones`, data),
+    api.post<ZoneData>(`/cameras/${id}/zones`, data),
 };
 
 export const settingsService = {

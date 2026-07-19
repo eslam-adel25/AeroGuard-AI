@@ -162,6 +162,11 @@ class ZoneCreate(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class ZoneResponse(ZoneCreate):
+    zone_id: UUID
+
+    model_config = {"from_attributes": True}
+
 # قالب لبيانات الـ FPS القادمة من الـ AI
 class AIStatusUpdate(BaseModel):
     fps: int

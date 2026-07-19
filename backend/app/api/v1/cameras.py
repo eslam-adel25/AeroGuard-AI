@@ -10,7 +10,7 @@ import asyncio
 
 from ...database.session import get_db
 from ...models.models import Camera, RestrictedZone, AIEvent, Detection, Tracking
-from ...schemas.schemas import CameraResponse, ZoneCreate
+from ...schemas.schemas import CameraResponse, ZoneCreate, ZoneResponse
 from ...core.auth_middleware import get_current_user
 from ...repositories.camera_repository import CameraRepository
 from ...ai.processor import ai_engine 
@@ -78,7 +78,7 @@ async def add_camera(
     return created
 
 # 2. إدارة المناطق المحظورة (Restricted Zones) لكل كاميرا
-@router.post("/{camera_id}/zones")
+@router.post("/{camera_id}/zones", response_model=ZoneResponse)
 def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
 
@@ -91,14 +91,29 @@ def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(
     )
     db.add(new_zone)
     db.commit()
-    return {"message": "Zone added successfully"}
+    db.refresh(new_zone)
+    return new_zone
 
 
-@router.get("/{camera_id}/zones")
+@router.get("/{camera_id}/zones", response_model=list[ZoneResponse])
 def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     zones = db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
     return zones
+
+
+@router.delete("/{camera_id}/zones/{zone_id}")
+def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    cam = _get_camera_for_user(db, camera_id, current_user)
+    zone = db.query(RestrictedZone).filter(
+        RestrictedZone.zone_id == zone_id,
+        RestrictedZone.camera_id == camera_id,
+    ).first()
+    if not zone:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    db.delete(zone)
+    db.commit()
+    return {"message": "Zone deleted successfully"}
 
 # 3. تشغيل الـ AI
 @router.post("/{camera_id}/start")

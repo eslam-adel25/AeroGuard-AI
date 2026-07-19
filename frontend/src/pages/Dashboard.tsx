@@ -10,6 +10,7 @@ import {
   cameraService,
   getStoredAuthToken,
   type ZoneCreateData,
+  type ZoneData,
 } from "../services/api";
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
@@ -90,6 +91,7 @@ const Dashboard = () => {
   const [drawingPoints, setDrawingPoints] = useState<Array<[number, number]>>(
     [],
   );
+  const [savedZones, setSavedZones] = useState<ZoneData[]>([]);
   const [drawingMode, setDrawingMode] = useState<
     "restricted" | "direction" | "tripwire"
   >("restricted");
@@ -137,6 +139,16 @@ const Dashboard = () => {
   useEffect(() => {
     selectedCameraRef.current = selectedCamera;
   }, [selectedCamera]);
+
+  const fetchZones = useCallback(async (cameraId: string) => {
+    try {
+      const response = await cameraService.getZones(cameraId);
+      setSavedZones(response.data as ZoneData[]);
+    } catch (error) {
+      console.error("Failed to load zones:", error);
+      setSavedZones([]);
+    }
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -273,6 +285,21 @@ const Dashboard = () => {
     ];
   };
 
+  const getSavedZoneCanvasCoords = useCallback((coords: [number, number][]) => {
+    const vid = videoRef.current;
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return [];
+
+    const rect = canvas.getBoundingClientRect();
+    const nativeW =
+      (vid && (vid as HTMLImageElement).naturalWidth) || rect.width;
+    const nativeH =
+      (vid && (vid as HTMLImageElement).naturalHeight) || rect.height;
+    const scaleX = rect.width / nativeW;
+    const scaleY = rect.height / nativeH;
+    return coords.map(([x, y]) => [x * scaleX, y * scaleY] as [number, number]);
+  }, []);
+
   const updateOverlayCanvas = useCallback(() => {
     const canvas = overlayCanvasRef.current;
     const video = videoRef.current;
@@ -296,6 +323,62 @@ const Dashboard = () => {
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const drawZone = (
+      zone: ZoneData,
+      fill = false,
+      strokeStyle = "rgba(255, 255, 255, 0.9)",
+      lineWidth = 2,
+    ) => {
+      const canvasCoords = getSavedZoneCanvasCoords(zone.polygon_coords);
+      if (canvasCoords.length === 0) return;
+      const path = new Path2D();
+      canvasCoords.forEach(([x, y], index) => {
+        if (index === 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      });
+      if (zone.zone_type.toLowerCase().includes("direction")) {
+        ctx.strokeStyle = "rgba(56, 161, 255, 0.95)";
+        ctx.lineWidth = 3;
+        ctx.stroke(path);
+        if (canvasCoords.length >= 2) {
+          const last = canvasCoords[canvasCoords.length - 1];
+          const before = canvasCoords[canvasCoords.length - 2];
+          const dx = last[0] - before[0];
+          const dy = last[1] - before[1];
+          const arrowX = last[0] - dx * 0.2;
+          const arrowY = last[1] - dy * 0.2;
+          ctx.beginPath();
+          ctx.moveTo(last[0], last[1]);
+          ctx.lineTo(arrowX - dy * 0.1, arrowY + dx * 0.1);
+          ctx.lineTo(arrowX + dy * 0.1, arrowY - dx * 0.1);
+          ctx.closePath();
+          ctx.fillStyle = "rgba(56, 161, 255, 0.95)";
+          ctx.fill();
+        }
+        return;
+      }
+      if (zone.zone_type.toLowerCase().includes("tripwire")) {
+        ctx.strokeStyle = "rgba(250, 204, 21, 0.95)";
+        ctx.lineWidth = 3;
+        ctx.stroke(path);
+        return;
+      }
+      if (fill) {
+        ctx.fillStyle = "rgba(255, 0, 0, 0.18)";
+        ctx.fill(path);
+      }
+      ctx.strokeStyle = strokeStyle;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke(path);
+    };
+
+    savedZones.forEach((zone) =>
+      drawZone(zone, zone.zone_type.toLowerCase().includes("restricted")),
+    );
 
     if (drawingPoints.length === 0) return;
 
@@ -350,7 +433,13 @@ const Dashboard = () => {
       ctx.fill();
       ctx.stroke();
     });
-  }, [drawingPoints, drawingMode, hoverPoint]);
+  }, [
+    drawingPoints,
+    drawingMode,
+    hoverPoint,
+    savedZones,
+    getSavedZoneCanvasCoords,
+  ]);
 
   useLayoutEffect(() => {
     updateOverlayCanvas();
@@ -373,6 +462,14 @@ const Dashboard = () => {
     };
     updateForCamera();
   }, [selectedCamera, updateOverlayCanvas, drawOverlay]);
+
+  useEffect(() => {
+    if (selectedCamera) {
+      void fetchZones(selectedCamera);
+    } else {
+      setSavedZones([]);
+    }
+  }, [selectedCamera, fetchZones]);
 
   const enterDrawingMode = useCallback(() => {
     setDrawingPoints([]);
@@ -402,6 +499,19 @@ const Dashboard = () => {
     setDrawingInstructions(t("dashboard.drawingInstructions.cleared"));
     setTimeout(() => setDrawingInstructions(""), 1800);
   }, [t]);
+
+  const deleteZone = useCallback(
+    async (zoneId: string) => {
+      if (!selectedCamera) return;
+      try {
+        await cameraService.deleteZone(selectedCamera, zoneId);
+        await fetchZones(selectedCamera);
+      } catch (err) {
+        console.error("Failed to delete zone:", err);
+      }
+    },
+    [fetchZones, selectedCamera],
+  );
 
   const saveDrawing = useCallback(async () => {
     // Persist the drawing as a zone to backend (scaled to native video size if available)
@@ -445,6 +555,7 @@ const Dashboard = () => {
         };
         await cameraService.addZone(selectedCamera, payload);
         setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
+        await fetchZones(selectedCamera);
       } catch (err) {
         console.error("Failed to save zone:", err);
         setDrawingInstructions(
@@ -457,7 +568,7 @@ const Dashboard = () => {
       setIsSidebarOpen(false);
       setTimeout(() => setDrawingInstructions(""), 2200);
     }
-  }, [t, drawingPoints, drawingMode, selectedCamera]);
+  }, [t, drawingPoints, drawingMode, selectedCamera, fetchZones]);
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
@@ -835,6 +946,35 @@ const Dashboard = () => {
                         {drawingPoints.length}
                       </span>
                     </div>
+
+                    {savedZones.length > 0 ? (
+                      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-white">
+                        <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-gray-400">
+                          <span>{t("dashboard.savedZones")}</span>
+                          <span className="text-white/70">
+                            {savedZones.length}
+                          </span>
+                        </div>
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                          {savedZones.map((zone) => (
+                            <div
+                              key={zone.zone_id}
+                              className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2"
+                            >
+                              <div className="min-w-0 text-[11px] text-white/90 overflow-hidden text-ellipsis whitespace-nowrap">
+                                {zone.zone_name}
+                              </div>
+                              <button
+                                onClick={() => deleteZone(zone.zone_id)}
+                                className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-gray-200 hover:bg-white/10 transition"
+                              >
+                                {t("common.delete")}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
                     {/* Action Buttons */}
                     <div className="flex flex-wrap gap-2">
