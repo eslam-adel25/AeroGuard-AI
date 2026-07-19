@@ -53,7 +53,8 @@ const Dashboard = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fps, setFps] = useState(0);
-  const [detectionCount, setDetectionCount] = useState(0);
+  const [bagCount, setBagCount] = useState(0);
+  const [unknownObjectCount, setUnknownObjectCount] = useState(0);
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
@@ -145,9 +146,18 @@ const Dashboard = () => {
           return;
         }
         setFps(message.data.fps ?? 0);
-        setDetectionCount(message.data.objects ?? 0);
+        setBagCount(message.data.bags ?? 0);
         setPeopleCount(message.data.persons ?? 0);
         setCarCount(message.data.cars ?? 0);
+        setUnknownObjectCount(
+          Math.max(
+            0,
+            (message.data.objects ?? 0) -
+              (message.data.persons ?? 0) -
+              (message.data.bags ?? 0) -
+              (message.data.cars ?? 0),
+          ),
+        );
         if (message.data.critical_alerts !== undefined) {
           setCriticalAlertCount(message.data.critical_alerts);
         }
@@ -519,8 +529,14 @@ const Dashboard = () => {
 
               <span className="text-white/50">|</span>
               <span className="flex items-center gap-1 text-white/90">
-                <span>🎯</span>
-                <span className="font-black">{detectionCount}</span>
+                <span>🧳</span>
+                <span className="font-black">{bagCount}</span>
+              </span>
+
+              <span className="text-white/50">|</span>
+              <span className="flex items-center gap-1 text-white/90">
+                <span>❓</span>
+                <span className="font-black">{unknownObjectCount}</span>
               </span>
 
               <span className="text-white/50">|</span>
