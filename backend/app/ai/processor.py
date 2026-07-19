@@ -43,6 +43,32 @@ def build_detection_record(camera_id, owner_id, detection_type, confidence, stat
     )
 
 
+def _normalize_zone_coords(raw_coords, camera_id=None, annotation_id=None, rule_type=None):
+    """Normalize zone coordinates so all rule checks receive a plain coordinate list."""
+    if isinstance(raw_coords, dict):
+        points = raw_coords.get("points")
+        if isinstance(points, list):
+            normalized = []
+            for point in points:
+                if isinstance(point, (list, tuple)) and len(point) >= 2:
+                    normalized.append([float(point[0]), float(point[1])])
+                else:
+                    raise ValueError(
+                        f"Invalid coordinate point in zone annotation: camera={camera_id} annotation={annotation_id} rule={rule_type} point={point!r}"
+                    )
+            return normalized
+        raise ValueError(
+            f"Invalid wrapped zone payload: camera={camera_id} annotation={annotation_id} rule={rule_type} payload={raw_coords!r}"
+        )
+
+    if isinstance(raw_coords, list):
+        return raw_coords
+
+    raise ValueError(
+        f"Unsupported zone coordinate format: camera={camera_id} annotation={annotation_id} rule={rule_type} value={raw_coords!r}"
+    )
+
+
 class AIProcessor:
     def __init__(self, model_path: str):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
@@ -650,7 +676,12 @@ class AIProcessor:
                     in_restricted = False
                     for zone in zones:
                         try:
-                            coords = zone.polygon_coords or []
+                            coords = _normalize_zone_coords(
+                                getattr(zone, "polygon_coords", None),
+                                camera_id=camera_id,
+                                annotation_id=getattr(zone, "zone_id", None),
+                                rule_type="zone",
+                            )
                             if not coords:
                                 continue
                             ztype = (zone.zone_type or "").lower()
@@ -746,8 +777,10 @@ class AIProcessor:
                                     display_label = "RESTRICTED AREA"
                                     overlay_label = f"{object_label}\nRESTRICTED AREA"
                                     break
-                        except Exception:
-                            # ignore malformed zone data for robustness
+                        except Exception as zone_exc:
+                            print(
+                                f"⚠️ [{camera_id}] failed to normalize zone annotation zone={getattr(zone, 'zone_id', None)} rule={getattr(zone, 'zone_type', None)}: {type(zone_exc).__name__}: {zone_exc}"
+                            )
                             continue
 
                     # legacy wrong-direction vertical heuristic (kept for backward compatibility)
