@@ -22,8 +22,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -35,6 +33,7 @@ import {
   XAxis,
   YAxis,
   LabelList,
+  type TooltipContentProps,
 } from "recharts";
 
 type CameraOption = {
@@ -71,11 +70,24 @@ type DetectionTypeItem = {
 };
 
 type TimelineItem = {
+  bucket_value?: string;
   label: string;
   day?: string;
   hour?: number;
+  camera_id?: string;
+  camera_name?: string;
   count: number;
   critical?: number;
+};
+
+type FrequencyBucket = {
+  label: string;
+  values: Record<string, number>;
+};
+
+type FrequencyTimelineData = {
+  data: Array<Record<string, number | string>>;
+  cameras: Array<[string, string]>;
 };
 
 type SeverityItem = {
@@ -504,17 +516,141 @@ const Analytics = () => {
     return severity.reduce((acc, curr) => acc + curr.count, 0).toLocaleString();
   }, [severity]);
 
-  const threatBarData = useMemo(
-    () => details.map((d) => ({ type: d.type, count: d.count })),
-    [details],
-  );
+  const threatBarData = useMemo(() => {
+    const categoryOrder = [
+      "Person",
+      "Baggage",
+      "Fire",
+      "Vehicle",
+      "Suspicious Object",
+    ];
 
-  const timelineData = useMemo(() => {
-    return timeline.map((item) => ({
-      ...item,
-      count: item.count,
+    const countsByCategory = new Map<string, number>();
+    details.forEach((item) => {
+      const normalized = item.type?.trim().toLowerCase();
+      if (!normalized) return;
+      if (normalized === "fire/smoke" || normalized === "fire") {
+        countsByCategory.set("Fire", item.count);
+        return;
+      }
+      if (normalized === "person" || normalized === "persons") {
+        countsByCategory.set("Person", item.count);
+        return;
+      }
+      if (normalized === "baggage" || normalized === "bag") {
+        countsByCategory.set("Baggage", item.count);
+        return;
+      }
+      if (normalized === "vehicle" || normalized === "vehicles") {
+        countsByCategory.set("Vehicle", item.count);
+        return;
+      }
+      if (normalized === "suspicious object" || normalized === "suspicious") {
+        countsByCategory.set("Suspicious Object", item.count);
+        return;
+      }
+      countsByCategory.set(item.type, item.count);
+    });
+
+    const prepared = categoryOrder.map((category) => ({
+      type: category,
+      count: countsByCategory.get(category) ?? 0,
     }));
+
+    return [...prepared].sort((a, b) => {
+      if (b.count !== a.count) {
+        return b.count - a.count;
+      }
+      return categoryOrder.indexOf(a.type) - categoryOrder.indexOf(b.type);
+    });
+  }, [details]);
+
+  const frequencyTimelineData = useMemo<FrequencyTimelineData>(() => {
+    const buckets = new Map<string, FrequencyBucket>();
+    const cameras = new Map<string, string>();
+
+    timeline.forEach((row) => {
+      const bucketKey = row.bucket_value ?? row.label;
+      const bucketLabel = row.label ?? bucketKey;
+      const cameraId = row.camera_id ?? "unknown";
+      const cameraName = row.camera_name ?? "Unknown Camera";
+      cameras.set(cameraId, cameraName);
+
+      const bucket = buckets.get(bucketKey);
+      if (bucket) {
+        bucket.values[cameraId] = (bucket.values[cameraId] || 0) + row.count;
+      } else {
+        buckets.set(bucketKey, {
+          label: bucketLabel,
+          values: {
+            [cameraId]: row.count,
+          },
+        });
+      }
+    });
+
+    const cameraOrder = Array.from(cameras.entries()).sort((a, b) => {
+      const totalA = Array.from(buckets.values()).reduce(
+        (sum, entry) => sum + (entry.values[a[0]] || 0),
+        0,
+      );
+      const totalB = Array.from(buckets.values()).reduce(
+        (sum, entry) => sum + (entry.values[b[0]] || 0),
+        0,
+      );
+      return totalB - totalA;
+    });
+
+    const cameraIds = cameraOrder.map(([cameraId]) => cameraId);
+
+    return {
+      data: Array.from(buckets.values()).map((bucket) => {
+        const row: Record<string, number | string> = { label: bucket.label };
+        cameraIds.forEach((cameraId) => {
+          row[cameraId] = bucket.values[cameraId] ?? 0;
+        });
+        return row;
+      }),
+      cameras: cameraOrder,
+    };
   }, [timeline]);
+
+  const renderFrequencyTooltip = useCallback((props: TooltipContentProps) => {
+    const { active, payload, label } = props;
+    if (!active || !payload || payload.length === 0) {
+      return null;
+    }
+
+    const total = payload.reduce((sum: number, entry) => {
+      const value = typeof entry.value === "number" ? entry.value : 0;
+      return sum + value;
+    }, 0);
+
+    return (
+      <div className="rounded-xl border border-[#162235] bg-[#0d1527] p-3 text-xs text-slate-100">
+        <div className="text-slate-300 mb-2 text-[11px] font-semibold">
+          {label}
+        </div>
+        {payload.map((entry, index) => (
+          <div key={index} className="flex items-center justify-between gap-4">
+            <span className="text-slate-300">{entry.name}</span>
+            <span className="font-semibold text-white">
+              {typeof entry.value === "number" ? entry.value : entry.value}
+            </span>
+          </div>
+        ))}
+        <div className="border-t border-white/10 mt-2 pt-2 flex items-center justify-between text-slate-300">
+          <span>Total</span>
+          <span className="font-semibold text-white">{total}</span>
+        </div>
+      </div>
+    );
+  }, []);
+
+  const heatmapMaxCount = useMemo(() => {
+    const counts = heatmap.map((item) => item.count);
+    return counts.length > 0 ? Math.max(...counts) : 0;
+  }, [heatmap]);
 
   return (
     <div className="min-h-screen bg-[#070e17] text-[#f8fafc] p-4 md:p-6 lg:p-8 font-sans antialiased space-y-6">
@@ -686,44 +822,37 @@ const Analytics = () => {
                   {t("analytics.chartTitles.timeline")}
                 </h3>
                 {/* Custom HTML Legend */}
-                <div className="flex items-center gap-4 text-[10px] font-semibold">
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-                    Total
-                  </span>
-                  <span className="flex items-center gap-1.5 text-slate-300">
-                    <span className="w-2 h-2 rounded-full bg-[#ef4444]" />
-                    Critical
-                  </span>
+                <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold">
+                  {frequencyTimelineData.cameras.map((camera, index) => (
+                    <span
+                      key={camera[0]}
+                      className="flex items-center gap-1.5 text-slate-300"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{
+                          backgroundColor: [
+                            "#10b981",
+                            "#22c55e",
+                            "#0ea5e9",
+                            "#f97316",
+                            "#a855f7",
+                            "#ec4899",
+                          ][index % 6],
+                        }}
+                      />
+                      {camera[1]}
+                    </span>
+                  ))}
                 </div>
               </div>
 
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={timelineData}
+                  <BarChart
+                    data={frequencyTimelineData.data}
                     margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
                   >
-                    <defs>
-                      <linearGradient
-                        id="totalGradient"
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop
-                          offset="5%"
-                          stopColor="#10b981"
-                          stopOpacity={0.15}
-                        />
-                        <stop
-                          offset="95%"
-                          stopColor="#10b981"
-                          stopOpacity={0.01}
-                        />
-                      </linearGradient>
-                    </defs>
                     <CartesianGrid
                       strokeDasharray="3 3"
                       stroke="#162235"
@@ -745,6 +874,7 @@ const Analytics = () => {
                       tickCount={6}
                     />
                     <Tooltip
+                      content={renderFrequencyTooltip}
                       contentStyle={{
                         backgroundColor: "#0d1527",
                         borderColor: "#162235",
@@ -757,15 +887,26 @@ const Analytics = () => {
                         fontWeight: 600,
                       }}
                     />
-                    <Area
-                      type="monotone"
-                      dataKey="count"
-                      stroke="#10b981"
-                      strokeWidth={2}
-                      fill="url(#totalGradient)"
-                      dot={{ r: 2, strokeWidth: 1 }}
-                    />
-                  </AreaChart>
+                    {frequencyTimelineData.cameras.map((camera, index) => (
+                      <Bar
+                        key={`camera-${camera[0]}`}
+                        name={camera[1]}
+                        dataKey={camera[0]}
+                        stackId="a"
+                        fill={
+                          [
+                            "#10b981",
+                            "#22c55e",
+                            "#0ea5e9",
+                            "#f97316",
+                            "#a855f7",
+                            "#ec4899",
+                          ][index % 6]
+                        }
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
@@ -997,20 +1138,23 @@ const Analytics = () => {
                 {t("analytics.chartTitles.heatmap")}
               </h3>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto py-2 flex-1">
+              <div className="grid grid-cols-12 gap-2 py-2 flex-1 items-end">
                 {heatmap.map((item, index) => {
-                  let bgClass = "bg-[#0c1424]";
-                  if (item.count > 90) bgClass = "bg-[#22c55e]";
-                  else if (item.count > 75) bgClass = "bg-[#10b981]";
-                  else if (item.count > 60) bgClass = "bg-[#059669]";
-                  else if (item.count > 40) bgClass = "bg-[#047857]";
-                  else if (item.count > 20) bgClass = "bg-[#065f46]";
-                  else if (item.count > 10) bgClass = "bg-[#064e3b]";
+                  const intensity =
+                    heatmapMaxCount > 0
+                      ? Math.min(1, item.count / heatmapMaxCount)
+                      : 0;
+                  let bgClass = "bg-[#064e3b]";
+                  if (intensity > 0.8) bgClass = "bg-[#22c55e]";
+                  else if (intensity > 0.6) bgClass = "bg-[#10b981]";
+                  else if (intensity > 0.4) bgClass = "bg-[#059669]";
+                  else if (intensity > 0.2) bgClass = "bg-[#047857]";
+                  else if (intensity > 0.05) bgClass = "bg-[#065f46]";
 
                   return (
                     <div
                       key={index}
-                      className="flex-1 min-w-[32px] flex flex-col items-center gap-3.5"
+                      className="flex flex-col items-center gap-2"
                     >
                       <div
                         className={`w-full h-8 rounded-sm ${bgClass} border border-white/5 transition-all duration-300 hover:brightness-125 hover:-translate-y-0.5 cursor-help`}
@@ -1084,7 +1228,14 @@ const Analytics = () => {
                         <td className="py-2.5 text-right">
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded text-[8px] font-black tracking-wider uppercase border select-none ${
-                              cam.status.toLowerCase() === "operational"
+                              (cam.status || "").toLowerCase() ===
+                                "operational" ||
+                              (cam.status || "").toLowerCase() === "running" ||
+                              (cam.status || "").toLowerCase() ===
+                                "processing" ||
+                              (cam.status || "").toLowerCase() ===
+                                "streaming" ||
+                              (cam.status || "").toLowerCase() === "connected"
                                 ? "bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20"
                                 : "bg-[#f97316]/10 text-[#f97316] border-[#f97316]/20"
                             }`}

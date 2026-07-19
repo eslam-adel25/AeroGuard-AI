@@ -1,11 +1,45 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, TIMESTAMP, Text, Float, Integer, Boolean, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import CHAR, Column, String, ForeignKey, TIMESTAMP, Text, Float, Integer, Boolean, JSON
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.types import TypeDecorator
 from ..database.session import Base
 
 JSONB = JSON
+
+
+class GUID(TypeDecorator):
+    impl = CHAR
+    cache_ok = True
+
+    def __init__(self, as_uuid: bool = False, *args, **kwargs):
+        self.as_uuid = as_uuid
+        super().__init__(*args, **kwargs)
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PG_UUID(as_uuid=self.as_uuid))
+        return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        return str(uuid.UUID(value))
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return value
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+
+
+UUID = GUID
 
 class Role(Base):
     __tablename__ = "roles"

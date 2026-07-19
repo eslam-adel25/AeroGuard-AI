@@ -33,6 +33,15 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
 
     return None
 
+
+def _is_active_camera_status(status: str | None) -> bool:
+    return (status or "").strip().lower() in {
+        "processing",
+        "streaming",
+        "running",
+        "connected",
+    }
+
 class ReportService:
     @staticmethod
     def get_report_stats(
@@ -253,65 +262,82 @@ class ReportService:
         end_dt = datetime.combine(end_date, datetime.max.time())
         span_days = (end_dt - start_dt).days + 1
 
-        detection_times = db.query(Detection.detected_at).filter(and_(*filters)).all()
+        dialect_name = (
+            db.bind.dialect.name
+            if getattr(db, "bind", None) and getattr(db.bind, "dialect", None)
+            else ""
+        )
 
-        if span_days <= 1:
-            bucket_counts = {hour: 0 for hour in range(24)}
-            for (detected_at,) in detection_times:
-                bucket_counts[detected_at.hour if detected_at else 0] += 1
-            timeline = [
-                {
-                    "label": f"{hour:02d}:00",
-                    "hour": hour,
-                    "count": bucket_counts[hour],
-                }
-                for hour in range(24)
-            ]
-        elif span_days <= 14:
-            bucket_counts = {}
-            current_day = start_dt.date()
-            while current_day <= end_dt.date():
-                bucket_counts[current_day.strftime("%Y-%m-%d")] = 0
-                current_day += timedelta(days=1)
-            for (detected_at,) in detection_times:
-                day_bucket = detected_at.date().strftime("%Y-%m-%d") if detected_at else start_dt.date().strftime("%Y-%m-%d")
-                bucket_counts[day_bucket] = bucket_counts.get(day_bucket, 0) + 1
-            timeline = [
-                {
-                    "label": day,
-                    "day": day,
-                    "count": bucket_counts[day],
-                }
-                for day in sorted(bucket_counts)
-            ]
+        if dialect_name == "sqlite":
+            if span_days <= 1:
+                bucket_value_expr = func.strftime("%Y-%m-%d %H:00:00", Detection.detected_at)
+                label_expr = func.strftime("%H:00", Detection.detected_at)
+            elif span_days <= 7:
+                bucket_value_expr = func.strftime("%Y-%m-%d", Detection.detected_at)
+                label_expr = func.strftime("%m-%d", Detection.detected_at)
+            else:
+                bucket_value_expr = func.strftime("%Y-%W", Detection.detected_at)
+                label_expr = func.strftime("%Y-%W", Detection.detected_at)
         else:
-            bucket_counts = {}
-            current_day = start_dt.date()
-            while current_day <= end_dt.date():
-                week_start = current_day - timedelta(days=current_day.weekday())
-                week_key = week_start.strftime("%Y-%m-%d")
-                bucket_counts[week_key] = bucket_counts.get(week_key, 0)
-                current_day += timedelta(days=1)
-            for (detected_at,) in detection_times:
-                day_value = detected_at.date() if detected_at else start_dt.date()
-                week_start = day_value - timedelta(days=day_value.weekday())
-                week_key = week_start.strftime("%Y-%m-%d")
-                bucket_counts[week_key] = bucket_counts.get(week_key, 0) + 1
-            timeline = [
+            if span_days <= 1:
+                bucket_value_expr = func.date_trunc("hour", Detection.detected_at)
+                label_expr = func.to_char(bucket_value_expr, "HH24:00")
+            elif span_days <= 7:
+                bucket_value_expr = func.date_trunc("day", Detection.detected_at)
+                label_expr = func.to_char(bucket_value_expr, "Mon DD")
+            else:
+                bucket_value_expr = func.date_trunc("week", Detection.detected_at)
+                label_expr = func.to_char(bucket_value_expr, "Mon DD")
+
+        timeline_rows = (
+            db.query(
+                bucket_value_expr.label("bucket_value"),
+                label_expr.label("label"),
+                Camera.camera_id.label("camera_id"),
+                Camera.camera_name.label("camera_name"),
+                func.count(Detection.detection_id).label("count"),
+            )
+            .join(Camera, Camera.camera_id == Detection.camera_id)
+            .filter(and_(*filters))
+            .group_by(
+                bucket_value_expr,
+                label_expr,
+                Camera.camera_id,
+                Camera.camera_name,
+            )
+            .order_by(bucket_value_expr, Camera.camera_name)
+            .all()
+        )
+
+        timeline = []
+        for row in timeline_rows:
+            bucket_value = row.bucket_value
+            if hasattr(bucket_value, "isoformat"):
+                bucket_value = bucket_value.isoformat()
+            elif bucket_value is None:
+                bucket_value = ""
+            else:
+                bucket_value = str(bucket_value)
+
+            timeline.append(
                 {
-                    "label": week,
-                    "count": bucket_counts[week],
+                    "bucket_value": bucket_value,
+                    "label": row.label,
+                    "camera_id": str(row.camera_id),
+                    "camera_name": row.camera_name,
+                    "count": int(row.count or 0),
                 }
-                for week in sorted(bucket_counts)
-            ]
+            )
+
+        detection_times = db.query(Detection.detected_at).filter(and_(*filters)).all()
 
         heatmap = []
         for hour in range(24):
-            hour_count = sum(1 for detected_at in [value[0] for value in detection_times] if detected_at and detected_at.hour == hour)
+            hour_count = sum(1 for (detected_at,) in detection_times if detected_at and detected_at.hour == hour)
             heatmap.append(
                 {
                     "hour": hour,
-                    "label": f"{hour:02d}:00",
+                    "label": f"{hour:02d}",
                     "count": hour_count,
                 }
             )
@@ -329,7 +355,11 @@ class ReportService:
                 }
             )
 
-        active_cameras = sum(1 for c in cameras if (c.get("status") or "").lower() in {"online", "running", "processing", "active"})
+        active_cameras = sum(
+            1
+            for c in cameras
+            if _is_active_camera_status(c.get("status"))
+        )
 
         zone_frequency_rows = db.query(
             Camera.camera_name,

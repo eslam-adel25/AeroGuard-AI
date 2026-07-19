@@ -1,4 +1,8 @@
-from datetime import date
+import os
+import uuid
+from datetime import date, datetime
+
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -13,35 +17,36 @@ def test_get_report_stats_returns_dashboard_payload():
 
     with Session(engine) as db:
         camera = Camera(
-            camera_id="cam-1",
+            camera_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
             camera_name="Front Gate",
             location="Gate",
-            status="online",
-            owner_id="user-1",
+            stream_url="rtsp://example.com/stream",
+            status="running",
+            owner_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
         )
         db.add(camera)
         db.add(
             Detection(
-                detection_id="det-1",
-                camera_id="cam-1",
-                owner_id="user-1",
+                detection_id=uuid.UUID("00000000-0000-0000-0000-000000000101"),
+                camera_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+                owner_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
                 detection_type="weapon detected",
                 priority="Critical",
                 confidence=0.95,
-                detected_at="2024-01-10T12:00:00",
+                detected_at=datetime(2024, 1, 10, 12, 0, 0),
                 is_violation=True,
                 violation_type="restricted area",
             )
         )
         db.add(
             Detection(
-                detection_id="det-2",
-                camera_id="cam-1",
-                owner_id="user-1",
+                detection_id=uuid.UUID("00000000-0000-0000-0000-000000000102"),
+                camera_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+                owner_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
                 detection_type="person detected",
                 priority="Low",
                 confidence=0.80,
-                detected_at="2024-01-10T12:30:00",
+                detected_at=datetime(2024, 1, 10, 12, 30, 0),
                 is_violation=False,
             )
         )
@@ -51,8 +56,7 @@ def test_get_report_stats_returns_dashboard_payload():
             db,
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 31),
-            owner_id="user-1",
-            is_admin=False,
+            is_admin=True,
         )
 
         assert payload["summary"]["weapons"] == 1
@@ -62,3 +66,5 @@ def test_get_report_stats_returns_dashboard_payload():
         assert payload["summary"]["fire"] == 0
         assert payload["summary"]["suspicious_objects"] == 0
         assert payload["charts"]["frequency_by_zone"][0]["name"] == "Front Gate"
+        assert payload["charts"]["timeline"][0]["camera_name"] == "Front Gate"
+        assert payload["charts"]["timeline"][0]["count"] == 2
