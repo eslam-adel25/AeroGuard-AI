@@ -78,28 +78,61 @@ async def add_camera(
     return created
 
 # 2. إدارة المناطق المحظورة (Restricted Zones) لكل كاميرا
+def _extract_zone_metadata(raw_polygon):
+    if isinstance(raw_polygon, dict):
+        points = raw_polygon.get("points", [])
+        if isinstance(points, list) and points and isinstance(points[0], dict):
+            points = [[point.get("x", 0), point.get("y", 0)] for point in points]
+        return (
+            points,
+            raw_polygon.get("video_width"),
+            raw_polygon.get("video_height"),
+        )
+    if isinstance(raw_polygon, list):
+        return raw_polygon, None, None
+    return raw_polygon, None, None
+
+
+def _build_zone_response(zone: RestrictedZone):
+    polygon_coords, video_width, video_height = _extract_zone_metadata(zone.polygon_coords)
+    return {
+        "zone_id": zone.zone_id,
+        "zone_name": zone.zone_name,
+        "zone_type": zone.zone_type,
+        "polygon_coords": polygon_coords,
+        "video_width": video_width,
+        "video_height": video_height,
+    }
+
+
 @router.post("/{camera_id}/zones", response_model=ZoneResponse)
 def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
+
+    stored_polygon = {
+        "points": zone.polygon_coords,
+        "video_width": zone.video_width,
+        "video_height": zone.video_height,
+    }
 
     new_zone = RestrictedZone(
         camera_id=camera_id,
         zone_name=zone.zone_name,
         zone_type=zone.zone_type,
-        polygon_coords=zone.polygon_coords,
+        polygon_coords=stored_polygon,
         owner_id=current_user.get("user_id")
     )
     db.add(new_zone)
     db.commit()
     db.refresh(new_zone)
-    return new_zone
+    return _build_zone_response(new_zone)
 
 
 @router.get("/{camera_id}/zones", response_model=list[ZoneResponse])
 def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     zones = db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
-    return zones
+    return [_build_zone_response(zone) for zone in zones]
 
 
 @router.delete("/{camera_id}/zones/{zone_id}")

@@ -158,12 +158,19 @@ class SettingsResponse(SettingsUpdate):
 class ZoneCreate(BaseModel):
     zone_name: str
     zone_type: str
-    polygon_coords: List[List[int]]
+    polygon_coords: List[List[float]]
+    video_width: Optional[int] = None
+    video_height: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
-class ZoneResponse(ZoneCreate):
+class ZoneResponse(BaseModel):
     zone_id: UUID
+    zone_name: str
+    zone_type: str
+    polygon_coords: List[List[float]]
+    video_width: Optional[int] = None
+    video_height: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

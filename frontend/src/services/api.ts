@@ -9,6 +9,8 @@ export interface ZoneCreateData {
   zone_name: string;
   zone_type: string;
   polygon_coords: [number, number][]; // مصفوفة من الإحداثيات [x, y]
+  video_width?: number;
+  video_height?: number;
 }
 
 export interface ZoneData extends ZoneCreateData {

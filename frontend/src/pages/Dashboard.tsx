@@ -275,45 +275,113 @@ const Dashboard = () => {
     }
   };
 
-  const getCanvasCoords = (event: MouseEvent<HTMLCanvasElement>) => {
-    const canvas = overlayCanvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    return [event.clientX - rect.left, event.clientY - rect.top] as [
-      number,
-      number,
-    ];
-  };
+  const getVideoRenderDetails = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return null;
 
-  const getSavedZoneCanvasCoords = useCallback((coords: [number, number][]) => {
-    const vid = videoRef.current;
-    const canvas = overlayCanvasRef.current;
-    if (!canvas) return [];
+    const rect = video.getBoundingClientRect();
+    const naturalW = (video as HTMLImageElement).naturalWidth || rect.width;
+    const naturalH = (video as HTMLImageElement).naturalHeight || rect.height;
+    if (naturalW === 0 || naturalH === 0) return null;
 
-    const rect = canvas.getBoundingClientRect();
-    const nativeW =
-      (vid && (vid as HTMLImageElement).naturalWidth) || rect.width;
-    const nativeH =
-      (vid && (vid as HTMLImageElement).naturalHeight) || rect.height;
-    const scaleX = rect.width / nativeW;
-    const scaleY = rect.height / nativeH;
-    return coords.map(([x, y]) => [x * scaleX, y * scaleY] as [number, number]);
+    const scaleX = rect.width / naturalW;
+    const scaleY = rect.height / naturalH;
+    const scale = Math.max(scaleX, scaleY);
+    const renderedW = naturalW * scale;
+    const renderedH = naturalH * scale;
+    const offsetX = Math.max(0, (renderedW - rect.width) / 2);
+    const offsetY = Math.max(0, (renderedH - rect.height) / 2);
+
+    return {
+      rect,
+      naturalW,
+      naturalH,
+      scale,
+      offsetX,
+      offsetY,
+    };
   }, []);
+
+  const getNormalizedVideoCoords = useCallback(
+    (event: MouseEvent<HTMLCanvasElement>) => {
+      const details = getVideoRenderDetails();
+      if (!details) return null;
+
+      const { rect, scale, offsetX, offsetY, naturalW, naturalH } = details;
+      const xInElement = event.clientX - rect.left;
+      const yInElement = event.clientY - rect.top;
+      const videoX = (xInElement + offsetX) / scale;
+      const videoY = (yInElement + offsetY) / scale;
+      if (videoX < 0 || videoX > naturalW || videoY < 0 || videoY > naturalH) {
+        return null;
+      }
+      return [videoX / naturalW, videoY / naturalH] as [number, number];
+    },
+    [getVideoRenderDetails],
+  );
+
+  const mapNormalizedToCanvasCoords = useCallback(
+    (normalized: [number, number]) => {
+      const details = getVideoRenderDetails();
+      if (!details) return null;
+
+      const { scale, offsetX, offsetY, naturalW, naturalH } = details;
+      return [
+        normalized[0] * naturalW * scale - offsetX,
+        normalized[1] * naturalH * scale - offsetY,
+      ] as [number, number];
+    },
+    [getVideoRenderDetails],
+  );
+
+  const getSavedZoneCanvasCoords = useCallback(
+    (coords: [number, number][], zone?: ZoneData) => {
+      const details = getVideoRenderDetails();
+      if (!details) return [];
+
+      const normalizePoint = (point: [number, number]) => {
+        const [x, y] = point;
+        if (x <= 1 && y <= 1) {
+          return point;
+        }
+        const zoneW = zone?.video_width || details.naturalW;
+        const zoneH = zone?.video_height || details.naturalH;
+        if (zoneW === 0 || zoneH === 0) {
+          return null;
+        }
+        return [x / zoneW, y / zoneH] as [number, number];
+      };
+
+      return coords
+        .map(normalizePoint)
+        .filter((value): value is [number, number] => value !== null)
+        .map(mapNormalizedToCanvasCoords)
+        .filter((value): value is [number, number] => value !== null);
+    },
+    [getVideoRenderDetails, mapNormalizedToCanvasCoords],
+  );
 
   const updateOverlayCanvas = useCallback(() => {
     const canvas = overlayCanvasRef.current;
     const video = videoRef.current;
-    if (!canvas || !video || !videoWrapperRef.current) return;
+    const wrapper = videoWrapperRef.current;
+    if (!canvas || !video || !wrapper) return;
 
     const rect = video.getBoundingClientRect();
-    const containerRect = videoWrapperRef.current.getBoundingClientRect();
+    const containerRect = wrapper.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
 
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    canvas.width = Math.round(rect.width * ratio);
+    canvas.height = Math.round(rect.height * ratio);
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     canvas.style.left = `${rect.left - containerRect.left}px`;
     canvas.style.top = `${rect.top - containerRect.top}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
   }, []);
 
   const drawOverlay = useCallback(() => {
@@ -322,7 +390,8 @@ const Dashboard = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const ratio = window.devicePixelRatio || 1;
+    ctx.clearRect(0, 0, canvas.width / ratio, canvas.height / ratio);
 
     const drawZone = (
       zone: ZoneData,
@@ -330,7 +399,7 @@ const Dashboard = () => {
       strokeStyle = "rgba(255, 255, 255, 0.9)",
       lineWidth = 2,
     ) => {
-      const canvasCoords = getSavedZoneCanvasCoords(zone.polygon_coords);
+      const canvasCoords = getSavedZoneCanvasCoords(zone.polygon_coords, zone);
       if (canvasCoords.length === 0) return;
       const path = new Path2D();
       canvasCoords.forEach(([x, y], index) => {
@@ -383,7 +452,11 @@ const Dashboard = () => {
     if (drawingPoints.length === 0) return;
 
     const path = new Path2D();
-    drawingPoints.forEach(([x, y], index) => {
+    const canvasPoints = drawingPoints
+      .map(mapNormalizedToCanvasCoords)
+      .filter((p): p is [number, number] => p !== null);
+
+    canvasPoints.forEach(([x, y], index) => {
       if (index === 0) {
         path.moveTo(x, y);
       } else {
@@ -401,9 +474,9 @@ const Dashboard = () => {
       ctx.strokeStyle = "rgba(56, 161, 255, 0.95)";
       ctx.lineWidth = 3;
       ctx.stroke(path);
-      if (drawingPoints.length >= 2) {
-        const last = drawingPoints[drawingPoints.length - 1];
-        const before = drawingPoints[drawingPoints.length - 2];
+      if (canvasPoints.length >= 2) {
+        const last = canvasPoints[canvasPoints.length - 1];
+        const before = canvasPoints[canvasPoints.length - 2];
         const dx = last[0] - before[0];
         const dy = last[1] - before[1];
         const arrowX = last[0] - dx * 0.2;
@@ -422,10 +495,14 @@ const Dashboard = () => {
       ctx.stroke(path);
     }
 
-    drawingPoints.forEach(([x, y]) => {
+    canvasPoints.forEach(([x, y], index) => {
       ctx.beginPath();
       const radius =
-        hoverPoint && hoverPoint[0] === x && hoverPoint[1] === y ? 8 : 5;
+        hoverPoint &&
+        hoverPoint[0] === drawingPoints[index][0] &&
+        hoverPoint[1] === drawingPoints[index][1]
+          ? 8
+          : 5;
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
@@ -439,6 +516,7 @@ const Dashboard = () => {
     hoverPoint,
     savedZones,
     getSavedZoneCanvasCoords,
+    mapNormalizedToCanvasCoords,
   ]);
 
   useLayoutEffect(() => {
@@ -447,12 +525,30 @@ const Dashboard = () => {
   }, [updateOverlayCanvas, drawOverlay]);
 
   useEffect(() => {
-    const handleResize = () => {
+    const handleLayoutChange = () => {
       updateOverlayCanvas();
       drawOverlay();
     };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    const wrapper = videoWrapperRef.current;
+    if (wrapper) {
+      const resizeObserver = new ResizeObserver(() => handleLayoutChange());
+      resizeObserver.observe(wrapper);
+      window.addEventListener("resize", handleLayoutChange);
+      document.addEventListener("fullscreenchange", handleLayoutChange);
+      return () => {
+        resizeObserver.disconnect();
+        window.removeEventListener("resize", handleLayoutChange);
+        document.removeEventListener("fullscreenchange", handleLayoutChange);
+      };
+    }
+
+    window.addEventListener("resize", handleLayoutChange);
+    document.addEventListener("fullscreenchange", handleLayoutChange);
+    return () => {
+      window.removeEventListener("resize", handleLayoutChange);
+      document.removeEventListener("fullscreenchange", handleLayoutChange);
+    };
   }, [updateOverlayCanvas, drawOverlay]);
 
   useEffect(() => {
@@ -461,7 +557,7 @@ const Dashboard = () => {
       drawOverlay();
     };
     updateForCamera();
-  }, [selectedCamera, updateOverlayCanvas, drawOverlay]);
+  }, [selectedCamera, isSidebarOpen, updateOverlayCanvas, drawOverlay]);
 
   useEffect(() => {
     if (selectedCamera) {
@@ -514,7 +610,6 @@ const Dashboard = () => {
   );
 
   const saveDrawing = useCallback(async () => {
-    // Persist the drawing as a zone to backend (scaled to native video size if available)
     try {
       setIsDrawing(false);
       setDrawingInstructions(
@@ -522,23 +617,11 @@ const Dashboard = () => {
           t("dashboard.drawingInstructions.saved"),
       );
       const vid = videoRef.current;
-      const canvas = overlayCanvasRef.current;
       if (!selectedCamera) throw new Error("No camera selected");
-      if (!canvas) throw new Error("No canvas available");
+      if (!vid) throw new Error("No video available");
 
-      const rect = canvas.getBoundingClientRect();
-      const nativeW =
-        (vid && (vid as HTMLImageElement).naturalWidth) || rect.width;
-      const nativeH =
-        (vid && (vid as HTMLImageElement).naturalHeight) || rect.height;
-      const scaleX = nativeW / rect.width;
-      const scaleY = nativeH / rect.height;
-
-      const coords = drawingPoints.map(([x, y]) => [
-        Math.round(x * scaleX),
-        Math.round(y * scaleY),
-      ]) as [number, number][];
-
+      const nativeW = (vid as HTMLImageElement).naturalWidth;
+      const nativeH = (vid as HTMLImageElement).naturalHeight;
       const zoneType =
         drawingMode === "restricted"
           ? "Restricted Area"
@@ -547,12 +630,15 @@ const Dashboard = () => {
             : "Tripwire";
       const zoneName = `${t("dashboard.inCameraAnnotation")} - ${zoneType}`;
 
+      const payload: ZoneCreateData = {
+        zone_name: zoneName,
+        zone_type: zoneType,
+        polygon_coords: drawingPoints,
+        video_width: nativeW || undefined,
+        video_height: nativeH || undefined,
+      };
+
       try {
-        const payload: ZoneCreateData = {
-          zone_name: zoneName,
-          zone_type: zoneType,
-          polygon_coords: coords,
-        };
         await cameraService.addZone(selectedCamera, payload);
         setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
         await fetchZones(selectedCamera);
@@ -572,9 +658,9 @@ const Dashboard = () => {
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
-    const coords = getCanvasCoords(event);
-    if (!coords) return;
-    setDrawingPoints((prev) => [...prev, coords]);
+    const normalized = getNormalizedVideoCoords(event);
+    if (!normalized) return;
+    setDrawingPoints((prev) => [...prev, normalized]);
   };
 
   const onCanvasDoubleClick = (event: MouseEvent<HTMLCanvasElement>) => {
@@ -591,13 +677,18 @@ const Dashboard = () => {
 
   const onCanvasMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
-    const coords = getCanvasCoords(event);
-    if (!coords) return;
+    const normalized = getNormalizedVideoCoords(event);
+    if (!normalized) return;
+
+    const canvasPoint = mapNormalizedToCanvasCoords(normalized);
+    if (!canvasPoint) return;
 
     const closest = drawingPoints.reduce<null | [number, number]>(
       (best, point) => {
-        const dx = point[0] - coords[0];
-        const dy = point[1] - coords[1];
+        const pointCanvas = mapNormalizedToCanvasCoords(point);
+        if (!pointCanvas) return best;
+        const dx = pointCanvas[0] - canvasPoint[0];
+        const dy = pointCanvas[1] - canvasPoint[1];
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 12) return point;
         return best;
