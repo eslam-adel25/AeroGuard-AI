@@ -34,7 +34,7 @@ interface Camera {
 
 const Cameras = () => {
   const { t } = useTranslation();
-  const { confirm } = useNotification();
+  const { confirm, toast } = useNotification();
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -92,7 +92,10 @@ const Cameras = () => {
     setLoading(true);
 
     if (uploadType === "UPLOAD" && !selectedFile) {
-      alert(t("cameras.uploadFileRequired") || "Please select a video file.");
+      toast.error(
+        "Operation Failed",
+        t("cameras.uploadFileRequired") || "Please select a video file.",
+      );
       setLoading(false);
       return;
     }
@@ -118,12 +121,13 @@ const Cameras = () => {
       await cameraService.start(res.data.camera_id);
       setShowModal(false);
       resetForm();
-      alert(t("cameras.provisionSuccess"));
+      toast.success("Success", t("cameras.provisionSuccess"));
     } catch {
       if (!created) {
-        alert(t("cameras.provisionFailed"));
+        toast.error("Operation Failed", t("cameras.provisionFailed"));
       } else {
-        alert(
+        toast.error(
+          "Operation Failed",
           t("cameras.provisionPartial") ||
             "Camera created, but AI initialization failed.",
         );
@@ -268,10 +272,11 @@ const Cameras = () => {
                         setStartingId(cam.camera_id);
                         try {
                           await cameraService.start(cam.camera_id);
-                          alert("AI Active");
+                          toast.success("Success", "AI Active");
                         } catch (err) {
                           console.error(err);
-                          alert(
+                          toast.error(
+                            "Operation Failed",
                             t("cameras.aiInitFailed") ||
                               "Failed to initialize AI node.",
                           );
@@ -317,10 +322,16 @@ const Cameras = () => {
                                     camera.camera_id !== cam.camera_id,
                                 ),
                               );
-                              alert(t("cameras.deleteSuccess"));
+                              toast.success(
+                                "Success",
+                                t("cameras.deleteSuccess"),
+                              );
                             } catch (err) {
                               console.error(err);
-                              alert(t("cameras.deleteFailed"));
+                              toast.error(
+                                "Operation Failed",
+                                t("cameras.deleteFailed"),
+                              );
                             } finally {
                               setDeletingId(null);
                             }
