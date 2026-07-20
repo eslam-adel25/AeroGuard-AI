@@ -91,16 +91,16 @@ const addToast = (
   if (finalDuration === undefined) {
     switch (type) {
       case "success":
-        finalDuration = 3000;
-        break;
-      case "info":
-        finalDuration = 4000;
-        break;
-      case "warning":
         finalDuration = 5000;
         break;
+      case "info":
+        finalDuration = 5000;
+        break;
+      case "warning":
+        finalDuration = 7000;
+        break;
       case "error":
-        finalDuration = 8000;
+        finalDuration = 9000;
         break;
       case "loading":
         finalDuration = undefined;

@@ -115,22 +115,38 @@ const Cameras = () => {
     }
 
     let created = false;
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       const res = await cameraService.create(data);
       created = true;
       await cameraService.start(res.data.camera_id);
       setShowModal(false);
       resetForm();
-      toast.success("Success", t("cameras.provisionSuccess"));
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: t("cameras.provisionSuccess"),
+        });
+      }
     } catch {
-      if (!created) {
-        toast.error("Operation Failed", t("cameras.provisionFailed"));
-      } else {
-        toast.error(
-          "Operation Failed",
-          t("cameras.provisionPartial") ||
-            "Camera created, but AI initialization failed.",
-        );
+      if (toastId) {
+        if (!created) {
+          toast.update(toastId, {
+            type: "error",
+            title: "Operation Failed",
+            description: t("cameras.provisionFailed"),
+          });
+        } else {
+          toast.update(toastId, {
+            type: "error",
+            title: "Operation Failed",
+            description:
+              t("cameras.provisionPartial") ||
+              "Camera created, but AI initialization failed.",
+          });
+        }
       }
     } finally {
       if (created) {
@@ -270,16 +286,31 @@ const Cameras = () => {
                     <button
                       onClick={async () => {
                         setStartingId(cam.camera_id);
+                        let toastId: string | null = null;
                         try {
+                          toastId = toast.loading(
+                            "Processing",
+                            "Please wait...",
+                          );
                           await cameraService.start(cam.camera_id);
-                          toast.success("Success", "AI Active");
+                          if (toastId) {
+                            toast.update(toastId, {
+                              type: "success",
+                              title: "Success",
+                              description: "AI Active",
+                            });
+                          }
                         } catch (err) {
                           console.error(err);
-                          toast.error(
-                            "Operation Failed",
-                            t("cameras.aiInitFailed") ||
-                              "Failed to initialize AI node.",
-                          );
+                          if (toastId) {
+                            toast.update(toastId, {
+                              type: "error",
+                              title: "Operation Failed",
+                              description:
+                                t("cameras.aiInitFailed") ||
+                                "Failed to initialize AI node.",
+                            });
+                          }
                         } finally {
                           setStartingId(null);
                         }
@@ -314,7 +345,12 @@ const Cameras = () => {
                           cancelLabel: "Cancel",
                           onConfirm: async () => {
                             setDeletingId(cam.camera_id);
+                            let toastId: string | null = null;
                             try {
+                              toastId = toast.loading(
+                                "Processing",
+                                "Please wait...",
+                              );
                               await cameraService.delete(cam.camera_id);
                               setCameras((current) =>
                                 current.filter(
@@ -322,16 +358,22 @@ const Cameras = () => {
                                     camera.camera_id !== cam.camera_id,
                                 ),
                               );
-                              toast.success(
-                                "Success",
-                                t("cameras.deleteSuccess"),
-                              );
+                              if (toastId) {
+                                toast.update(toastId, {
+                                  type: "success",
+                                  title: "Success",
+                                  description: t("cameras.deleteSuccess"),
+                                });
+                              }
                             } catch (err) {
                               console.error(err);
-                              toast.error(
-                                "Operation Failed",
-                                t("cameras.deleteFailed"),
-                              );
+                              if (toastId) {
+                                toast.update(toastId, {
+                                  type: "error",
+                                  title: "Operation Failed",
+                                  description: t("cameras.deleteFailed"),
+                                });
+                              }
                             } finally {
                               setDeletingId(null);
                             }
