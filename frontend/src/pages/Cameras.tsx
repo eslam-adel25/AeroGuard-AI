@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cameraService } from "../services/api";
+import { useNotification } from "../components/NotificationSystem/useNotification";
 import {
   Plus,
   Play,
@@ -33,6 +34,7 @@ interface Camera {
 
 const Cameras = () => {
   const { t } = useTranslation();
+  const { confirm } = useNotification();
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -294,28 +296,36 @@ const Cameras = () => {
                     </button>
 
                     <button
-                      onClick={async () => {
-                        const confirmed = window.confirm(
-                          t("cameras.confirmDeleteCamera") ||
+                      onClick={() => {
+                        confirm({
+                          title:
+                            t("cameras.confirmDeleteCameraTitle") ||
+                            "Delete Camera",
+                          description:
+                            t("cameras.confirmDeleteCamera") ||
                             "Delete this camera and all related data?",
-                        );
-                        if (!confirmed) return;
-
-                        setDeletingId(cam.camera_id);
-                        try {
-                          await cameraService.delete(cam.camera_id);
-                          setCameras((current) =>
-                            current.filter(
-                              (camera) => camera.camera_id !== cam.camera_id,
-                            ),
-                          );
-                          alert(t("cameras.deleteSuccess"));
-                        } catch (err) {
-                          console.error(err);
-                          alert(t("cameras.deleteFailed"));
-                        } finally {
-                          setDeletingId(null);
-                        }
+                          type: "danger",
+                          confirmLabel: "Delete",
+                          cancelLabel: "Cancel",
+                          onConfirm: async () => {
+                            setDeletingId(cam.camera_id);
+                            try {
+                              await cameraService.delete(cam.camera_id);
+                              setCameras((current) =>
+                                current.filter(
+                                  (camera) =>
+                                    camera.camera_id !== cam.camera_id,
+                                ),
+                              );
+                              alert(t("cameras.deleteSuccess"));
+                            } catch (err) {
+                              console.error(err);
+                              alert(t("cameras.deleteFailed"));
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          },
+                        });
                       }}
                       disabled={deletingId === cam.camera_id}
                       className="w-full text-gray-400 hover:text-ag-danger text-[11px] font-bold uppercase tracking-wider transition-colors py-2 block text-center disabled:opacity-50 disabled:cursor-not-allowed"
