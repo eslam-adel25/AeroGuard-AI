@@ -24,6 +24,8 @@ import {
   type NotificationSeverity,
 } from "./services/notificationService";
 
+
+
 function App() {
   const { t } = useTranslation();
   const [activePage, setActivePage] = useState("dashboard");
@@ -537,6 +539,7 @@ function App() {
           path="*"
           element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />}
         />
+        
       </Routes>
     </BrowserRouter>
   );

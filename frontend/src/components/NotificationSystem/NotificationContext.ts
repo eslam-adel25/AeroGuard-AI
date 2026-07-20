@@ -52,6 +52,11 @@ let notificationState: NotificationStoreSnapshot = {
   activeConfirmation: null,
 };
 
+let notificationSnapshot: NotificationStoreSnapshot = {
+  toasts: [],
+  activeConfirmation: null,
+};
+
 const notificationListeners = new Set<NotificationListener>();
 
 const notifyListeners = () => {
@@ -65,6 +70,13 @@ const cloneConfirmation = (
 ): ConfirmationOptions | null => {
   if (!confirmation) return null;
   return { ...confirmation };
+};
+
+const updateSnapshot = () => {
+  notificationSnapshot = {
+    toasts: notificationState.toasts.map(cloneToast),
+    activeConfirmation: cloneConfirmation(notificationState.activeConfirmation),
+  };
 };
 
 const addToast = (
@@ -110,6 +122,7 @@ const addToast = (
     toasts: [newToast, ...notificationState.toasts].slice(0, 4),
   };
 
+  updateSnapshot();
   notifyListeners();
   return id;
 };
@@ -153,6 +166,7 @@ const updateToast = (
     }),
   };
 
+  updateSnapshot();
   notifyListeners();
 };
 
@@ -162,6 +176,7 @@ const dismissToast = (id: string) => {
     toasts: notificationState.toasts.filter((toast) => toast.id !== id),
   };
 
+  updateSnapshot();
   notifyListeners();
 };
 
@@ -175,6 +190,7 @@ const confirm = (options: Omit<ConfirmationOptions, "id">) => {
     },
   };
 
+  updateSnapshot();
   notifyListeners();
 };
 
@@ -184,6 +200,7 @@ const closeConfirmation = () => {
     activeConfirmation: null,
   };
 
+  updateSnapshot();
   notifyListeners();
 };
 
@@ -195,12 +212,7 @@ export const notificationStore = {
     };
   },
   getSnapshot(): NotificationStoreSnapshot {
-    return {
-      toasts: notificationState.toasts.map(cloneToast),
-      activeConfirmation: cloneConfirmation(
-        notificationState.activeConfirmation,
-      ),
-    };
+    return notificationSnapshot;
   },
   addToast,
   updateToast,
@@ -209,10 +221,8 @@ export const notificationStore = {
   closeConfirmation,
   getContextValue(): NotificationContextType {
     return {
-      toasts: notificationState.toasts.map(cloneToast),
-      activeConfirmation: cloneConfirmation(
-        notificationState.activeConfirmation,
-      ),
+      toasts: notificationSnapshot.toasts,
+      activeConfirmation: notificationSnapshot.activeConfirmation,
       addToast,
       updateToast,
       dismissToast,
