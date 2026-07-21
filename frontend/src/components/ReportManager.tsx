@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { reportService, cameraService } from "../services/api";
+import { useNotification } from "./NotificationSystem/useNotification";
 import {
   Loader2,
   FileText,
@@ -18,6 +19,7 @@ interface ReportItem {
 }
 
 const ReportManager: React.FC = () => {
+  const { confirm, toast } = useNotification();
   const [cameras, setCameras] = useState<
     Array<{ camera_id: string; camera_name: string }>
   >([]);
@@ -78,46 +80,96 @@ const ReportManager: React.FC = () => {
   };
 
   const handleExport = async (id: string, type: "csv" | "excel" | "pdf") => {
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       let res;
       if (type === "csv") {
         res = await reportService.exportCsv(id);
-        downloadFile(res.data, `report-${id}.csv`);
       } else if (type === "excel") {
         res = await reportService.exportExcel(id);
-        downloadFile(res.data, `report-${id}.xlsx`);
       } else {
         res = await reportService.exportPdf(id);
+      }
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Download Started",
+          description: "Your report is being downloaded.",
+        });
+      }
+      if (type === "csv") {
+        downloadFile(res.data, `report-${id}.csv`);
+      } else if (type === "excel") {
+        downloadFile(res.data, `report-${id}.xlsx`);
+      } else {
         downloadFile(res.data, `report-${id}.pdf`);
       }
       await loadReports();
     } catch (err) {
       console.warn(err);
-      alert(`Failed to export ${type.toUpperCase()}`);
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: `Failed to export ${type.toUpperCase()}`,
+        });
+      }
     }
   };
 
   const handleDeleteReport = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this report?")) {
-      return;
-    }
-    setLoading(true);
-    try {
-      await reportService.deleteReport(id);
-      await loadReports();
-    } catch (err) {
-      console.warn(err);
-      alert("Failed to delete report");
-    } finally {
-      setLoading(false);
-    }
+    confirm({
+      title: "Delete report?",
+      description: "Are you sure you want to delete this report?",
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      type: "warning",
+      onConfirm: async () => {
+        setLoading(true);
+        let toastId: string | null = null;
+        try {
+          toastId = toast.loading("Processing", "Please wait...");
+          await reportService.deleteReport(id);
+          await loadReports();
+          if (toastId) {
+            toast.update(toastId, {
+              type: "success",
+              title: "Success",
+              description: "Report deleted successfully.",
+            });
+          }
+        } catch (err) {
+          console.warn(err);
+          if (toastId) {
+            toast.update(toastId, {
+              type: "error",
+              title: "Operation Failed",
+              description: "Failed to delete report",
+            });
+          }
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   const handleGenerate = async () => {
-    if (!filters.start_date || !filters.end_date)
-      return alert("Please select start and end dates");
+    if (!filters.start_date || !filters.end_date) {
+      const toastId = toast.loading("Processing", "Please wait...");
+      toast.update(toastId, {
+        type: "error",
+        title: "Operation Failed",
+        description: "Please select start and end dates",
+      });
+      return;
+    }
+
     setLoading(true);
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       const payload = {
         start_date: filters.start_date,
         end_date: filters.end_date,
@@ -126,11 +178,23 @@ const ReportManager: React.FC = () => {
         report_type: reportType || undefined,
       };
       const res = await reportService.generateReport(payload);
-      alert("Report generated: " + (res.data.report_id || ""));
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: `Report generated: ${res.data.report_id || ""}`,
+        });
+      }
       await loadReports();
     } catch (err) {
       console.warn(err);
-      alert("Failed to generate report");
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: "Failed to generate report",
+        });
+      }
     } finally {
       setLoading(false);
     }
