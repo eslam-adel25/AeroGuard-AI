@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useNotification } from "../components/NotificationSystem/useNotification";
 import {
   Bell,
   Save,
@@ -82,6 +83,7 @@ const Toggle = ({
 
 const Settings = () => {
   const { t } = useTranslation();
+  const { confirm, toast } = useNotification();
   const [config, setConfig] = useState<ISystemSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -102,20 +104,41 @@ const Settings = () => {
 
   const handleSave = async () => {
     setIsSaving(true);
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       await settingsService.update(config);
-      alert(t("settings.saveSuccess"));
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: t("settings.saveSuccess"),
+        });
+      }
     } catch {
-      alert(t("settings.saveFailed"));
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: t("settings.saveFailed"),
+        });
+      }
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleLoadDefaults = () => {
-    if (window.confirm(t("settings.factoryDefaultsConfirm"))) {
-      setConfig(DEFAULT_SETTINGS);
-    }
+    confirm({
+      title: t("settings.factoryDefaultsTitle") || "Load Defaults",
+      description: t("settings.factoryDefaultsConfirm"),
+      type: "danger",
+      confirmLabel: "Load",
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        setConfig(DEFAULT_SETTINGS);
+      },
+    });
   };
 
   if (isLoading)
