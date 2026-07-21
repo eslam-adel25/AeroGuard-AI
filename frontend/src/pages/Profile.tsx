@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { userService } from "../services/api";
 import type { IUserProfile } from "../services/api";
+import { useNotification } from "../components/NotificationSystem/useNotification";
 import {
   User,
   LogIn,
@@ -58,6 +59,7 @@ const getSessionDeviceLabel = (session: UserSession) => {
 
 const Profile: React.FC = () => {
   const { t } = useTranslation();
+  const { confirm, toast } = useNotification();
 
   // --- States ---
   const [profile, setProfile] = useState<IUserProfile | null>(null);
@@ -112,11 +114,27 @@ const Profile: React.FC = () => {
     e.preventDefault();
     if (!profile) return;
     setIsSaving(true);
+
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       await userService.updateProfile(profile);
       setIsEditing(false);
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: "Profile updated successfully.",
+        });
+      }
     } catch {
-      alert("❌ Failed to update registry.");
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: "❌ Failed to update registry.",
+        });
+      }
     } finally {
       setIsSaving(false);
     }
@@ -125,21 +143,37 @@ const Profile: React.FC = () => {
   const handlePasswordRotate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new_password !== passwords.confirm_password) {
-      return alert("❌ New passwords do not match!");
+      toast.error("Validation Error", "❌ New passwords do not match!");
+      return;
     }
+
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       await userService.updatePassword({
         old_password: passwords.old_password,
         new_password: passwords.new_password,
       });
-      alert("✅ Credentials rotated successfully!");
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: "Credentials rotated successfully.",
+        });
+      }
       setPasswords({
         old_password: "",
         new_password: "",
         confirm_password: "",
       });
     } catch {
-      alert("❌ Authentication Error: Current password incorrect.");
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: "❌ Authentication Error: Current password incorrect.",
+        });
+      }
     }
   };
 
@@ -151,11 +185,26 @@ const Profile: React.FC = () => {
     formData.append("file", file);
 
     setIsUploading(true);
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       await userService.uploadAvatar(formData);
       await loadProfile();
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description: "Avatar uploaded successfully.",
+        });
+      }
     } catch {
-      alert("❌ Failed to upload image.");
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: "❌ Failed to upload image.",
+        });
+      }
     } finally {
       setIsUploading(false);
     }
@@ -164,24 +213,62 @@ const Profile: React.FC = () => {
   const handleChangeEmail = async () => {
     const newEmail = window.prompt("Enter your new email:");
     if (!newEmail) return;
+
+    let toastId: string | null = null;
     try {
+      toastId = toast.loading("Processing", "Please wait...");
       await userService.changeEmail(newEmail);
-      alert(
-        "Verification email sent to new address. Follow the link to confirm.",
-      );
+      if (toastId) {
+        toast.update(toastId, {
+          type: "success",
+          title: "Success",
+          description:
+            "Verification email sent to new address. Follow the link to confirm.",
+        });
+      }
     } catch (err) {
       console.warn("Failed to request email change", err);
+      if (toastId) {
+        toast.update(toastId, {
+          type: "error",
+          title: "Operation Failed",
+          description: "❌ Failed to send verification email.",
+        });
+      }
     }
   };
 
   const handleLogoutAll = async () => {
-    if (!window.confirm("Logout all sessions?")) return;
-    try {
-      await userService.logoutAllSessions();
-      loadSessions();
-    } catch {
-      alert("Failed to logout sessions.");
-    }
+    confirm({
+      title: "Logout all sessions?",
+      description: "Are you sure you want to logout all sessions?",
+      confirmLabel: "Logout",
+      cancelLabel: "Cancel",
+      type: "warning",
+      onConfirm: async () => {
+        let toastId: string | null = null;
+        try {
+          toastId = toast.loading("Processing", "Please wait...");
+          await userService.logoutAllSessions();
+          loadSessions();
+          if (toastId) {
+            toast.update(toastId, {
+              type: "success",
+              title: "Success",
+              description: "All sessions logged out successfully.",
+            });
+          }
+        } catch {
+          if (toastId) {
+            toast.update(toastId, {
+              type: "error",
+              title: "Operation Failed",
+              description: "Failed to logout sessions.",
+            });
+          }
+        }
+      },
+    });
   };
 
   const sortedSessions = [...sessions].sort((a, b) => {
