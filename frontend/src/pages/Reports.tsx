@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNotification } from "../components/NotificationSystem/useNotification";
 import { reportService, cameraService } from "../services/api";
 import { Loader2, BarChart3, TriangleAlert, ShieldCheck } from "lucide-react";
 import {
@@ -97,6 +98,8 @@ const Reports = () => {
     camera_id: "",
   });
 
+  const { toast } = useNotification();
+
   const loadReports = async (activeFilters = filters) => {
     setLoading(true);
     try {
@@ -108,7 +111,7 @@ const Reports = () => {
       setData(res.data);
     } catch {
       setData(null);
-      alert("Failed to fetch analytics data.");
+      toast.error("Operation Failed", "Failed to fetch analytics data.");
     } finally {
       setLoading(false);
     }
@@ -162,7 +165,7 @@ const Reports = () => {
         setData(res.data);
       } catch {
         setData(null);
-        alert("Failed to fetch analytics data.");
+        toast.error("Operation Failed", "Failed to fetch analytics data.");
       } finally {
         setLoading(false);
       }
