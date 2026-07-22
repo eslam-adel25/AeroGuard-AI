@@ -16,7 +16,7 @@ import VerifyEmail from "./pages/VerifyEmail";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
-import { aiService, getStoredAuthToken } from "./services/api";
+import { aiService, cameraService, getStoredAuthToken } from "./services/api";
 import { closeActiveSocket } from "./services/socket";
 import {
   notificationService,
@@ -30,12 +30,12 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] =
     useState(!!getStoredAuthToken());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [cameraMap, setCameraMap] = useState<Record<string, string>>({});
   const [screenshotModalEventId, setScreenshotModalEventId] = useState<
     string | null
   >(null);
   const [screenshotCache] = useState(() => new Map<string, string>());
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0 });
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -44,6 +44,14 @@ function App() {
   const unreadCount = notifications.filter(
     (item) => item.status === "Unread",
   ).length;
+
+  const sortedNotifications = useMemo(
+    () =>
+      [...notifications].sort(
+        (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
+      ),
+    [notifications],
+  );
 
   const pageTitle = useMemo(() => {
     switch (activePage) {
@@ -132,9 +140,28 @@ function App() {
 
     let socketHandle: { close: () => void } | null = null;
 
+    const hydrateNotification = (notification: NotificationItem) => {
+      const resolvedCameraName =
+        notification.cameraName &&
+        notification.cameraId &&
+        notification.cameraName !== notification.cameraId
+          ? notification.cameraName
+          : notification.cameraId && cameraMap[notification.cameraId]
+            ? cameraMap[notification.cameraId]
+            : notification.cameraName ||
+              notification.cameraId ||
+              "Unknown Camera";
+
+      return {
+        ...notification,
+        cameraName: resolvedCameraName,
+      };
+    };
+
     const loadNotifications = async () => {
       const fetched = await notificationService.fetchNotifications();
-      const sorted = [...fetched].sort(
+      const hydrated = fetched.map(hydrateNotification);
+      const sorted = [...hydrated].sort(
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
       );
       setNotifications(sorted);
@@ -143,13 +170,13 @@ function App() {
     loadNotifications();
 
     socketHandle = notificationService.subscribeToLiveAlerts((notification) => {
-      setNotifications((prev) => [notification, ...prev]);
+      setNotifications((prev) => [hydrateNotification(notification), ...prev]);
     });
 
     return () => {
       socketHandle?.close();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, cameraMap]);
 
   const fetchAndCacheScreenshot = async (eventId?: string | null) => {
     if (!eventId) return null;
@@ -168,14 +195,32 @@ function App() {
   };
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 60000);
+    if (!isAuthenticated) return;
 
-    return () => {
-      window.clearInterval(intervalId);
+    const loadCameras = async () => {
+      try {
+        const res = await cameraService.getAll();
+        if (Array.isArray(res.data)) {
+          const map = (res.data as Array<Record<string, unknown>>).reduce(
+            (acc: Record<string, string>, item) => {
+              const cameraId = String(item.camera_id ?? "");
+              const cameraName = String(item.camera_name ?? "");
+              if (cameraId && cameraName) {
+                acc[cameraId] = cameraName;
+              }
+              return acc;
+            },
+            {},
+          );
+          setCameraMap(map);
+        }
+      } catch (err) {
+        console.warn("Failed to load camera metadata", err);
+      }
     };
-  }, []);
+
+    loadCameras();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isNotificationsOpen || !bellRef.current) {
@@ -235,16 +280,25 @@ function App() {
     }
   };
 
-  const formatRelativeTime = (isoTime: string, referenceTime: number) => {
-    const delta = referenceTime - new Date(isoTime).getTime();
-    const minutes = Math.round(delta / 60000);
-    if (minutes < 1) return "Just now";
-    if (minutes === 1) return "1 minute ago";
-    if (minutes < 60) return `${minutes} minutes ago`;
-    return new Date(isoTime).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const formatNotificationDateTime = (isoTime: string) => {
+    const date = new Date(isoTime);
+    if (Number.isNaN(date.getTime())) {
+      return { dateLabel: isoTime, timeLabel: "" };
+    }
+
+    return {
+      dateLabel: date.toLocaleDateString(undefined, {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
+      timeLabel: date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      }),
+    };
   };
 
   const authenticatedShell = (
@@ -344,12 +398,12 @@ function App() {
                           overscrollBehavior: "contain",
                         }}
                       >
-                        {notifications.length === 0 ? (
+                        {sortedNotifications.length === 0 ? (
                           <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-sm text-gray-400">
                             No notifications available yet.
                           </div>
                         ) : (
-                          notifications.map((notification) => (
+                          sortedNotifications.map((notification) => (
                             <div
                               key={notification.id}
                               className="rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -359,9 +413,25 @@ function App() {
                                   <p className="text-sm font-semibold text-white">
                                     {notification.detectionType}
                                   </p>
-                                  <p className="text-xs text-gray-400">
+                                  <p className="mt-1 text-xs text-gray-400">
                                     Camera: {notification.cameraName}
                                   </p>
+                                  <div className="mt-3 space-y-1 text-xs text-gray-400">
+                                    <div>
+                                      {
+                                        formatNotificationDateTime(
+                                          notification.time,
+                                        ).dateLabel
+                                      }
+                                    </div>
+                                    <div>
+                                      {
+                                        formatNotificationDateTime(
+                                          notification.time,
+                                        ).timeLabel
+                                      }
+                                    </div>
+                                  </div>
                                 </div>
                                 <span
                                   className={`rounded-full border px-2 py-1 text-xs font-semibold ${getSeverityStyle(
@@ -372,23 +442,17 @@ function App() {
                                 </span>
                               </div>
 
-                              <div className="mt-4 flex items-center justify-between gap-3 text-sm text-gray-400">
-                                <p>
-                                  {formatRelativeTime(
-                                    notification.time,
-                                    currentTime,
-                                  )}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.18em] ${
-                                      notification.status === "Unread"
-                                        ? "bg-white/10 text-white"
-                                        : "bg-white/5 text-gray-400"
-                                    }`}
-                                  >
-                                    {notification.status}
-                                  </span>
+                              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-400">
+                                <span
+                                  className={`inline-flex rounded-full px-2 py-1 text-[11px] uppercase tracking-[0.18em] ${
+                                    notification.status === "Unread"
+                                      ? "bg-white/10 text-white"
+                                      : "bg-white/5 text-gray-400"
+                                  }`}
+                                >
+                                  {notification.status}
+                                </span>
+                                <div className="flex flex-wrap items-center justify-end gap-2">
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -458,15 +522,16 @@ function App() {
                                   ) : null}
                                 </div>
                               </div>
-                              {notification.eventId ? (
-                                <div className="mt-3">
-                                  {screenshotCache.has(notification.eventId) ? (
+
+                              <div className="mt-4 h-20 w-full overflow-hidden rounded-md bg-white/5">
+                                {notification.eventId ? (
+                                  screenshotCache.has(notification.eventId) ? (
                                     <img
                                       src={screenshotCache.get(
                                         notification.eventId,
                                       )}
                                       alt="thumb"
-                                      className="h-20 w-28 rounded-md object-cover"
+                                      className="h-20 w-full object-cover"
                                     />
                                   ) : (
                                     <div
@@ -475,13 +540,17 @@ function App() {
                                           notification.eventId,
                                         )
                                       }
-                                      className="flex h-20 w-28 items-center justify-center rounded-md bg-white/5 text-xs text-gray-400"
+                                      className="flex h-20 w-full items-center justify-center rounded-md bg-white/5 text-xs text-gray-400"
                                     >
                                       Preview
                                     </div>
-                                  )}
-                                </div>
-                              ) : null}
+                                  )
+                                ) : (
+                                  <div className="flex h-20 w-full items-center justify-center rounded-md bg-white/5 text-xs text-gray-400">
+                                    Preview
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           ))
                         )}

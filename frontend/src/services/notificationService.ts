@@ -12,6 +12,7 @@ export interface NotificationItem {
   id: string; // event_id when available
   eventId?: string | null;
   detectionType: string;
+  cameraId?: string;
   cameraName: string;
   severity: NotificationSeverity;
   time: string;
@@ -19,15 +20,28 @@ export interface NotificationItem {
   screenshot?: string | null;
 }
 
+const resolveNotificationTime = (data: AlertWSData) =>
+  String(
+    data.created_at ??
+      data.event_time ??
+      data.detection_time ??
+      data.timestamp ??
+      data.screenshot_timestamp ??
+      new Date().toISOString(),
+  );
+
 const normalizeNotification = (
   data: AlertWSData,
   cameraName?: string,
 ): NotificationItem => ({
   id: `${data.camera_id}-${data.type}-${data.priority}-${Date.now()}`,
+  eventId: data.event_id ?? null,
   detectionType: data.type || "Unknown Detection",
-  cameraName: cameraName || data.camera_id || "Unknown Camera",
+  cameraId: data.camera_id,
+  cameraName:
+    cameraName || data.camera_name || data.camera_id || "Unknown Camera",
   severity: (data.priority as NotificationSeverity) ?? "Normal",
-  time: new Date().toISOString(),
+  time: resolveNotificationTime(data),
   status: "Unread",
 });
 
@@ -55,6 +69,7 @@ export const notificationService = {
         detectionType: String(
           item.detection_type ?? item.type ?? "Unknown Detection",
         ),
+        cameraId: item.camera_id ? String(item.camera_id) : undefined,
         cameraName: String(
           item.camera_name ?? item.camera_id ?? "Unknown Camera",
         ),
@@ -62,7 +77,12 @@ export const notificationService = {
           (item.severity as NotificationSeverity) ??
           (item.priority as NotificationSeverity) ??
           "Normal",
-        time: String(item.created_at ?? item.time ?? new Date().toISOString()),
+        time: String(
+          item.created_at ??
+            item.time ??
+            item.timestamp ??
+            new Date().toISOString(),
+        ),
         status: item.status === "Read" ? "Read" : "Unread",
         screenshot:
           (item.screenshot_path as string) ??

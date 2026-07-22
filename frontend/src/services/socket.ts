@@ -8,9 +8,15 @@ export type AlertWSData = {
   type: string;
   priority: string;
   camera_id: string;
+  camera_name?: string;
   confidence?: number;
   event_id?: string;
   screenshot?: string | null;
+  created_at?: string;
+  event_time?: string;
+  detection_time?: string;
+  timestamp?: string;
+  screenshot_timestamp?: string;
 };
 
 export type DashboardStats = {
