@@ -57,7 +57,21 @@ interface CameraData {
   location: string;
 }
 
-const Dashboard = () => {
+const alertBadgeLabel = (alert: AlertData) => {
+  const typeLabel = alert.type?.trim();
+  if (!typeLabel) return "Alert";
+  if (/restricted/i.test(typeLabel)) return "Restricted Area";
+  return typeLabel;
+};
+
+const hasCriticalAlerts = (alerts: AlertData[]) =>
+  alerts.some((alert) => /critical/i.test(alert.priority || ""));
+
+interface DashboardProps {
+  onAlertBadgeClick?: () => void;
+}
+
+const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const { t } = useTranslation();
   // --- States ---
   const [alerts, setAlerts] = useState<AlertData[]>([]);
@@ -782,77 +796,27 @@ const Dashboard = () => {
                   <span className="font-black">{carCount}</span>
                 </span>
               </div>
+
+              {alerts.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={onAlertBadgeClick}
+                  className="inline-flex items-center gap-2 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[13px] font-semibold text-white whitespace-nowrap pointer-events-auto transition hover:bg-white/5"
+                >
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-ag-danger/90 text-white">
+                    <ShieldAlert size={14} />
+                  </div>
+                  <span>
+                    {alerts.length === 1
+                      ? alertBadgeLabel(alerts[0])
+                      : `${alerts.length} ${hasCriticalAlerts(alerts) ? "Critical Alerts" : "Alerts"}`}
+                  </span>
+                </button>
+              ) : null}
+
               <div className="inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
                 {localDateTime}
               </div>
-            </div>
-
-            {/* Floating Violation Alerts */}
-            <div className="absolute left-1/2 top-[12%] z-50 flex w-full -translate-x-1/2 flex-col items-center gap-2 pointer-events-none px-3 md:px-6">
-              {alerts.map((alert, idx) => (
-                <div
-                  key={idx}
-                  className="max-w-[92%] rounded-xl border border-ag-danger/40 bg-ag-danger/12 backdrop-blur-lg px-4 py-3 flex items-center gap-3 animate-in slide-in-from-top zoom-in duration-300 shadow-[0_6px_30px_rgba(239,68,68,0.12)]"
-                >
-                  <div className="bg-ag-danger/90 p-2.5 rounded-xl shadow-lg">
-                    <ShieldAlert size={20} className="text-white" />
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-black text-ag-danger uppercase tracking-[0.3em]">
-                      {t("dashboard.criticalAlert")}
-                    </p>
-                    <h4 className="text-base md:text-lg font-black text-white uppercase tracking-tighter">
-                      {alert.type} {t("dashboard.detectLabel")}
-                    </h4>
-                  </div>
-                  {alert.event_id ? (
-                    <div className="ml-auto flex items-center gap-2 pointer-events-auto">
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await (
-                              await import("../services/api")
-                            ).aiService.downloadScreenshot(
-                              alert.event_id as string,
-                            );
-                            const blob = res.data as Blob;
-                            const url = window.URL.createObjectURL(blob);
-                            window.open(url, "_blank");
-                          } catch (err) {
-                            console.error(err);
-                          }
-                        }}
-                        className="rounded-full bg-white/6 px-3 py-2 text-xs text-white cursor-pointer"
-                      >
-                        View
-                      </button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await (
-                              await import("../services/api")
-                            ).aiService.downloadScreenshot(
-                              alert.event_id as string,
-                            );
-                            const blob = res.data as Blob;
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = `ai_event_${alert.event_id}.jpg`;
-                            a.click();
-                            window.URL.revokeObjectURL(url);
-                          } catch (err) {
-                            console.error(err);
-                          }
-                        }}
-                        className="rounded-full bg-white/6 px-3 py-2 text-xs text-white cursor-pointer"
-                      >
-                        Download
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
             </div>
 
             {/* Video Stream Implementation */}

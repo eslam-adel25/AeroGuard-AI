@@ -24,8 +24,6 @@ import {
   type NotificationSeverity,
 } from "./services/notificationService";
 
-
-
 function App() {
   const { t } = useTranslation();
   const [activePage, setActivePage] = useState("dashboard");
@@ -490,7 +488,9 @@ function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto">
-          {activePage === "dashboard" && <Dashboard />}
+          {activePage === "dashboard" && (
+            <Dashboard onAlertBadgeClick={() => setIsNotificationsOpen(true)} />
+          )}
           {activePage === "cameras" && <Cameras />}
           {activePage === "reports" && <Analytics />}
           {activePage === "alerts" && <AlertHistory />}
@@ -539,7 +539,6 @@ function App() {
           path="*"
           element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />}
         />
-        
       </Routes>
     </BrowserRouter>
   );
