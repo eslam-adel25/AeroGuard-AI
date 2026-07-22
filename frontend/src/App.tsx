@@ -297,6 +297,7 @@ function App() {
                         top: panelPosition.top,
                         left: panelPosition.left,
                         minWidth: 320,
+                        overscrollBehavior: "contain",
                       }}
                     >
                       <div className="flex items-center justify-between gap-3 pb-4">
@@ -336,7 +337,13 @@ function App() {
                         </div>
                       </div>
 
-                      <div className="space-y-3">
+                      <div
+                        className="space-y-3 overflow-y-auto pr-1"
+                        style={{
+                          maxHeight: "calc(100vh - 212px)",
+                          overscrollBehavior: "contain",
+                        }}
+                      >
                         {notifications.length === 0 ? (
                           <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-sm text-gray-400">
                             No notifications available yet.
