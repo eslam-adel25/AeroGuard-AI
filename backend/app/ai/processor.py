@@ -695,6 +695,16 @@ class AIProcessor:
                                 if prev_point is not None:
                                     side_prev = _point_side(a, b, prev_point)
                                     side_curr = _point_side(a, b, base_point)
+                                    ###############################
+                                    print("=" * 80)
+                                    print("[TRIPWIRE]")
+                                    print("TRACK:", obj_id)
+                                    print("PREV:", prev_point)
+                                    print("CURR:", base_point)
+                                    print("SIDE PREV:", side_prev)
+                                    print("SIDE CURR:", side_curr)
+                                    print("=" * 80)
+                                    ##########################
                                     if side_prev * side_curr < 0:
                                         # crossed the direction line this frame
                                         move_vec = (base_point[0] - prev_point[0], base_point[1] - prev_point[1])
@@ -738,6 +748,16 @@ class AIProcessor:
                                 if prev_point is not None:
                                     side_prev = _point_side(a, b, prev_point)
                                     side_curr = _point_side(a, b, base_point)
+                                    ###################
+                                    print("=" * 80)
+                                    print("[DIRECTION]")
+                                    print("TRACK:", obj_id)
+                                    print("PREV:", prev_point)
+                                    print("CURR:", base_point)
+                                    print("SIDE PREV:", side_prev)
+                                    print("SIDE CURR:", side_curr)
+                                    print("=" * 80)
+                                    #################
                                     if side_prev * side_curr < 0:
                                         status = "DANGER"
                                         box_color = (0, 0, 255)
@@ -768,8 +788,22 @@ class AIProcessor:
 
                             # Default: restricted polygon area
                             else:
-                                polygon = np.array(coords, np.int32)
+                                polygon = np.asarray(coords, dtype=np.float32)
+                                if polygon.size and np.all(polygon >= 0.0) and np.all(polygon <= 1.0):
+                                    polygon *= np.array([annotated_frame.shape[1], annotated_frame.shape[0]], dtype=np.float32)
+                                polygon = np.array(polygon, np.int32)
+                                print("POLYGON:", polygon)#####################
                                 cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
+                                #############################
+                                print("=" * 80)
+                                print("TRACK:", obj_id)
+                                print("ZONE TYPE:", ztype)
+                                print("ZONE COORDS:", coords)
+                                print("BASE POINT:", base_point)
+                                print("POLYGON TEST:", cv2.pointPolygonTest(polygon, base_point, False))
+                                print("=" * 80)
+                               
+                                ##############################
                                 if cv2.pointPolygonTest(polygon, base_point, False) >= 0:
                                     in_restricted = True
                                     status = "DANGER"
