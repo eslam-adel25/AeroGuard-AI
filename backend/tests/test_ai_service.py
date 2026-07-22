@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 
 from app.services import ai_service
@@ -43,3 +44,13 @@ def test_register_event_uses_none_for_invalid_track_id(monkeypatch):
     )
 
     assert fake_repo.payloads[0]["track_id"] is None
+
+
+def test_build_screenshot_filename_returns_human_readable_name():
+    filename = ai_service.build_screenshot_filename(
+        "Main Entrance",
+        "LOITERING",
+        datetime(2025, 1, 2, 15, 4, 5),
+    )
+
+    assert filename == "Main_Entrance_LOITERING_2025-01-02_15-04-05.jpg"

@@ -30,6 +30,36 @@ export const getStoredAuthToken = () => {
   return token;
 };
 
+export const sanitizeFileNameComponent = (value: string) => {
+  return (
+    value
+      .trim()
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/_+/g, "_") || "unknown"
+  );
+};
+
+export const formatScreenshotFilename = (
+  cameraName: string,
+  alertType: string,
+  timeString?: string,
+) => {
+  const cameraPart = sanitizeFileNameComponent(cameraName || "Unknown_Camera");
+  const typePart = sanitizeFileNameComponent(alertType || "Alert");
+  const when = timeString ? new Date(timeString) : new Date();
+  const safeWhen = Number.isNaN(when.valueOf()) ? new Date() : when;
+  const datePart = safeWhen.toISOString().slice(0, 10);
+  const timePart = safeWhen.toISOString().slice(11, 19).replace(/:/g, "-");
+  return `${cameraPart}_${typePart}_${datePart}_${timePart}.jpg`;
+};
+
+export const getFilenameFromContentDisposition = (header?: string) => {
+  if (!header) return null;
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header);
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
 /**
  * نظام حماية الطلبات: إرفاق توكن JWT تلقائياً (صفحة 79)
  */

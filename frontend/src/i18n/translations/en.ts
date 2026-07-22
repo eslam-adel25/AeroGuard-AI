@@ -35,11 +35,11 @@ const en = {
     headerTitle: "AeroGuard Dashboard",
   },
   sidebar: {
-    monitoring: "Monitoring",
+    monitoring: "Dashboard",
     cameras: "Cameras",
     analytics: "Analytics",
     profile: "Profile",
-    control: "Control",
+    control: "Settings",
     logout: "Logout",
     collapse: "Collapse sidebar",
     expand: "Expand sidebar",

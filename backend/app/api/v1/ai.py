@@ -3,10 +3,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from ...database.session import get_db
 from ...core.auth_middleware import get_current_user
-from ...services.ai_service import AIService
+from ...services.ai_service import AIService, build_screenshot_filename
 from ...repositories.ai_repository import AIRepository
+from ...models.models import Camera
 from fastapi.responses import FileResponse
 import os
+from datetime import datetime
 
 router = APIRouter()
 
@@ -96,5 +98,10 @@ def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), curren
     path = ev.screenshot_path
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Screenshot file missing")
-    filename = os.path.basename(path)
+    camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
+    filename = build_screenshot_filename(
+        getattr(camera, "camera_name", None) if camera else None,
+        ev.detection_type,
+        ev.created_at or datetime.utcnow(),
+    )
     return FileResponse(path, media_type="image/jpeg", filename=filename)

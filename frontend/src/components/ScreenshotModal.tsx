@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { X, Download } from "lucide-react";
-import { aiService } from "../services/api";
+import { aiService, getFilenameFromContentDisposition } from "../services/api";
 
 interface Props {
   eventId: string;
@@ -44,7 +44,10 @@ export default function ScreenshotModal({ eventId, onClose }: Props) {
       const blob = resp.data as Blob;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `ai_event_${eventId}.jpg`;
+      const responseFilename = getFilenameFromContentDisposition(
+        resp.headers["content-disposition"],
+      );
+      a.download = responseFilename || `ai_event_${eventId}.jpg`;
       document.body.appendChild(a);
       a.click();
       a.remove();

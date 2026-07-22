@@ -88,7 +88,7 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
               }
             />
             {!isCollapsed && (
-              <span className="font-semibold text-[12px] uppercase tracking-[0.18em]">
+              <span className="font-semibold text-[12px] tracking-[0.18em]">
                 {item.label}
               </span>
             )}

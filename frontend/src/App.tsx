@@ -16,7 +16,13 @@ import VerifyEmail from "./pages/VerifyEmail";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
-import { aiService, cameraService, getStoredAuthToken } from "./services/api";
+import {
+  aiService,
+  cameraService,
+  formatScreenshotFilename,
+  getFilenameFromContentDisposition,
+  getStoredAuthToken,
+} from "./services/api";
 import { closeActiveSocket } from "./services/socket";
 import {
   notificationService,
@@ -496,7 +502,20 @@ function App() {
                                                 document.createElement("a");
                                               a.href =
                                                 URL.createObjectURL(blob);
-                                              a.download = `ai_event_${notification.eventId}.jpg`;
+                                              const responseFilename =
+                                                getFilenameFromContentDisposition(
+                                                  resp.headers[
+                                                    "content-disposition"
+                                                  ],
+                                                );
+                                              a.download =
+                                                responseFilename ||
+                                                formatScreenshotFilename(
+                                                  notification.cameraName ||
+                                                    "Unknown Camera",
+                                                  notification.detectionType,
+                                                  notification.time,
+                                                );
                                               document.body.appendChild(a);
                                               a.click();
                                               a.remove();
