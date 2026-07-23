@@ -16,6 +16,12 @@ from ..services.decision_engine import DecisionEngine
 from ..websocket.manager import manager
 from .tracker import TrackerManager
 from ..services.ai_service import AIService
+from .ownership_config import (
+    OWNERSHIP_ASSIGNMENT_REQUIRED_FRAMES,
+    OWNERSHIP_LOSS_REQUIRED_FRAMES,
+    OWNERSHIP_MAX_DISTANCE_PX,
+    UNATTENDED_TIMEOUT_SECONDS,
+)
 
 
 def build_detection_record(camera_id, owner_id, detection_type, confidence, status=None):
@@ -89,6 +95,8 @@ class AIProcessor:
         self.crowd_cooldown = {}  # camera_id -> last_alert_time
         self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
         self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
+        self.bag_owner_evidence = {}  # camera_id -> {bag_internal_id: {candidate_owner, confirm_streak, missing_streak, confirmed_owner}}
+        self.bag_owner_status = {}  # camera_id -> {bag_internal_id: "owned" | "lost" | "unknown"}
         self.active_critical_alerts = {}  # camera_id -> [alert_timestamps]
         self._detection_persist_cooldown = {}  # key -> last persisted timestamp
         self._stop_flags = {}
@@ -314,7 +322,10 @@ class AIProcessor:
     def _assign_bag_owner(self, camera_id, person_tracks, bag_tracks):
         """Assign a stable owner ID to bags for overlay display without changing tracker internals."""
         camera_key = str(camera_id)
-        bag_owner_state = self.bag_owner_state.setdefault(camera_key, {})
+        bag_owner_state = getattr(self, "bag_owner_state", {}).setdefault(camera_key, {})
+        bag_owner_evidence = getattr(self, "bag_owner_evidence", {}).setdefault(camera_key, {})
+        bag_owner_status = getattr(self, "bag_owner_status", {}).setdefault(camera_key, {})
+        now = time.time()
 
         person_candidates = []
         for track in person_tracks:
@@ -323,16 +334,25 @@ class AIProcessor:
                 continue
             person_candidates.append(track)
 
+        visible_bag_ids = set()
         owner_map = {}
         for bag_track in bag_tracks:
             bag_id = getattr(bag_track, "track_id", None)
             if bag_id is None:
                 continue
 
-            current_owner = bag_owner_state.get(bag_id)
-            if current_owner is not None:
-                owner_map[bag_id] = current_owner
-                continue
+            visible_bag_ids.add(bag_id)
+            evidence = bag_owner_evidence.setdefault(
+                bag_id,
+                {
+                    "candidate_owner": None,
+                    "confirm_streak": 0,
+                    "missing_streak": 0,
+                    "confirmed_owner": bag_owner_state.get(bag_id),
+                    "state": "unknown",
+                    "state_started_at": None,
+                },
+            )
 
             best_owner = None
             best_score = None
@@ -344,18 +364,95 @@ class AIProcessor:
                 dx = bag_center[0] - person_center[0]
                 dy = bag_center[1] - person_center[1]
                 distance = (dx * dx + dy * dy) ** 0.5
-                if distance > 220:
+                if distance > OWNERSHIP_MAX_DISTANCE_PX:
                     continue
-                score = max(0.0, 220.0 - distance)
+                score = max(0.0, float(OWNERSHIP_MAX_DISTANCE_PX) - distance)
                 if best_score is None or score > best_score:
                     best_score = score
                     best_owner = getattr(person_track, "track_id", None)
 
+            confirmed_owner = evidence.get("confirmed_owner")
             if best_owner is None:
-                owner_map[bag_id] = current_owner
+                evidence["missing_streak"] = int(evidence.get("missing_streak", 0)) + 1
+                evidence["confirm_streak"] = 0
+                if confirmed_owner is not None:
+                    if evidence["missing_streak"] < OWNERSHIP_LOSS_REQUIRED_FRAMES:
+                        evidence["state"] = "owned"
+                        evidence["state_started_at"] = None
+                        bag_owner_state[bag_id] = confirmed_owner
+                        owner_map[bag_id] = confirmed_owner
+                        bag_owner_status[bag_id] = "owned"
+                    else:
+                        if evidence.get("state") not in {"temporary_unattended", "unattended"}:
+                            evidence["state"] = "temporary_unattended"
+                            evidence["state_started_at"] = now
+                            print(f"[OWNERSHIP] Temporary unattended started for bag {bag_id} at camera {camera_key}")
+                        elif evidence.get("state") == "temporary_unattended":
+                            started_at = evidence.get("state_started_at")
+                            if started_at is not None and (now - started_at) >= UNATTENDED_TIMEOUT_SECONDS:
+                                evidence["state"] = "unattended"
+                                evidence["state_started_at"] = started_at
+                                print(f"[OWNERSHIP] Unattended timeout expired for bag {bag_id} at camera {camera_key}")
+                        bag_owner_state.pop(bag_id, None)
+                        owner_map[bag_id] = None
+                        bag_owner_status[bag_id] = evidence.get("state", "temporary_unattended")
+                else:
+                    evidence["state"] = "unknown"
+                    evidence["state_started_at"] = None
+                    owner_map[bag_id] = None
+                    bag_owner_status[bag_id] = "unknown"
             else:
-                owner_map[bag_id] = best_owner
-                bag_owner_state[bag_id] = best_owner
+                evidence["missing_streak"] = 0
+                if confirmed_owner is not None and confirmed_owner == best_owner:
+                    evidence["confirm_streak"] = max(int(evidence.get("confirm_streak", 0)), OWNERSHIP_ASSIGNMENT_REQUIRED_FRAMES)
+                    evidence["candidate_owner"] = best_owner
+                    evidence["confirmed_owner"] = best_owner
+                    evidence["state"] = "owned"
+                    evidence["state_started_at"] = None
+                    bag_owner_state[bag_id] = best_owner
+                    owner_map[bag_id] = best_owner
+                    bag_owner_status[bag_id] = "owned"
+                else:
+                    candidate_owner = evidence.get("candidate_owner")
+                    if candidate_owner == best_owner:
+                        evidence["confirm_streak"] = int(evidence.get("confirm_streak", 0)) + 1
+                    else:
+                        evidence["candidate_owner"] = best_owner
+                        evidence["confirm_streak"] = 1
+
+                    if evidence["confirm_streak"] >= OWNERSHIP_ASSIGNMENT_REQUIRED_FRAMES:
+                        evidence["confirmed_owner"] = best_owner
+                        evidence["state"] = "owned"
+                        evidence["state_started_at"] = None
+                        bag_owner_state[bag_id] = best_owner
+                        owner_map[bag_id] = best_owner
+                        bag_owner_status[bag_id] = "owned"
+                    else:
+                        evidence["state"] = "unknown"
+                        evidence["state_started_at"] = None
+                        owner_map[bag_id] = None
+                        bag_owner_status[bag_id] = "unknown"
+
+        for stale_bag_id in list(bag_owner_state.keys()):
+            if stale_bag_id not in visible_bag_ids:
+                del bag_owner_state[stale_bag_id]
+        for stale_bag_id in list(bag_owner_evidence.keys()):
+            if stale_bag_id not in visible_bag_ids:
+                del bag_owner_evidence[stale_bag_id]
+        for stale_bag_id in list(bag_owner_status.keys()):
+            if stale_bag_id not in visible_bag_ids:
+                del bag_owner_status[stale_bag_id]
+
+        if getattr(self, "bag_owner_state", None) is None:
+            self.bag_owner_state = {}
+        if getattr(self, "bag_owner_evidence", None) is None:
+            self.bag_owner_evidence = {}
+        if getattr(self, "bag_owner_status", None) is None:
+            self.bag_owner_status = {}
+
+        self.bag_owner_state[camera_key] = bag_owner_state
+        self.bag_owner_evidence[camera_key] = bag_owner_evidence
+        self.bag_owner_status[camera_key] = bag_owner_status
 
         return owner_map
 
@@ -682,6 +779,7 @@ class AIProcessor:
 
                 display_ids = self._assign_display_ids(camera_id, active_tracks)
                 bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
+                ownership_state = self.bag_owner_status.get(str(camera_id), {})
 
                 # Periodically refresh zones from DB so saved annotations are applied to live inference
                 try:
@@ -708,57 +806,143 @@ class AIProcessor:
                     box_color = self._get_detection_box_color(label_name)
                     display_label = "Person" if label_name == "person" else "Baggage"
                     display_id = display_ids.get(obj_id, 0)
+                    bag_state = None
                     if label_name in {"bag", "backpack", "suitcase"}:
                         overlay_owner_id = bag_owner_map.get(obj_id)
-                        object_label = f"Owner:{overlay_owner_id:03d} Bag" if overlay_owner_id is not None else "Bag"
+                        bag_evidence = self.bag_owner_evidence.get(str(camera_id), {}).get(obj_id, {})
+                        bag_state = bag_evidence.get("state", ownership_state.get(obj_id, "unknown"))
+                        if overlay_owner_id is not None:
+                            box_color = (0, 255, 0)
+                            object_label = f"Owned ID {int(overlay_owner_id):03d} Bag"
+                            display_label = "OWNED_BAG"
+                            status = "NORMAL"
+                            if bag_state in {"temporary_unattended", "unattended"}:
+                                print(f"[OWNERSHIP] Owner returned for bag {obj_id} at camera {camera_id}")
+                            ownership_state[obj_id] = "owned"
+                        elif bag_state == "temporary_unattended":
+                            started_at = bag_evidence.get("state_started_at")
+                            remaining = 0
+                            if started_at is not None:
+                                remaining = max(0, int(UNATTENDED_TIMEOUT_SECONDS - (time.time() - started_at)))
+                            box_color = (0, 255, 255)
+                            object_label = f"LEFT {remaining}s"
+                            display_label = "TEMP_UNATTENDED"
+                            status = "NORMAL"
+                            ownership_state[obj_id] = "temporary_unattended"
+                        elif bag_state == "unattended":
+                            box_color = (0, 0, 255)
+                            object_label = "UNATTENDED"
+                            display_label = "UNATTENDED"
+                            status = "DANGER"
+                            ownership_state[obj_id] = "unattended"
+                        else:
+                            box_color = self._get_detection_box_color(label_name)
+                            object_label = "Bag"
+                            display_label = "Baggage"
+                            status = "NORMAL"
+                            ownership_state[obj_id] = "unknown"
                     else:
                         object_label = self._format_overlay_label(display_id, label_name)
 
                     overlay_label = object_label
                     in_restricted = False
-                    for zone in zones:
-                        try:
-                            coords = _normalize_zone_coords(
-                                getattr(zone, "polygon_coords", None),
-                                camera_id=camera_id,
-                                annotation_id=getattr(zone, "zone_id", None),
-                                rule_type="zone",
-                            )
-                            if not coords:
-                                continue
-                            ztype = (zone.zone_type or "").lower()
+                    should_skip_rule_engine = (
+                        label_name in {"bag", "backpack", "suitcase"}
+                        and bag_state == "temporary_unattended"
+                    )
+                    if should_skip_rule_engine:
+                        pass
+                    else:
+                        for zone in zones:
+                            try:
+                                coords = _normalize_zone_coords(
+                                    getattr(zone, "polygon_coords", None),
+                                    camera_id=camera_id,
+                                    annotation_id=getattr(zone, "zone_id", None),
+                                    rule_type="zone",
+                                )
+                                if not coords:
+                                    continue
+                                ztype = (zone.zone_type or "").lower()
 
-                            # Direction rule (line): detect crossing and check allowed direction
-                            if "direction" in ztype:
-                                prev_point = self.object_history.get(obj_id)
-                                a = tuple(coords[0])
-                                b = tuple(coords[-1])
-                                cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (200, 200, 200), 1)
-                                if prev_point is not None:
-                                    side_prev = _point_side(a, b, prev_point)
-                                    side_curr = _point_side(a, b, base_point)
-                                    ###############################
-                                    print("=" * 80)
-                                    print("[TRIPWIRE]")
-                                    print("TRACK:", obj_id)
-                                    print("PREV:", prev_point)
-                                    print("CURR:", base_point)
-                                    print("SIDE PREV:", side_prev)
-                                    print("SIDE CURR:", side_curr)
-                                    print("=" * 80)
-                                    ##########################
-                                    if side_prev * side_curr < 0:
-                                        # crossed the direction line this frame
-                                        move_vec = (base_point[0] - prev_point[0], base_point[1] - prev_point[1])
-                                        dir_vec = (b[0] - a[0], b[1] - a[1])
-                                        dot = move_vec[0] * dir_vec[0] + move_vec[1] * dir_vec[1]
-                                        # if dot < 0 => moving opposite to defined direction => violation
-                                        if dot < 0:
+                                # Direction rule (line): detect crossing and check allowed direction
+                                if "direction" in ztype:
+                                    prev_point = self.object_history.get(obj_id)
+                                    a = tuple(coords[0])
+                                    b = tuple(coords[-1])
+                                    cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (200, 200, 200), 1)
+                                    if prev_point is not None:
+                                        side_prev = _point_side(a, b, prev_point)
+                                        side_curr = _point_side(a, b, base_point)
+                                        ###############################
+                                        print("=" * 80)
+                                        print("[TRIPWIRE]")
+                                        print("TRACK:", obj_id)
+                                        print("PREV:", prev_point)
+                                        print("CURR:", base_point)
+                                        print("SIDE PREV:", side_prev)
+                                        print("SIDE CURR:", side_curr)
+                                        print("=" * 80)
+                                        ##########################
+                                        if side_prev * side_curr < 0:
+                                            # crossed the direction line this frame
+                                            move_vec = (base_point[0] - prev_point[0], base_point[1] - prev_point[1])
+                                            dir_vec = (b[0] - a[0], b[1] - a[1])
+                                            dot = move_vec[0] * dir_vec[0] + move_vec[1] * dir_vec[1]
+                                            # if dot < 0 => moving opposite to defined direction => violation
+                                            if dot < 0:
+                                                status = "DANGER"
+                                                box_color = (0, 0, 255)
+                                                display_label = "WRONG DIRECTION"
+                                                overlay_label = f"{object_label}\nWRONG DIRECTION"
+                                                alert_key = f"{camera_id}_{obj_id}_WRONG_DIR_{getattr(zone, 'zone_id', '')}"
+                                                if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
+                                                    try:
+                                                        _, jpg = cv2.imencode('.jpg', annotated_frame)
+                                                        img_bytes = jpg.tobytes() if jpg is not None else None
+                                                    except Exception:
+                                                        img_bytes = None
+                                                    ai_service.register_event(
+                                                        camera_id=camera_id,
+                                                        detection_type=display_label,
+                                                        severity="Critical",
+                                                        confidence=float(conf),
+                                                        track_id=str(obj_id),
+                                                        user_id=None,
+                                                        metadata={"bbox": [x1, y1, x2, y2]},
+                                                        screenshot_bytes=img_bytes,
+                                                    )
+                                                    await manager.broadcast({
+                                                        "event": "new_alert",
+                                                        "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
+                                                    })
+                                                    self.last_alert_time[alert_key] = time.time()
+
+                                # Tripwire: any crossing of the defined line triggers one alert per crossing
+                                elif "tripwire" in ztype:
+                                    prev_point = self.object_history.get(obj_id)
+                                    a = tuple(coords[0])
+                                    b = tuple(coords[-1])
+                                    cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
+                                    if prev_point is not None:
+                                        side_prev = _point_side(a, b, prev_point)
+                                        side_curr = _point_side(a, b, base_point)
+                                        ###################
+                                        print("=" * 80)
+                                        print("[DIRECTION]")
+                                        print("TRACK:", obj_id)
+                                        print("PREV:", prev_point)
+                                        print("CURR:", base_point)
+                                        print("SIDE PREV:", side_prev)
+                                        print("SIDE CURR:", side_curr)
+                                        print("=" * 80)
+                                        #################
+                                        if side_prev * side_curr < 0:
                                             status = "DANGER"
                                             box_color = (0, 0, 255)
-                                            display_label = "WRONG DIRECTION"
-                                            overlay_label = f"{object_label}\nWRONG DIRECTION"
-                                            alert_key = f"{camera_id}_{obj_id}_WRONG_DIR_{getattr(zone, 'zone_id', '')}"
+                                            display_label = "TRIPWIRE"
+                                            overlay_label = f"{object_label}\nTRIPWIRE CROSSED"
+                                            alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
                                             if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
                                                 try:
                                                     _, jpg = cv2.imencode('.jpg', annotated_frame)
@@ -781,73 +965,26 @@ class AIProcessor:
                                                 })
                                                 self.last_alert_time[alert_key] = time.time()
 
-                            # Tripwire: any crossing of the defined line triggers one alert per crossing
-                            elif "tripwire" in ztype:
-                                prev_point = self.object_history.get(obj_id)
-                                a = tuple(coords[0])
-                                b = tuple(coords[-1])
-                                cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
-                                if prev_point is not None:
-                                    side_prev = _point_side(a, b, prev_point)
-                                    side_curr = _point_side(a, b, base_point)
-                                    ###################
-                                    print("=" * 80)
-                                    print("[DIRECTION]")
-                                    print("TRACK:", obj_id)
-                                    print("PREV:", prev_point)
-                                    print("CURR:", base_point)
-                                    print("SIDE PREV:", side_prev)
-                                    print("SIDE CURR:", side_curr)
-                                    print("=" * 80)
-                                    #################
-                                    if side_prev * side_curr < 0:
+                                # Default: restricted polygon area
+                                else:
+                                    polygon = np.asarray(coords, dtype=np.float32)
+                                    if polygon.size and np.all(polygon >= 0.0) and np.all(polygon <= 1.0):
+                                        polygon *= np.array([annotated_frame.shape[1], annotated_frame.shape[0]], dtype=np.float32)
+                                    polygon = np.array(polygon, np.int32)
+                                    cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
+
+                                    if self._bbox_intersects_polygon((x1, y1, x2, y2), polygon):
+                                        in_restricted = True
                                         status = "DANGER"
                                         box_color = (0, 0, 255)
-                                        display_label = "TRIPWIRE"
-                                        overlay_label = f"{object_label}\nTRIPWIRE CROSSED"
-                                        alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
-                                        if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                                            try:
-                                                _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                                img_bytes = jpg.tobytes() if jpg is not None else None
-                                            except Exception:
-                                                img_bytes = None
-                                            ai_service.register_event(
-                                                camera_id=camera_id,
-                                                detection_type=display_label,
-                                                severity="Critical",
-                                                confidence=float(conf),
-                                                track_id=str(obj_id),
-                                                user_id=None,
-                                                metadata={"bbox": [x1, y1, x2, y2]},
-                                                screenshot_bytes=img_bytes,
-                                            )
-                                            await manager.broadcast({
-                                                "event": "new_alert",
-                                                "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
-                                            })
-                                            self.last_alert_time[alert_key] = time.time()
-
-                            # Default: restricted polygon area
-                            else:
-                                polygon = np.asarray(coords, dtype=np.float32)
-                                if polygon.size and np.all(polygon >= 0.0) and np.all(polygon <= 1.0):
-                                    polygon *= np.array([annotated_frame.shape[1], annotated_frame.shape[0]], dtype=np.float32)
-                                polygon = np.array(polygon, np.int32)
-                                cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
-
-                                if self._bbox_intersects_polygon((x1, y1, x2, y2), polygon):
-                                    in_restricted = True
-                                    status = "DANGER"
-                                    box_color = (0, 0, 255)
-                                    display_label = "RESTRICTED AREA"
-                                    overlay_label = f"{object_label}\nRESTRICTED AREA"
-                                    break
-                        except Exception as zone_exc:
-                            print(
-                                f"⚠️ [{camera_id}] failed to normalize zone annotation zone={getattr(zone, 'zone_id', None)} rule={getattr(zone, 'zone_type', None)}: {type(zone_exc).__name__}: {zone_exc}"
-                            )
-                            continue
+                                        display_label = "RESTRICTED AREA"
+                                        overlay_label = f"{object_label}\nRESTRICTED AREA"
+                                        break
+                            except Exception as zone_exc:
+                                print(
+                                    f"⚠️ [{camera_id}] failed to normalize zone annotation zone={getattr(zone, 'zone_id', None)} rule={getattr(zone, 'zone_type', None)}: {type(zone_exc).__name__}: {zone_exc}"
+                                )
+                                continue
 
                     # legacy wrong-direction vertical heuristic (kept for backward compatibility)
                     if obj_id in self.object_history and not in_restricted:

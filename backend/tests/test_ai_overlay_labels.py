@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import app.ai.processor as processor_module
 from app.ai.processor import AIProcessor
 
 
@@ -33,16 +34,76 @@ def test_person_fallback_threshold_is_lower_for_recall():
     assert AIProcessor._get_person_confidence_threshold(0.5) == 0.38
 
 
-def test_bag_owner_is_preserved_after_separation():
+def test_bag_owner_requires_multiple_consecutive_frames_to_assign():
     processor = AIProcessor.__new__(AIProcessor)
     processor.bag_owner_state = {}
     processor.display_id_state = {}
+    processor.bag_owner_evidence = {}
+    processor.bag_owner_status = {}
 
     person = SimpleNamespace(track_id=14, bbox=[10, 10, 50, 120], class_name="person")
     bag = SimpleNamespace(track_id=88, bbox=[20, 90, 60, 140], class_name="bag")
 
-    owner_map = processor._assign_bag_owner("cam-1", [person], [bag])
-    assert owner_map[88] == 14
+    first_assignment = processor._assign_bag_owner("cam-1", [person], [bag])
+    assert first_assignment.get(88) is None
 
-    owner_map = processor._assign_bag_owner("cam-1", [], [bag])
-    assert owner_map[88] == 14
+    second_assignment = processor._assign_bag_owner("cam-1", [person], [bag])
+    assert second_assignment.get(88) is None
+
+    third_assignment = processor._assign_bag_owner("cam-1", [person], [bag])
+    assert third_assignment[88] == 14
+
+
+def test_bag_owner_is_lost_after_consecutive_missing_frames():
+    processor = AIProcessor.__new__(AIProcessor)
+    processor.bag_owner_state = {}
+    processor.display_id_state = {}
+    processor.bag_owner_evidence = {}
+    processor.bag_owner_status = {}
+
+    person = SimpleNamespace(track_id=14, bbox=[10, 10, 50, 120], class_name="person")
+    bag = SimpleNamespace(track_id=88, bbox=[20, 90, 60, 140], class_name="bag")
+
+    processor._assign_bag_owner("cam-1", [person], [bag])
+    processor._assign_bag_owner("cam-1", [person], [bag])
+    processor._assign_bag_owner("cam-1", [person], [bag])
+
+    lost_assignment = processor._assign_bag_owner("cam-1", [], [bag])
+    assert lost_assignment.get(88) == 14
+
+    lost_assignment = processor._assign_bag_owner("cam-1", [], [bag])
+    assert lost_assignment.get(88) == 14
+
+    lost_assignment = processor._assign_bag_owner("cam-1", [], [bag])
+    assert lost_assignment.get(88) is None
+
+
+def test_bag_owner_enters_temporary_and_unattended_states():
+    processor = AIProcessor.__new__(AIProcessor)
+    processor.bag_owner_state = {}
+    processor.display_id_state = {}
+    processor.bag_owner_evidence = {}
+    processor.bag_owner_status = {}
+
+    person = SimpleNamespace(track_id=14, bbox=[10, 10, 50, 120], class_name="person")
+    bag = SimpleNamespace(track_id=88, bbox=[20, 90, 60, 140], class_name="bag")
+
+    original_timeout = processor_module.UNATTENDED_TIMEOUT_SECONDS
+    original_loss_required = processor_module.OWNERSHIP_LOSS_REQUIRED_FRAMES
+    processor_module.UNATTENDED_TIMEOUT_SECONDS = 0
+    processor_module.OWNERSHIP_LOSS_REQUIRED_FRAMES = 1
+    try:
+        processor._assign_bag_owner("cam-1", [person], [bag])
+        processor._assign_bag_owner("cam-1", [person], [bag])
+        processor._assign_bag_owner("cam-1", [person], [bag])
+
+        temporary_assignment = processor._assign_bag_owner("cam-1", [], [bag])
+        assert temporary_assignment.get(88) is None
+        assert processor.bag_owner_status["cam-1"][88] == "temporary_unattended"
+
+        unattended_assignment = processor._assign_bag_owner("cam-1", [], [bag])
+        assert unattended_assignment.get(88) is None
+        assert processor.bag_owner_status["cam-1"][88] == "unattended"
+    finally:
+        processor_module.UNATTENDED_TIMEOUT_SECONDS = original_timeout
+        processor_module.OWNERSHIP_LOSS_REQUIRED_FRAMES = original_loss_required
