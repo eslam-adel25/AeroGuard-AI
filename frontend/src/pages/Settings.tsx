@@ -130,11 +130,11 @@ const Settings = () => {
 
   const handleLoadDefaults = () => {
     confirm({
-      title: t("settings.factoryDefaultsTitle") || "Load Defaults",
+      title: t("settings.factoryDefaultsTitle"),
       description: t("settings.factoryDefaultsConfirm"),
       type: "danger",
-      confirmLabel: "Load",
-      cancelLabel: "Cancel",
+      confirmLabel: t("common.load"),
+      cancelLabel: t("common.cancel"),
       onConfirm: () => {
         setConfig(DEFAULT_SETTINGS);
       },
@@ -158,10 +158,10 @@ const Settings = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              System Settings
+              {t("settings.title")}
             </h1>
             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mt-0.5">
-              Core Intelligence & Infrastructure Parameters
+              {t("settings.subtitle")}
             </p>
           </div>
         </div>
@@ -170,7 +170,7 @@ const Settings = () => {
             onClick={handleLoadDefaults}
             className="px-4 py-2 rounded-lg bg-[#11131a] border border-[#1e212b] text-sm font-bold text-gray-300 flex items-center gap-2 hover:bg-[#1a1c26] transition-colors"
           >
-            <RotateCcw size={14} /> Load Defaults
+            <RotateCcw size={14} /> {t("settings.loadDefaults")}
           </button>
           <button
             onClick={handleSave}
@@ -182,7 +182,7 @@ const Settings = () => {
             ) : (
               <Save size={18} />
             )}
-            Save & Deploy
+            {t("settings.saveDeploy")}
           </button>
           <button className="p-2 text-gray-500 hover:text-white transition-colors">
             <HelpCircle size={20} />
@@ -198,13 +198,13 @@ const Settings = () => {
             <div className="flex items-center gap-2 mb-6">
               <Globe className="text-blue-500" size={18} />
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                Environment
+                {t("settings.environment")}
               </h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                  Airport Name
+                  {t("settings.airportName")}
                 </label>
                 <input
                   value={config.airport_name}
@@ -217,7 +217,7 @@ const Settings = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                  Time Zone
+                  {t("settings.timeZone")}
                 </label>
                 <select
                   value={config.timezone}
@@ -258,11 +258,11 @@ const Settings = () => {
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
                 <span className="text-xs text-gray-400 font-medium">
-                  Active deployment - 14.2ms latency verified
+                  {t("settings.activeDeployment")}
                 </span>
               </div>
               <span className="text-[10px] font-black text-blue-500 uppercase">
-                Connected
+                {t("settings.connected")}
               </span>
             </div>
           </section>
@@ -272,16 +272,18 @@ const Settings = () => {
             <div className="flex items-center gap-2 mb-6">
               <Bell className="text-orange-500" size={18} />
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                Notification Engine
+                {t("settings.notificationEngine")}
               </h3>
             </div>
             <div className="flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
               <div className="flex items-center gap-3">
                 <Volume2 className="text-orange-500" size={18} />
                 <div>
-                  <div className="text-sm font-bold">Dashboard Audio Siren</div>
+                  <div className="text-sm font-bold">
+                    {t("settings.dashboardAudioSiren")}
+                  </div>
                   <div className="text-[10px] text-gray-500 font-medium">
-                    Triggers audible alarm on security breach
+                    {t("settings.notificationEngineDescription")}
                   </div>
                 </div>
               </div>
@@ -302,7 +304,7 @@ const Settings = () => {
             <div className="flex items-center gap-2 mb-6">
               <Shield className="text-blue-500" size={18} />
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                Security Lifecycle
+                {t("settings.securityLifecycle")}
               </h3>
             </div>
             <div className="space-y-3">
@@ -311,10 +313,10 @@ const Settings = () => {
                   <RotateCcw className="text-blue-500" size={18} />
                   <div>
                     <div className="text-sm font-bold">
-                      Persistent Operation
+                      {t("settings.securityLifecyclePersistent")}
                     </div>
                     <div className="text-[10px] text-gray-500 font-medium">
-                      System remains active indefinitely
+                      {t("settings.securityLifecyclePersistentDescription")}
                     </div>
                   </div>
                 </div>
@@ -332,10 +334,11 @@ const Settings = () => {
                 <div className="flex items-center gap-3">
                   <Clock className="text-orange-500" size={18} />
                   <div>
-                    <div className="text-sm font-bold">Auto Shutdown</div>
+                    <div className="text-sm font-bold">
+                      {t("settings.securityLifecycleAutoShutdown")}
+                    </div>
                     <div className="text-[10px] text-gray-500 font-medium">
-                      The system will automatically stop after the specified
-                      hours
+                      {t("settings.securityLifecycleAutoShutdownDescription")}
                     </div>
                   </div>
                 </div>
@@ -352,7 +355,7 @@ const Settings = () => {
                     className="w-12 bg-transparent text-right text-sm font-bold outline-none text-blue-500"
                   />
                   <span className="text-[10px] font-black bg-[#1a1c26] px-2 py-1 rounded text-gray-400">
-                    HRS
+                    {t("settings.hours")}
                   </span>
                 </div>
               </div>
@@ -367,14 +370,16 @@ const Settings = () => {
             <div className="flex items-center gap-2 mb-6">
               <Zap className="text-orange-500" size={18} />
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                AI Core Intelligence
+                {t("settings.aiCore")}
               </h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex justify-between items-center p-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
                 <div className="flex items-center gap-2">
                   <Eye className="text-blue-400" size={16} />
-                  <span className="text-xs font-bold">Face Recognition</span>
+                  <span className="text-xs font-bold">
+                    {t("settings.faceRecognition")}
+                  </span>
                 </div>
                 <Toggle
                   enabled={config.face_recognition_enabled}
@@ -390,7 +395,9 @@ const Settings = () => {
               <div className="flex justify-between items-center p-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
                 <div className="flex items-center gap-2">
                   <Zap className="text-blue-400" size={16} />
-                  <span className="text-xs font-bold">Motion Tracking</span>
+                  <span className="text-xs font-bold">
+                    {t("settings.motionTracking")}
+                  </span>
                 </div>
                 <Toggle
                   enabled={config.tracking_enabled}
@@ -410,55 +417,55 @@ const Settings = () => {
             <div className="flex items-center gap-2 mb-6">
               <Eye className="text-orange-500" size={18} />
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                AI Vision Modules
+                {t("settings.aiVisionModules")}
               </h3>
             </div>
             <div className="space-y-1">
               {[
                 {
-                  label: "GPU Acceleration",
-                  sub: "Enable GPU for model inference (if available)",
+                  label: t("settings.modules.gpuAcceleration"),
+                  sub: t("settings.modules.gpuAccelerationDescription"),
                   key: "gpu_enabled",
                 },
                 {
-                  label: "Frame Skip",
-                  sub: "Skip N frames between inferences to save CPU",
+                  label: t("settings.modules.frameSkip"),
+                  sub: t("settings.modules.frameSkipDescription"),
                   key: "frame_skip",
                   control: true,
                 },
                 {
-                  label: "Loitering Detection",
-                  sub: "Detects persons loitering in an area",
+                  label: t("settings.modules.loiteringDetection"),
+                  sub: t("settings.modules.loiteringDetectionDescription"),
                   key: "loitering_enabled",
                 },
                 {
-                  label: "Crowd Density",
-                  sub: "Counts people and alerts on threshold",
+                  label: t("settings.modules.crowdDensity"),
+                  sub: t("settings.modules.crowdDensityDescription"),
                   key: "crowd_density_enabled",
                 },
                 {
-                  label: "Abandoned Bag Detection",
-                  sub: "Detects ownerless bags",
+                  label: t("settings.modules.abandonedBag"),
+                  sub: t("settings.modules.abandonedBagDescription"),
                   key: "abandoned_bag_enabled",
                 },
                 {
-                  label: "Wrong Direction",
-                  sub: "Alerts when people move against allowed direction",
+                  label: t("settings.modules.wrongDirection"),
+                  sub: t("settings.modules.wrongDirectionDescription"),
                   key: "wrong_direction_enabled",
                 },
                 {
-                  label: "Restricted Area",
-                  sub: "Named polygon zones with intrusion alerts",
+                  label: t("settings.modules.restrictedArea"),
+                  sub: t("settings.modules.restrictedAreaDescription"),
                   key: "restricted_area_enabled",
                 },
                 {
-                  label: "Fire Detection",
-                  sub: "Integrate pretrained fire model",
+                  label: t("settings.modules.fireDetection"),
+                  sub: t("settings.modules.fireDetectionDescription"),
                   key: "fire_detection_enabled",
                 },
                 {
-                  label: "Smoke Detection",
-                  sub: "Integrate pretrained smoke model",
+                  label: t("settings.modules.smokeDetection"),
+                  sub: t("settings.modules.smokeDetectionDescription"),
                   key: "smoke_detection_enabled",
                 },
               ].map((module) => (

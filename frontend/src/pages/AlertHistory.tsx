@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { aiService } from "../services/api";
 import ScreenshotModal from "../components/ScreenshotModal";
 
@@ -10,6 +11,7 @@ interface AIEvent {
 }
 
 export default function AlertHistory() {
+  const { t } = useTranslation();
   const [events, setEvents] = useState<AIEvent[]>([]);
   const [page] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
@@ -53,7 +55,9 @@ export default function AlertHistory() {
 
   return (
     <div className="p-6">
-      <h2 className="mb-4 text-2xl font-bold text-white">Alert History</h2>
+      <h2 className="mb-4 text-2xl font-bold text-white">
+        {t("alertHistory.title")}
+      </h2>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {events.map((ev) => (
           <div key={ev.event_id} className="rounded-lg bg-ag-card p-3">
@@ -67,7 +71,7 @@ export default function AlertHistory() {
                 onClick={() => setSelectedEvent(ev.event_id)}
                 className="rounded-full bg-white/5 px-3 py-1 text-sm text-white"
               >
-                View
+                {t("common.view")}
               </button>
             </div>
           </div>

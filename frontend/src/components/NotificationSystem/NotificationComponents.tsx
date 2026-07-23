@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle,
@@ -203,6 +204,7 @@ export const ToastContainer: React.FC = () => {
 // ==========================================
 
 export const ConfirmationDialog: React.FC = () => {
+  const { t } = useTranslation();
   const { activeConfirmation, closeConfirmation } = useNotification();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -211,8 +213,8 @@ export const ConfirmationDialog: React.FC = () => {
   const {
     title,
     description,
-    confirmLabel = "Confirm",
-    cancelLabel = "Cancel",
+    confirmLabel = t("common.confirm"),
+    cancelLabel = t("common.cancel"),
     type = "warning",
     onConfirm,
     onCancel,
@@ -338,7 +340,7 @@ export const ConfirmationDialog: React.FC = () => {
               {isSubmitting ? (
                 <>
                   <Loader className="w-4 h-4 animate-spin" />
-                  Processing
+                  {t("common.processing")}
                 </>
               ) : (
                 confirmLabel

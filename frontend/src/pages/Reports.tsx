@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNotification } from "../components/NotificationSystem/useNotification";
 import { reportService, cameraService } from "../services/api";
 import { Loader2, BarChart3, TriangleAlert, ShieldCheck } from "lucide-react";
@@ -89,6 +90,7 @@ type ReportResponse = {
 const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
 
 const Reports = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [cameras, setCameras] = useState<CameraItem[]>([]);
   const [data, setData] = useState<ReportResponse | null>(null);
@@ -165,7 +167,7 @@ const Reports = () => {
         setData(res.data);
       } catch {
         setData(null);
-        toast.error("Operation Failed", "Failed to fetch analytics data.");
+        toast.error(t("common.status"), t("reports.fetchFailed"));
       } finally {
         setLoading(false);
       }
@@ -177,11 +179,9 @@ const Reports = () => {
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between bg-ag-card/30 p-6 rounded-3xl border border-white/5">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-white">
-            Analytics Reports
+            {t("reports.pageTitle")}
           </h2>
-          <p className="text-gray-500 text-sm">
-            Unified view of detections and violations
-          </p>
+          <p className="text-gray-500 text-sm">{t("reports.pageSubtitle")}</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 w-full xl:w-auto">
@@ -208,7 +208,7 @@ const Reports = () => {
             }
             className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
           >
-            <option value="">All Cameras</option>
+            <option value="">{t("reports.allCameras")}</option>
             {cameras.map((c) => (
               <option key={c.camera_id} value={c.camera_id}>
                 {c.camera_name}
@@ -222,7 +222,7 @@ const Reports = () => {
             disabled={loading}
             className="bg-ag-success hover:bg-green-600 text-white rounded-xl px-4 py-2 font-bold text-sm"
           >
-            {loading ? "Loading..." : "Apply"}
+            {loading ? t("common.loading") : t("common.apply")}
           </button>
         </div>
       </div>
@@ -238,13 +238,13 @@ const Reports = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-ag-card p-5 rounded-2xl border border-white/5">
               <div className="flex items-center gap-2 text-gray-400 text-xs uppercase tracking-widest mb-2">
-                <BarChart3 size={14} /> Total Detections
+                <BarChart3 size={14} /> {t("analytics.kpis.totalDetections")}
               </div>
               <p className="text-3xl font-black">{data?.summary.total ?? 0}</p>
             </div>
             <div className="bg-ag-card p-5 rounded-2xl border border-white/5">
               <div className="flex items-center gap-2 text-gray-400 text-xs uppercase tracking-widest mb-2">
-                <TriangleAlert size={14} /> Violations
+                <TriangleAlert size={14} /> {t("analytics.kpis.criticalAlerts")}
               </div>
               <p className="text-3xl font-black text-ag-danger">
                 {data?.summary.violations ?? 0}
@@ -252,7 +252,8 @@ const Reports = () => {
             </div>
             <div className="bg-ag-card p-5 rounded-2xl border border-white/5">
               <div className="flex items-center gap-2 text-gray-400 text-xs uppercase tracking-widest mb-2">
-                <ShieldCheck size={14} /> Avg Confidence
+                <ShieldCheck size={14} />{" "}
+                {t("analytics.kpis.averageConfidence")}
               </div>
               <p className="text-3xl font-black text-ag-success">
                 {data?.summary.average_confidence ?? 0}%
@@ -262,7 +263,9 @@ const Reports = () => {
 
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-xl font-bold mb-4">Detection Volume</h3>
+              <h3 className="text-xl font-bold mb-4">
+                {t("analytics.chartTitles.timeline")}
+              </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={timeline}>
@@ -293,7 +296,9 @@ const Reports = () => {
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-xl font-bold mb-4">Top Detection Types</h3>
+              <h3 className="text-xl font-bold mb-4">
+                {t("analytics.chartTitles.distribution")}
+              </h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={threatDistribution}>
@@ -320,15 +325,25 @@ const Reports = () => {
 
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div className="xl:col-span-2 rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-xl font-bold mb-4">Top Cameras</h3>
+              <h3 className="text-xl font-bold mb-4">
+                {t("analytics.chartTitles.topCameras")}
+              </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-gray-400 border-b border-white/10">
-                      <th className="py-2">Camera</th>
-                      <th className="py-2">Location</th>
-                      <th className="py-2">Detections</th>
-                      <th className="py-2">Status</th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.camera")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.location")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.detections")}
+                      </th>
+                      <th className="py-2">
+                        {t("analytics.tableHeaders.status")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -361,7 +376,9 @@ const Reports = () => {
             </div>
 
             <div className="rounded-2xl border border-white/5 bg-ag-card p-5">
-              <h3 className="text-xl font-bold mb-4">Detection Breakdown</h3>
+              <h3 className="text-xl font-bold mb-4">
+                {t("analytics.chartTitles.severity")}
+              </h3>
               {severityDistribution.length ? (
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
@@ -398,7 +415,7 @@ const Reports = () => {
                 </div>
               ) : (
                 <p className="text-gray-400 text-sm">
-                  No severity chart available.
+                  {t("analytics.noSeverityChart")}
                 </p>
               )}
             </div>

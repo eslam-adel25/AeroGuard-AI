@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { X, Download } from "lucide-react";
 import { aiService, getFilenameFromContentDisposition } from "../services/api";
 
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function ScreenshotModal({ eventId, onClose }: Props) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState<string | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,14 +63,15 @@ export default function ScreenshotModal({ eventId, onClose }: Props) {
       <div className="relative max-w-[95vw] max-h-[95vh] w-full overflow-hidden rounded-2xl bg-[#071018] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-white">
-            AI Event Screenshot
+            {t("app.screenshotModal.title")}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownload}
               className="rounded-md bg-white/5 px-3 py-1 text-sm text-white"
             >
-              <Download size={14} className="inline-block mr-2" /> Download
+              <Download size={14} className="inline-block mr-2" />
+              {t("common.download")}
             </button>
             <button
               onClick={onClose}
@@ -81,11 +84,15 @@ export default function ScreenshotModal({ eventId, onClose }: Props) {
 
         <div className="flex h-[70vh] items-center justify-center overflow-auto">
           {loading ? (
-            <div className="text-gray-400">Loading…</div>
+            <div className="text-gray-400">
+              {t("app.screenshotModal.loading")}
+            </div>
           ) : url ? (
             <img src={url} alt="AI event" className="max-h-[70vh] w-auto" />
           ) : (
-            <div className="text-gray-400">No image available</div>
+            <div className="text-gray-400">
+              {t("app.screenshotModal.empty")}
+            </div>
           )}
         </div>
       </div>

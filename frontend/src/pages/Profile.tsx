@@ -35,7 +35,7 @@ interface UserSession {
 
 const getSessionDeviceLabel = (session: UserSession) => {
   const deviceType = session.device_type?.trim();
-  if (deviceType && deviceType !== "Unknown device") {
+  if (deviceType && deviceType !== "Unknown") {
     return deviceType;
   }
 
@@ -54,7 +54,7 @@ const getSessionDeviceLabel = (session: UserSession) => {
     return session.device_model.trim();
   }
 
-  return "Unknown device";
+  return "Unknown";
 };
 
 const Profile: React.FC = () => {
@@ -117,22 +117,22 @@ const Profile: React.FC = () => {
 
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(t("common.processing"), t("common.pleaseWait"));
       await userService.updateProfile(profile);
       setIsEditing(false);
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
-          description: "Profile updated successfully.",
+          title: t("common.done"),
+          description: t("auth.securityIdentityUpdated"),
         });
       }
     } catch {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: "❌ Failed to update registry.",
+          title: t("common.status"),
+          description: t("auth.profileUpdateFailed"),
         });
       }
     } finally {
@@ -143,13 +143,13 @@ const Profile: React.FC = () => {
   const handlePasswordRotate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (passwords.new_password !== passwords.confirm_password) {
-      toast.error("Validation Error", "❌ New passwords do not match!");
+      toast.error(t("common.status"), t("auth.passwordMismatch"));
       return;
     }
 
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(t("common.processing"), t("common.pleaseWait"));
       await userService.updatePassword({
         old_password: passwords.old_password,
         new_password: passwords.new_password,
@@ -157,8 +157,8 @@ const Profile: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
-          description: "Credentials rotated successfully.",
+          title: t("common.done"),
+          description: t("auth.credentialsRotated"),
         });
       }
       setPasswords({
@@ -170,8 +170,8 @@ const Profile: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: "❌ Authentication Error: Current password incorrect.",
+          title: t("common.status"),
+          description: t("auth.invalidPassword"),
         });
       }
     }
@@ -187,22 +187,22 @@ const Profile: React.FC = () => {
     setIsUploading(true);
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(t("common.processing"), t("common.pleaseWait"));
       await userService.uploadAvatar(formData);
       await loadProfile();
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
-          description: "Avatar uploaded successfully.",
+          title: t("common.done"),
+          description: t("auth.avatarUpdated"),
         });
       }
     } catch {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: "❌ Failed to upload image.",
+          title: t("common.status"),
+          description: t("auth.avatarUploadFailed"),
         });
       }
     } finally {
@@ -211,19 +211,18 @@ const Profile: React.FC = () => {
   };
 
   const handleChangeEmail = async () => {
-    const newEmail = window.prompt("Enter your new email:");
+    const newEmail = window.prompt(t("profile.changeEmailPrompt"));
     if (!newEmail) return;
 
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(t("common.processing"), t("common.pleaseWait"));
       await userService.changeEmail(newEmail);
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
-          description:
-            "Verification email sent to new address. Follow the link to confirm.",
+          title: t("common.done"),
+          description: t("auth.verifyEmailResendSuccess"),
         });
       }
     } catch (err) {
@@ -231,8 +230,8 @@ const Profile: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: "❌ Failed to send verification email.",
+          title: t("common.status"),
+          description: t("auth.verifyEmailResendFailed"),
         });
       }
     }
@@ -240,30 +239,33 @@ const Profile: React.FC = () => {
 
   const handleLogoutAll = async () => {
     confirm({
-      title: "Logout all sessions?",
-      description: "Are you sure you want to logout all sessions?",
-      confirmLabel: "Logout",
-      cancelLabel: "Cancel",
+      title: t("profile.logoutAll"),
+      description: t("profile.logoutAllDescription"),
+      confirmLabel: t("sidebar.logout"),
+      cancelLabel: t("common.cancel"),
       type: "warning",
       onConfirm: async () => {
         let toastId: string | null = null;
         try {
-          toastId = toast.loading("Processing", "Please wait...");
+          toastId = toast.loading(
+            t("common.processing"),
+            t("common.pleaseWait"),
+          );
           await userService.logoutAllSessions();
           loadSessions();
           if (toastId) {
             toast.update(toastId, {
               type: "success",
-              title: "Success",
-              description: "All sessions logged out successfully.",
+              title: t("common.done"),
+              description: t("auth.credentialsRotated"),
             });
           }
         } catch {
           if (toastId) {
             toast.update(toastId, {
               type: "error",
-              title: "Operation Failed",
-              description: "Failed to logout sessions.",
+              title: t("common.status"),
+              description: t("auth.profileUpdateFailed"),
             });
           }
         }
@@ -344,7 +346,7 @@ const Profile: React.FC = () => {
               </div>
 
               <h3 className="text-xl font-bold mb-3">
-                {profile?.full_name || "System administrator"}
+                {profile?.full_name || t("profile.defaultName")}
               </h3>
 
               <div className="flex gap-2 mb-8">
@@ -363,13 +365,14 @@ const Profile: React.FC = () => {
                   </span>
                   <span className="text-green-500 flex items-center gap-2">
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>{" "}
-                    Online
+                    {t("profile.online")}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[11px] font-medium">
                   <span className="text-gray-500">{t("profile.systemId")}</span>
                   <span className="bg-[#0c0e12] px-2 py-1 rounded text-white font-mono text-[10px]">
-                    {profile?.user_id?.slice(0, 8).toUpperCase() || "CCFF-096B"}
+                    {profile?.user_id?.slice(0, 8).toUpperCase() ||
+                      t("profile.defaultSystemId")}
                   </span>
                 </div>
               </div>
@@ -383,7 +386,7 @@ const Profile: React.FC = () => {
                 {t("profile.accessHistory")}
               </h2>
               <button className="text-[11px] text-blue-400 hover:underline">
-                View logs
+                {t("profile.viewLogs")}
               </button>
             </div>
 
@@ -405,7 +408,7 @@ const Profile: React.FC = () => {
                       : "July 07, 2026"}
                   </p>
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Initial instantiation completed by system root.
+                    {t("profile.initialInstantiation")}
                   </p>
                 </div>
               </div>
@@ -417,10 +420,12 @@ const Profile: React.FC = () => {
                 <div className="space-y-1">
                   <p className="text-sm font-bold">{t("profile.lastLogin")}</p>
                   <p className="text-[10px] text-gray-500">
-                    {profile?.last_login ? "Active" : "5 minutes ago"}
+                    {profile?.last_login
+                      ? t("profile.active")
+                      : "5 minutes ago"}
                   </p>
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Neural-link handshake verified at node-04.
+                    {t("profile.lastLoginDescription")}
                   </p>
                 </div>
               </div>
@@ -484,13 +489,13 @@ const Profile: React.FC = () => {
                       onClick={handleChangeEmail}
                       className="px-4 py-2 bg-white/5 border border-white/5 rounded-xl text-[10px] font-bold text-gray-400 hover:text-white"
                     >
-                      Change
+                      {t("profile.changeEmail")}
                     </button>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
-                    Secure contact line
+                    {t("profile.secureContactLine")}
                   </label>
                   <input
                     disabled={!isEditing}
@@ -503,7 +508,7 @@ const Profile: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">
-                    Assigned organization
+                    {t("profile.assignedOrganization")}
                   </label>
                   <input
                     disabled={!isEditing}
@@ -538,8 +543,7 @@ const Profile: React.FC = () => {
                   className="text-blue-400 flex-shrink-0 mt-0.5"
                 />
                 <p className="text-[11px] text-blue-300/80 leading-relaxed">
-                  Registry modifications require secondary biometric
-                  verification and administrative approval.
+                  {t("profile.registryNotice")}
                 </p>
               </div>
             </form>
@@ -573,7 +577,7 @@ const Profile: React.FC = () => {
                       })
                     }
                     className="w-full bg-[#0c0e12] border border-white/5 p-4 pr-24 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
-                    placeholder="••••••••••••"
+                    placeholder={t("profile.passwordPlaceholder")}
                   />
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-3 text-gray-600">
                     <button
@@ -604,7 +608,7 @@ const Profile: React.FC = () => {
                         })
                       }
                       className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
-                      placeholder="Min. 32 characters"
+                      placeholder={t("profile.passwordHint")}
                     />
                     <button
                       type="button"
@@ -631,7 +635,7 @@ const Profile: React.FC = () => {
                         })
                       }
                       className="w-full bg-[#0c0e12] border border-white/5 p-4 rounded-xl text-sm font-medium outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-700 font-mono"
-                      placeholder="Re-enter password"
+                      placeholder={t("profile.passwordReenter")}
                     />
                     <button
                       type="button"
@@ -663,20 +667,22 @@ const Profile: React.FC = () => {
           <header className="flex justify-between items-center mb-4 shrink-0">
             <div className="flex items-center gap-3">
               <Activity size={18} className="text-blue-400" />
-              <h2 className="text-sm font-bold">Active sessions</h2>
+              <h2 className="text-sm font-bold">
+                {t("profile.activeSessions")}
+              </h2>
             </div>
             <div className="flex gap-3">
               <button
                 onClick={loadSessions}
                 className="flex items-center gap-2 px-6 py-2 bg-[#0c0e12] border border-white/5 rounded-lg text-[11px] font-bold text-gray-400 hover:text-white transition-colors"
               >
-                <RefreshCw size={14} /> Refresh
+                <RefreshCw size={14} /> {t("common.refresh")}
               </button>
               <button
                 onClick={handleLogoutAll}
                 className="px-6 py-2 border border-red-500/30 text-red-400 rounded-lg text-[11px] font-bold hover:bg-red-500/10 transition-colors"
               >
-                Logout all
+                {t("profile.logoutAll")}
               </button>
             </div>
           </header>
@@ -686,13 +692,17 @@ const Profile: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead className="sticky top-0 z-10 bg-[#0c0e12]">
                   <tr className="text-[10px] text-gray-500 font-bold uppercase border-b border-white/5 tracking-wider">
-                    <th className="pb-4 pt-4 px-4 font-bold">Session ID</th>
                     <th className="pb-4 pt-4 px-4 font-bold">
-                      Login date & time
+                      {t("profile.sessionId")}
                     </th>
-                    <th className="pb-4 pt-4 px-4 font-bold">Device type</th>
+                    <th className="pb-4 pt-4 px-4 font-bold">
+                      {t("profile.loginDateTime")}
+                    </th>
+                    <th className="pb-4 pt-4 px-4 font-bold">
+                      {t("profile.deviceType")}
+                    </th>
                     <th className="pb-4 pt-4 px-4 text-right font-bold">
-                      Status
+                      {t("common.status")}
                     </th>
                   </tr>
                 </thead>
@@ -703,7 +713,7 @@ const Profile: React.FC = () => {
                         colSpan={4}
                         className="py-8 text-center text-gray-600 text-sm"
                       >
-                        No active sessions found.
+                        {t("profile.noActiveSessions")}
                       </td>
                     </tr>
                   ) : (
@@ -727,7 +737,9 @@ const Profile: React.FC = () => {
                           <span
                             className={`px-3 py-1 rounded-md text-[10px] font-bold ${idx === 0 ? "bg-blue-600/20 text-blue-400" : "bg-gray-800 text-gray-500"}`}
                           >
-                            {idx === 0 ? "Active" : "Idle"}
+                            {idx === 0
+                              ? t("profile.active")
+                              : t("profile.idle")}
                           </span>
                         </td>
                       </tr>
@@ -747,19 +759,19 @@ const Profile: React.FC = () => {
         </p>
         <div className="flex gap-8 text-[11px] text-gray-500 font-bold tracking-tight uppercase">
           <button className="hover:text-white transition-colors">
-            Privacy Policy
+            {t("profile.privacyPolicy")}
           </button>
           <button className="hover:text-white transition-colors">
-            Terms of Service
+            {t("profile.termsOfService")}
           </button>
           <button className="hover:text-white transition-colors">
-            Documentation
+            {t("profile.documentation")}
           </button>
           <button className="hover:text-white transition-colors">
-            Support
+            {t("profile.support")}
           </button>
           <button className="hover:text-white transition-colors">
-            Contact
+            {t("profile.contact")}
           </button>
         </div>
       </footer>

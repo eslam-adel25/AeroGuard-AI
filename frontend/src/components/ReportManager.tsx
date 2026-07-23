@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { reportService, cameraService } from "../services/api";
 import { useNotification } from "./NotificationSystem/useNotification";
 import {
@@ -19,6 +20,7 @@ interface ReportItem {
 }
 
 const ReportManager: React.FC = () => {
+  const { t } = useTranslation();
   const { confirm, toast } = useNotification();
   const [cameras, setCameras] = useState<
     Array<{ camera_id: string; camera_name: string }>
@@ -82,7 +84,7 @@ const ReportManager: React.FC = () => {
   const handleExport = async (id: string, type: "csv" | "excel" | "pdf") => {
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(t("common.processing"), t("common.pleaseWait"));
       let res;
       if (type === "csv") {
         res = await reportService.exportCsv(id);
@@ -94,8 +96,8 @@ const ReportManager: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Download Started",
-          description: "Your report is being downloaded.",
+          title: t("reports.exportStarted"),
+          description: t("reports.exportStartedDescription"),
         });
       }
       if (type === "csv") {
@@ -111,8 +113,8 @@ const ReportManager: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: `Failed to export ${type.toUpperCase()}`,
+          title: t("common.status"),
+          description: t("reports.exportFailed", { type: type.toUpperCase() }),
         });
       }
     }
@@ -120,23 +122,26 @@ const ReportManager: React.FC = () => {
 
   const handleDeleteReport = async (id: string) => {
     confirm({
-      title: "Delete report?",
-      description: "Are you sure you want to delete this report?",
-      confirmLabel: "Delete",
-      cancelLabel: "Cancel",
+      title: t("reports.deleteTitle"),
+      description: t("reports.deleteDescription"),
+      confirmLabel: t("common.delete"),
+      cancelLabel: t("common.cancel"),
       type: "warning",
       onConfirm: async () => {
         setLoading(true);
         let toastId: string | null = null;
         try {
-          toastId = toast.loading("Processing", "Please wait...");
+          toastId = toast.loading(
+            t("common.processing"),
+            t("common.pleaseWait"),
+          );
           await reportService.deleteReport(id);
           await loadReports();
           if (toastId) {
             toast.update(toastId, {
               type: "success",
-              title: "Success",
-              description: "Report deleted successfully.",
+              title: t("common.done"),
+              description: t("reports.deleteSuccess"),
             });
           }
         } catch (err) {
@@ -144,8 +149,8 @@ const ReportManager: React.FC = () => {
           if (toastId) {
             toast.update(toastId, {
               type: "error",
-              title: "Operation Failed",
-              description: "Failed to delete report",
+              title: t("common.status"),
+              description: t("reports.deleteFailed"),
             });
           }
         } finally {
@@ -157,11 +162,14 @@ const ReportManager: React.FC = () => {
 
   const handleGenerate = async () => {
     if (!filters.start_date || !filters.end_date) {
-      const toastId = toast.loading("Processing", "Please wait...");
+      const toastId = toast.loading(
+        t("common.processing"),
+        t("common.pleaseWait"),
+      );
       toast.update(toastId, {
         type: "error",
-        title: "Operation Failed",
-        description: "Please select start and end dates",
+        title: t("common.status"),
+        description: t("reports.generateMissingDates"),
       });
       return;
     }
@@ -181,8 +189,10 @@ const ReportManager: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
-          description: `Report generated: ${res.data.report_id || ""}`,
+          title: t("common.done"),
+          description: t("reports.generateSuccess", {
+            id: res.data.report_id || "",
+          }),
         });
       }
       await loadReports();
@@ -191,8 +201,8 @@ const ReportManager: React.FC = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
-          description: "Failed to generate report",
+          title: t("common.status"),
+          description: t("reports.generateFailed"),
         });
       }
     } finally {
@@ -202,13 +212,13 @@ const ReportManager: React.FC = () => {
 
   return (
     <div className="bg-ag-card p-6 rounded-2xl border border-white/5 space-y-4">
-      <h3 className="text-lg font-black">Reports Manager</h3>
+      <h3 className="text-lg font-black">{t("reports.managerTitle")}</h3>
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Report title (optional)"
+          placeholder={t("reports.titlePlaceholder")}
           className="col-span-2 bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
         />
         <select
@@ -216,9 +226,11 @@ const ReportManager: React.FC = () => {
           onChange={(e) => setReportType(e.target.value)}
           className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
         >
-          <option value="custom">Custom</option>
-          <option value="summary">Summary</option>
-          <option value="compliance">Compliance</option>
+          <option value="custom">{t("reports.reportTypeCustom")}</option>
+          <option value="summary">{t("reports.reportTypeSummary")}</option>
+          <option value="compliance">
+            {t("reports.reportTypeCompliance")}
+          </option>
         </select>
         <input
           type="date"
@@ -243,7 +255,7 @@ const ReportManager: React.FC = () => {
           }
           className="bg-ag-dark border border-white/10 rounded-xl px-3 py-2 text-sm"
         >
-          <option value="">All Cameras</option>
+          <option value="">{t("reports.allCameras")}</option>
           {cameras.map((c) => (
             <option key={c.camera_id} value={c.camera_id}>
               {c.camera_name}
@@ -256,7 +268,11 @@ const ReportManager: React.FC = () => {
           onClick={handleGenerate}
           className="inline-flex items-center justify-center gap-2 bg-ag-success text-white rounded-xl px-4 py-2 font-bold text-sm"
         >
-          {loading ? <Loader2 className="animate-spin" /> : "Generate Report"}
+          {loading ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            t("reports.generateReport")
+          )}
         </button>
         <div className="relative w-full sm:w-auto">
           <input
@@ -265,7 +281,7 @@ const ReportManager: React.FC = () => {
             onChange={(e) =>
               setFilters((p) => ({ ...p, query: e.target.value }))
             }
-            placeholder="Search saved reports"
+            placeholder={t("reports.searchReports")}
             className="w-full rounded-xl border border-white/10 bg-ag-dark px-10 py-2 text-sm"
           />
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
@@ -274,12 +290,12 @@ const ReportManager: React.FC = () => {
           onClick={handleFilterSearch}
           className="inline-flex items-center justify-center gap-2 bg-ag-primary text-white rounded-xl px-4 py-2 font-bold text-sm"
         >
-          Search
+          {t("common.search")}
         </button>
       </div>
 
       <div>
-        <h4 className="font-bold">History</h4>
+        <h4 className="font-bold">{t("reports.history")}</h4>
         {loading ? (
           <div className="py-4">
             <Loader2 className="animate-spin" />
@@ -287,7 +303,9 @@ const ReportManager: React.FC = () => {
         ) : (
           <div className="space-y-2 max-h-96 overflow-auto">
             {reports.length === 0 && (
-              <div className="text-sm text-gray-400">No reports yet</div>
+              <div className="text-sm text-gray-400">
+                {t("reports.noReports")}
+              </div>
             )}
             {reports.map((r) => (
               <div
@@ -300,14 +318,14 @@ const ReportManager: React.FC = () => {
                       {r.report_id}
                     </div>
                     <div className="text-xs text-gray-400">
-                      {r.title || "Report"} —{" "}
+                      {r.title || t("reports.managerTitle")} —{" "}
                       {new Date(r.generated_at).toLocaleString()}
                     </div>
                     <div className="text-xs text-gray-400 mt-1">
                       {r.report_type ?? "custom"} •{" "}
                       {r.filters?.camera_id
-                        ? `Camera: ${r.filters.camera_id}`
-                        : "All cameras"}
+                        ? `${t("common.camera")}: ${r.filters.camera_id}`
+                        : t("reports.allCameras")}
                     </div>
                   </div>
 

@@ -367,8 +367,8 @@ function App() {
                           </p>
                           <h3 className="text-lg font-black text-white">
                             {notifications.length > 0
-                              ? "Security Notifications"
-                              : "No new alerts"}
+                              ? t("app.notifications.title")
+                              : t("app.notifications.noNewAlerts")}
                           </h3>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -377,14 +377,14 @@ function App() {
                             onClick={markAllAsRead}
                             className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
                           >
-                            Mark all read
+                            {t("app.notifications.markAllRead")}
                           </button>
                           <button
                             type="button"
                             onClick={clearNotifications}
                             className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
                           >
-                            Clear
+                            {t("app.notifications.clear")}
                           </button>
                           <button
                             type="button"
@@ -406,7 +406,7 @@ function App() {
                       >
                         {sortedNotifications.length === 0 ? (
                           <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-sm text-gray-400">
-                            No notifications available yet.
+                            {t("app.notifications.empty")}
                           </div>
                         ) : (
                           sortedNotifications.map((notification) => (
@@ -420,7 +420,8 @@ function App() {
                                     {notification.detectionType}
                                   </p>
                                   <p className="mt-1 text-xs text-gray-400">
-                                    Camera: {notification.cameraName}
+                                    {t("app.notifications.camera")}:{" "}
+                                    {notification.cameraName}
                                   </p>
                                   <div className="mt-3 space-y-1 text-xs text-gray-400">
                                     <div>
@@ -467,7 +468,7 @@ function App() {
                                     className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-white/10"
                                   >
                                     <CheckCircle2 size={14} />
-                                    Read
+                                    {t("app.notifications.read")}
                                   </button>
                                   {notification.eventId ||
                                   notification.screenshot ? (
@@ -487,7 +488,7 @@ function App() {
                                         }}
                                         className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-white/10"
                                       >
-                                        View
+                                        {t("app.notifications.view")}
                                       </button>
                                       <button
                                         onClick={async () => {
@@ -512,7 +513,7 @@ function App() {
                                                 responseFilename ||
                                                 formatScreenshotFilename(
                                                   notification.cameraName ||
-                                                    "Unknown Camera",
+                                                    t("common.unknownCamera"),
                                                   notification.detectionType,
                                                   notification.time,
                                                 );
@@ -535,7 +536,7 @@ function App() {
                                         }}
                                         className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-white/10"
                                       >
-                                        Download
+                                        {t("app.notifications.download")}
                                       </button>
                                     </>
                                   ) : null}
