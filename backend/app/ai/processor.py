@@ -115,6 +115,31 @@ class AIProcessor:
             raise ValueError(f"YOLO model file is empty: {resolved}")
         return str(resolved)
 
+    @staticmethod
+    def _bbox_intersects_polygon(bbox, polygon) -> bool:
+        x1, y1, x2, y2 = bbox
+        if x1 >= x2 or y1 >= y2 or polygon is None or polygon.size == 0:
+            return False
+
+        corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+        for corner in corners:
+            if cv2.pointPolygonTest(polygon, corner, False) >= 0:
+                return True
+
+        polygon_points = polygon.reshape(-1, 2)
+        for px, py in polygon_points:
+            if x1 <= px <= x2 and y1 <= py <= y2:
+                return True
+
+        rect = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+        for i in range(len(polygon_points)):
+            p1 = tuple(map(int, polygon_points[i]))
+            p2 = tuple(map(int, polygon_points[(i + 1) % len(polygon_points)]))
+            if cv2.clipLine(rect, p1, p2)[0]:
+                return True
+
+        return False
+
     def _patch_ultralytics_weights_only(self):
         """Patch installed Ultralytics to make torch.load use weights_only=False for this backend."""
         try:
@@ -809,19 +834,9 @@ class AIProcessor:
                                 if polygon.size and np.all(polygon >= 0.0) and np.all(polygon <= 1.0):
                                     polygon *= np.array([annotated_frame.shape[1], annotated_frame.shape[0]], dtype=np.float32)
                                 polygon = np.array(polygon, np.int32)
-                                print("POLYGON:", polygon)#####################
                                 cv2.polylines(annotated_frame, [polygon], True, (255, 255, 255), 1)
-                                #############################
-                                print("=" * 80)
-                                print("TRACK:", obj_id)
-                                print("ZONE TYPE:", ztype)
-                                print("ZONE COORDS:", coords)
-                                print("BASE POINT:", base_point)
-                                print("POLYGON TEST:", cv2.pointPolygonTest(polygon, base_point, False))
-                                print("=" * 80)
-                               
-                                ##############################
-                                if cv2.pointPolygonTest(polygon, base_point, False) >= 0:
+
+                                if self._bbox_intersects_polygon((x1, y1, x2, y2), polygon):
                                     in_restricted = True
                                     status = "DANGER"
                                     box_color = (0, 0, 255)
