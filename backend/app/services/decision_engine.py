@@ -7,7 +7,7 @@ class DecisionEngine:
         label = label.lower()
 
         # 1. المخاطر الحرجة (تحتاج تدخل فوري)
-        critical_threats = ["weapon", "knife", "fire", "pistol", "gun"]
+        critical_threats = ["weapon", "knife", "fire", "flame", "pistol", "gun"]
         if label in critical_threats and confidence > 0.4:
             return "Critical"
 

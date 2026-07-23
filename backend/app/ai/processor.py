@@ -94,6 +94,8 @@ class AIProcessor:
         self._stop_flags = {}
         self._active_cameras = set()
         self._active_camera_lock = threading.Lock()
+        self._active_alarm_state = {}  # camera_id -> bool
+        self._active_alarm_sources = {}  # camera_id -> list[str]
         
         # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
         self.active_settings = None
@@ -145,6 +147,20 @@ class AIProcessor:
         active = [ts for ts in alerts if now - ts < 5]
         self.active_critical_alerts[camera_key] = active
         return len(active)
+
+    async def _broadcast_alarm_state(self, camera_id, active, sources=None):
+        camera_key = str(camera_id)
+        try:
+            await manager.broadcast({
+                "event": "alarm_state",
+                "data": {
+                    "camera_id": str(camera_id),
+                    "active": bool(active),
+                    "sources": sorted(sources) if sources else [],
+                },
+            })
+        except Exception:
+            pass
 
     def _register_critical_alert(self, camera_id) -> None:
         camera_key = str(camera_id)
@@ -620,7 +636,7 @@ class AIProcessor:
                 for box, cls_idx, conf in zip(boxes, labels, confs):
                     x1, y1, x2, y2 = box.astype(int)
                     label_name = self.model.names[int(cls_idx)].lower()
-                    if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke"]:
+                    if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke", "flame"]:
                         continue
                     detection_confidence = float(conf)
                     if label_name == "person" and detection_confidence < person_conf_thr:
@@ -637,6 +653,7 @@ class AIProcessor:
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
                 bag_count = sum(1 for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"})
                 vehicle_count = sum(1 for t in active_tracks if t.class_name in {"car", "truck", "bus", "vehicle"})
+                alarm_sources = set()
 
                 display_ids = self._assign_display_ids(camera_id, active_tracks)
                 bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
@@ -893,6 +910,9 @@ class AIProcessor:
                         status,
                     )
 
+                    if status == "DANGER":
+                        alarm_sources.add(display_label)
+
                     # Abandoned bag detection
                     if label_name in {"bag", "backpack", "suitcase"}:
                         cam_bags = self.bag_tracker.setdefault(str(camera_id), {})
@@ -957,11 +977,19 @@ class AIProcessor:
                         (label_name == "smoke" and smoke_enabled)
                     )
                     
+                    flame_enabled = getattr(self.active_settings, "fire_detection_enabled", False) or False
+                    should_trigger_fire_smoke = (
+                        (label_name == "fire" and fire_enabled) or
+                        (label_name == "smoke" and smoke_enabled) or
+                        (label_name == "flame" and flame_enabled)
+                    )
+
                     if should_trigger_fire_smoke:
                         status = "DANGER"
                         box_color = (0, 0, 255)
                         display_label = label_name.upper()
                         overlay_label = f"{object_label}\n{display_label}"
+                        alarm_sources.add(display_label)
 
                     if status in ["DANGER", "WARNING"]:
                         if overlay_label == object_label:
@@ -1013,6 +1041,23 @@ class AIProcessor:
                 elapsed = time.time() - start_time
                 current_fps = int(1.0 / elapsed) if elapsed > 0 else 30
                 critical_alert_count = self._get_active_critical_alert_count(camera_id)
+                new_alarm_active = len(alarm_sources) > 0
+                camera_key = str(camera_id)
+                existing_alarm_active = self._active_alarm_state.get(camera_key, False)
+                existing_alarm_sources = self._active_alarm_sources.get(camera_key, [])
+                current_alarm_sources = sorted(alarm_sources)
+
+                if (
+                    new_alarm_active != existing_alarm_active or
+                    current_alarm_sources != existing_alarm_sources
+                ):
+                    self._active_alarm_state[camera_key] = new_alarm_active
+                    self._active_alarm_sources[camera_key] = current_alarm_sources
+                    await self._broadcast_alarm_state(
+                        camera_id,
+                        new_alarm_active,
+                        current_alarm_sources,
+                    )
 
                 await manager.broadcast({
                     "event": "ai_status",

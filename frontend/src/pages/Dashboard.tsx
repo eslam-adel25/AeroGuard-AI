@@ -57,6 +57,9 @@ interface CameraData {
   location: string;
 }
 
+const FIRE_ALARM_AUDIO = "/sounds/fire_alarm.mp3";
+const SECURITY_ALARM_AUDIO = "/sounds/security_alarm.mp3";
+
 const alertBadgeLabel = (alert: AlertData) => {
   const typeLabel = alert.type?.trim();
   if (!typeLabel) return "Alert";
@@ -85,6 +88,11 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
+  const [alarmActive, setAlarmActive] = useState(false);
+  const [alarmSources, setAlarmSources] = useState<string[]>([]);
+  const [alarmSilenced, setAlarmSilenced] = useState(false);
+  const fireAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
+  const securityAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const [localDateTime, setLocalDateTime] = useState(() =>
     formatLocalDateTime(new Date()),
   );
@@ -242,6 +250,21 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           ].slice(0, 3),
         );
       }
+
+      if (message.event === "alarm_state") {
+        if (
+          message.data.camera_id &&
+          selectedCameraRef.current &&
+          message.data.camera_id !== selectedCameraRef.current
+        ) {
+          return;
+        }
+        setAlarmActive(message.data.active);
+        setAlarmSources(message.data.sources ?? []);
+        if (!message.data.active) {
+          setAlarmSilenced(false);
+        }
+      }
     };
 
     const socket = createSocket(handleMessage);
@@ -264,6 +287,123 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       socket.close();
     };
   }, [handleCameraSelection]);
+
+  const stopAudio = useCallback(
+    (audioRef: React.MutableRefObject<HTMLAudioElement | null>) => {
+      const audio = audioRef.current;
+      if (!audio) {
+        return;
+      }
+      if (!audio.paused) {
+        audio.pause();
+      }
+      audio.currentTime = 0;
+    },
+    [],
+  );
+
+  const createLoopingAudio = useCallback((src: string) => {
+    const audio = new Audio(src);
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0.75;
+    audio.crossOrigin = "anonymous";
+    return audio;
+  }, []);
+
+  const playAlarmAudio = useCallback(
+    (
+      audioRef: React.MutableRefObject<HTMLAudioElement | null>,
+      src: string,
+    ) => {
+      if (alarmSilenced) {
+        return;
+      }
+      if (!audioRef.current) {
+        audioRef.current = createLoopingAudio(src);
+      }
+      const audio = audioRef.current;
+      if (audio.paused) {
+        audio.currentTime = 0;
+        void audio.play().catch(() => null);
+      }
+    },
+    [alarmSilenced, createLoopingAudio],
+  );
+
+  const isFireAlarmSource = useCallback(
+    (sources: string[]) =>
+      sources.some((source) => /^(fire|flame|smoke)$/i.test(source.trim())),
+    [],
+  );
+
+  const isSecurityAlarmSource = useCallback(
+    (sources: string[]) =>
+      sources.some(
+        (source) =>
+          source.trim() !== "" && !/^(fire|flame|smoke)$/i.test(source.trim()),
+      ),
+    [],
+  );
+
+  const stopAlarm = useCallback(() => {
+    stopAudio(fireAlarmAudioRef);
+    stopAudio(securityAlarmAudioRef);
+    setAlarmSilenced(true);
+    setAlarmActive(false);
+  }, [stopAudio]);
+
+  useEffect(() => {
+    if (!alarmActive || alarmSilenced) {
+      stopAudio(fireAlarmAudioRef);
+      stopAudio(securityAlarmAudioRef);
+      return;
+    }
+
+    const hasFire = isFireAlarmSource(alarmSources);
+    const hasSecurity = isSecurityAlarmSource(alarmSources);
+
+    if (hasFire) {
+      playAlarmAudio(fireAlarmAudioRef, FIRE_ALARM_AUDIO);
+    } else {
+      stopAudio(fireAlarmAudioRef);
+    }
+
+    if (hasSecurity) {
+      playAlarmAudio(securityAlarmAudioRef, SECURITY_ALARM_AUDIO);
+    } else {
+      stopAudio(securityAlarmAudioRef);
+    }
+  }, [
+    alarmActive,
+    alarmSilenced,
+    alarmSources,
+    isFireAlarmSource,
+    isSecurityAlarmSource,
+    playAlarmAudio,
+    stopAudio,
+  ]);
+
+  useEffect(() => {
+    const fireAudio = fireAlarmAudioRef.current;
+    const securityAudio = securityAlarmAudioRef.current;
+    return () => {
+      if (fireAudio) {
+        if (!fireAudio.paused) {
+          fireAudio.pause();
+        }
+        fireAudio.currentTime = 0;
+        fireAudio.src = "";
+      }
+      if (securityAudio) {
+        if (!securityAudio.paused) {
+          securityAudio.pause();
+        }
+        securityAudio.currentTime = 0;
+        securityAudio.src = "";
+      }
+    };
+  }, []);
 
   // --- Control Functions ---
   const toggleFullscreen = () => {
@@ -812,6 +952,26 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       : `${alerts.length} ${hasCriticalAlerts(alerts) ? "Critical Alerts" : "Alerts"}`}
                   </span>
                 </button>
+              ) : null}
+
+              {alarmActive ? (
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={stopAlarm}
+                    className="inline-flex items-center gap-2 rounded-[18px] border border-red-500 bg-red-600/15 px-3 py-1.5 shadow-[0_10px_30px_rgba(255,0,0,0.15)] backdrop-blur-md text-[13px] font-semibold text-red-200 whitespace-nowrap pointer-events-auto transition hover:bg-red-600/25"
+                  >
+                    <span className="h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white">
+                      ■
+                    </span>
+                    <span>Stop Alarm</span>
+                  </button>
+                  {alarmSources.length > 0 ? (
+                    <span className="text-[12px] text-red-200/80">
+                      {`Sources: ${alarmSources.join(", ")}`}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
 
               <div className="inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">

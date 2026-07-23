@@ -39,6 +39,12 @@ export type AIEventWSData = {
   screenshot?: string | null;
 };
 
+export type AlarmStateWSData = {
+  camera_id: string;
+  active: boolean;
+  sources: string[];
+};
+
 export type CameraStatusWSData = {
   camera_id: string;
   status: string;
@@ -48,6 +54,7 @@ export type WSMessage =
   | { event: "new_alert"; data: AlertWSData }
   | { event: "ai_status"; data: DashboardStats }
   | { event: "ai_event"; data: AIEventWSData }
+  | { event: "alarm_state"; data: AlarmStateWSData }
   | { event: "camera_status"; data: CameraStatusWSData };
 
 export type SocketHandle = {
