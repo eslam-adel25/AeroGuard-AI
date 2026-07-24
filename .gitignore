@@ -29,6 +29,11 @@ dist/
 # Uploaded Files
 backend/uploads/videos/
 backend/uploads/avatars/
+backend/uploads/reports/
+backend/uploads/ai_events/
+
+# Runtime uploads
+backend/uploads/
 
 # ==========================
 # Node.js / React / Vite
