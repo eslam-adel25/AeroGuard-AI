@@ -1,25 +1,25 @@
 # WebSocket Architecture
 
-The backend exposes a single WebSocket endpoint and a connection manager used by the AI engine and services to broadcast live updates.
+The backend exposes a dashboard WebSocket endpoint that the frontend uses for live AI and camera updates.
 
-- Endpoint: `ws://<host>/ws/dashboard?token=<ACCESS_TOKEN>` (see `awro-guard/backend/app/api/v1/websocket_api.py`)
-  - The endpoint requires a `token` query parameter (access token - JWT).
-  - The server validates the token using `core/security.verify_token`. If invalid, the connection is closed with code `1008`.
+- Endpoint: ws://<host>/ws/dashboard?token=<ACCESS_TOKEN>
+- The server validates the JWT passed in the token query parameter before accepting the socket.
+- The frontend opens this endpoint from frontend/src/services/socket.ts.
 
-- Connection manager: `awro-guard/backend/app/websocket/manager.py`
-  - `ConnectionManager.connect(websocket)` accepts and stores the connection.
-  - `disconnect(websocket)` removes the connection.
-  - `broadcast(message: dict)` sends JSON to all active connections and cleans up dead sockets.
+Connection manager
 
-- Producer: `AIService.register_event()` and `AIProcessor` call `manager.broadcast()` and create async tasks to avoid blocking the main loop.
+- backend/app/websocket/manager.py maintains the active socket set.
+- It accepts new connections, removes closed ones, and broadcasts JSON messages to all active clients.
 
-- Message types (frontend expects these shapes in `awro-guard/frontend/src/services/socket.ts`):
-  - `new_alert` — high-priority alert metadata
-  - `ai_status` — periodic engine metrics (fps, counts)
-  - `ai_event` — detailed AI event created and persisted
-  - `camera_status` — camera online/offline messages
+Message types
+
+- new_alert — high-priority alert metadata.
+- ai_status — periodic engine metrics such as FPS and object counts.
+- ai_event — detailed AI event payloads.
+- alarm_state — alarm state changes for a specific camera.
+- camera_status — camera online/offline updates.
 
 Security and scaling notes
 
-- WebSocket authentication uses JWT in query string. For additional security consider moving to a short-lived signed cookie or performing an initial authenticated HTTP upgrade handshake.
-- The connection manager stores sockets in memory; in a multi-worker or multi-node deployment, use a pub/sub (Redis) to broadcast messages across instances.
+- The current implementation authenticates the WebSocket with a token in the query string.
+- The connection manager is in-memory and is suitable for single-instance deployments; a shared pub/sub layer would be required for multi-instance scaling.

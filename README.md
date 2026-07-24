@@ -253,7 +253,7 @@ Once started, the backend streams the processed output to the frontend and store
 
 ### Prerequisites
 
-- Python 12.3 or newer
+- Python 3.12 or newer
 - Node.js 18 or newer
 - npm
 - PostgreSQL database instance for the backend

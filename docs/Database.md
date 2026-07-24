@@ -1,77 +1,33 @@
-# Database Schema & Models (implementation-derived)
+# Database Schema and Models
 
-This file summarizes the SQLAlchemy models implemented in `awro-guard/backend/app/models/models.py`. The repository uses PostgreSQL-specific column types (UUID, JSONB).
+The data layer is implemented in backend/app/models/models.py and initialized through backend/app/database/session.py.
 
-Important tables and key fields
+Storage behavior
 
-- `roles`
-  - `role_id` (UUID, PK)
-  - `role_name` (string)
+- The application uses SQLAlchemy with a database connection string from DATABASE_URL.
+- The code supports SQLite-style URLs as well as PostgreSQL-style URLs, but the models and dialect types are PostgreSQL-oriented.
+- The schema is created on startup with Base.metadata.create_all(bind=engine); there is no Alembic migration setup in the repository.
 
-- `users`
-  - `user_id` (UUID, PK)
-  - `role_id` (FK -> roles.role_id)
-  - `full_name`, `username`, `email`
-  - `password_hash` (stored as text, bcrypt)
-  - `profile_picture` (path)
-  - `status` (e.g., Pending, Active)
-  - `is_verified` (bool)
-  - `last_login`, `created_at`, `updated_at`
+Core tables
 
-- `system_settings`
-  - global settings like `organization_name`, `detection_confidence`, `tracking_enabled`, `jwt_expiration`, `gpu_enabled`, etc.
+- roles — stores role names such as Officer and Administrator.
+- users — stores account metadata, password hash, profile information, verification state, and role linkage.
+- system_settings — stores global defaults such as detection confidence, GPU usage, frame skip, and AI rule toggles.
+- cameras — stores stream source, camera type, owner, and status.
+- restricted_zones — stores polygon zones for each camera.
+- detections — stores per-detection records, confidence, priority, and violation flags.
+- email_verifications — stores tokens and OTP data for email verification.
+- refresh_tokens — stores refresh tokens with expiry and revocation state.
+- activity_logs — stores activity events for auditing and profile history.
+- user_settings — stores user-specific UI and AI preferences.
+- reports — stores generated report metadata and export history.
+- trackings — stores tracking state for detections across frames.
+- ai_events — stores alert events associated with a camera and optional track.
 
-- `cameras`
-  - `camera_id` (UUID, PK)
-  - `camera_name`, `location`, `stream_url`
-  - `camera_type` (LIVE, UPLOAD, USB)
-  - `owner_id` (FK -> users.user_id)
-  - `status`, `created_at`
+Important implementation notes
 
-- `restricted_zones`
-  - `zone_id` (UUID, PK)
-  - `camera_id` (FK -> cameras.camera_id)
-  - `zone_name`, `zone_type`
-  - `polygon_coords` (JSONB)
-  - `owner_id` (FK -> users.user_id)
+- UUIDs are represented using a custom GUID type that works with PostgreSQL UUIDs and falls back to a string form for other dialects.
+- JSON fields are used for zone coordinates, report payloads, and event metadata.
+- The camera and AI event relationships are owner-scoped for access checks.
 
-- `detections`
-  - `detection_id` (UUID)
-  - `camera_id` (FK)
-  - `owner_id` (FK -> users.user_id)
-  - `detection_type`, `confidence`, `priority`, `is_violation`, `violation_type`, `detected_at`
-
-- `email_verifications`
-  - tokens for email/username change flows: `token_id`, `user_id`, `token`, `new_email`, `new_username`, `expires_at`, `resend_count`, `attempts`
-
-- `refresh_tokens`
-  - `id`, `user_id`, `token`, `expires_at`, `revoked`
-
-- `activity_logs`
-  - `id`, `user_id`, `event_type`, `details` (JSONB), `ip_address`, `user_agent`, `created_at`
-
-- `user_settings`
-  - per-user settings persisted as model fields (language, timezone, frame_buffer, etc.)
-
-- `reports`
-  - `report_id` (UUID), `owner_id`, `generated_by`, `generated_at`, `title`, `description`, `report_type`, `filters` (JSONB), `summary` (JSONB), `details` (JSONB), `export_history` (JSONB)
-
-- `trackings`
-  - used by the tracking system (track_id, camera_id, track_type, track_label, latest_bbox, confidence, timestamps)
-
-- `ai_events`
-  - `event_id` (UUID), `track_id` (FK optional), `camera_id`, `detected_by` (user), `detection_type`, `severity`, `confidence`, `screenshot_path`, `metadata` (JSONB), `created_at`
-
-Relationships
-
-- `users` ← 1:N → `cameras` (owner_id)
-- `cameras` ← 1:N → `detections`
-- `users` ← 1:N → `refresh_tokens`
-- AI events reference cameras and optionally `users.detected_by`.
-
-Notes
-
-- The code uses PostgreSQL `JSONB` and `UUID` dialect types, so `DATABASE_URL` should point to a PostgreSQL instance (e.g. `postgresql+psycopg2://user:pass@host/dbname`).
-- Nothing in the repo suggests use of Alembic migrations — database schema is created on startup via `Base.metadata.create_all(bind=engine)` in `awro-guard/backend/app/main.py`.
-
-Refer to the SQLAlchemy models in `awro-guard/backend/app/models/models.py` for full schema details.
+Refer to backend/app/models/models.py for the full schema and field list.

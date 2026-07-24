@@ -1,59 +1,39 @@
-# Security & Hardening Summary (implementation-derived)
+# Security and Hardening Summary
 
-This summary enumerates security measures implemented in the codebase and references the files where each protection appears.
+This summary captures the security controls that are implemented in the current codebase.
 
-Authentication & Authorization
+Authentication and authorization
 
-- JWT-based authentication
-  - Token creation and validation performed in `awro-guard/backend/app/core/security.py` (uses `python-jose`).
-  - `ACCESS_TOKEN_EXPIRE_MINUTES` controls expiration (defaults to 60 mins if unset).
-- Password hashing with bcrypt in `awro-guard/backend/app/core/security.py`.
-- Role-based access control via `awro-guard/backend/app/core/auth_middleware.py` and `role_required()` decorator.
+- JWT-based authentication is implemented in backend/app/core/security.py.
+- Role-based access checks are enforced through backend/app/core/auth_middleware.py.
+- Passwords are hashed with bcrypt before storage.
 
-Rate limiting and brute-force protection
+Rate limiting
 
-- A lightweight in-memory throttling mechanism protects login and registration routes in `awro-guard/backend/app/api/v1/auth.py` (per-client and per-username buckets).
-- This is suitable for small deployments; for production a distributed rate limiter (Redis or API gateway rate limits) is recommended.
+- Authentication endpoints use an in-memory throttling mechanism to reduce brute-force attempts.
+- This is appropriate for development and small deployments, but production deployments should consider a shared rate-limiter.
 
-Input, uploads and file handling
+Uploads and file handling
 
-- Avatar and video uploads are validated for extension and size in `awro-guard/backend/app/api/v1/users.py` and `awro-guard/backend/app/api/v1/cameras.py`.
-- Uploaded files are saved under the `uploads/` directory and are removed when camera entries are deleted (camera type UPLOAD).
-- Screenshot writing for AI events is handled carefully and paths are stored on the model (`screenshot_path`).
-
-Database safety
-
-- SQLAlchemy query composition is used across repositories (parameterized queries). Use of `JSONB` accessors appears in `report_repository` but queries remain parameterized.
+- Camera uploads and profile avatars are validated for extension and size.
+- Uploaded assets are stored under backend/uploads and are removed when the owning camera is deleted.
 
 WebSocket security
 
-- WebSocket endpoint `awro-guard/backend/app/api/v1/websocket_api.py` accepts `token` as a query parameter and validates via JWT helper.
-- The WebSocket manager broadcasts JSON messages only; connection cleanup handles dead sockets.
+- The WebSocket route validates the access token from the query string before accepting a connection.
+- The connection manager cleans up dead sockets and only broadcasts JSON payloads.
 
-CORS & headers
+CORS and headers
 
-- Security headers are set by a custom middleware in `awro-guard/backend/app/main.py` (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy).
-- CORS is configured with an explicit allowlist (localhost dev origins).
+- The app adds security headers and a constrained CORS allowlist in backend/app/main.py.
 
-Email and secrets
+Secrets and email delivery
 
-- Email sending is implemented in `awro-guard/backend/app/core/emailer.py` using SMTP settings read from environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM).
-- Secrets (JWT secret, SMTP credentials, DATABASE_URL) must be provided via environment variables. The repository uses `python-dotenv` if `.env` is present, but no `.env` is included in source control.
+- SMTP and JWT settings are read from environment variables.
+- The backend can log verification email content when SMTP is not configured, but this is not a production email delivery path.
 
-Session & refresh tokens
+Recommended hardening for production
 
-- Refresh tokens are stored server-side in `refresh_tokens` table and can be revoked.
-- Password changes revoke refresh tokens for the user.
-
-Audit & activity logs
-
-- Activity events are recorded using `ActivityRepository` into `activity_logs` table.
-
-What is missing or recommended
-
-- No web application firewall or distributed rate limiter configured — recommend integration with Redis or API gateway for production.
-- No HTTPS / TLS termination instructions (assume reverse proxy with TLS in front of Uvicorn).
-- No secrets management shown (use environment variables and secret stores in production).
-- No explicit CSRF tokens required because API uses Bearer tokens, but if cookies are used later, CSRF protection must be added.
-
-Review production hardening best practices for authentication, secret management, session storage, and network isolation when deploying this application.
+- Use a managed secret store for DATABASE_URL, JWT secrets, and SMTP credentials.
+- Put the app behind HTTPS and consider a reverse proxy or API gateway.
+- Replace the in-memory rate limiter with a distributed solution if the deployment scales beyond a single instance.

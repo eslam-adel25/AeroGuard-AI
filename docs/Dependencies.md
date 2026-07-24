@@ -1,44 +1,20 @@
 # Dependencies
 
-This document lists observed dependencies in the repository.
+This document reflects the package lists currently present in the repository.
 
 Frontend
 
-- See `awro-guard/frontend/package.json` for exact dependencies and devDependencies. Key runtime deps:
-  - `react`, `react-dom` (React 19)
-  - `axios` (HTTP client)
-  - `recharts` (charts)
-  - `react-i18next` / `i18next` (i18n)
-  - `lucide-react` (icons)
+- See frontend/package.json for the installed frontend dependencies.
+- Key runtime libraries include React 19, React Router, Axios, Recharts, Framer Motion, i18next, and Lucide React.
+- Development tooling includes Vite, TypeScript, ESLint, Tailwind CSS, PostCSS, and Autoprefixer.
 
-Backend (inferred)
+Backend
 
-The backend includes a pinned requirements file at `awro-guard/backend/requirements.txt`. These packages are referenced in the code and are required to run the backend (install and pin versions before deployment):
+- The pinned Python dependency list lives in backend/requirements.txt.
+- The main backend stack includes FastAPI, Uvicorn, SQLAlchemy, psycopg2-binary, python-jose, bcrypt, python-dotenv, python-multipart, Pillow, fpdf2, pandas, openpyxl, email-validator, websockets, ultralytics, opencv-python, and numpy.
 
-- `fastapi`
-- `uvicorn`
-- `sqlalchemy`
-- `psycopg2-binary` (Postgres driver)
-- `python-dotenv` (optional, for .env files)
-- `python-jose[cryptography]` (JWT)
-- `bcrypt` (password hashing)
-- `python-multipart` (file uploads)
-- `Pillow` (image resizing)
-- `fpdf2` (PDF generation)
-- `pandas` (Excel/report generation)
-- `openpyxl` (Excel export)
-- `email-validator` (Pydantic EmailStr validation)
-- `websockets` (WebSocket support)
-- `starlette` (ASGI/web utilities)
-- `ultralytics` (YOLOv8 model API)
-- `opencv-python`
-- `numpy`
+Notes
 
-Optional / integration
-
-- `openpyxl` — required if Excel export is used (`reports/export/excel`).
-
-Recommendation
-
-- The backend already includes a pinned requirements file at `awro-guard/backend/requirements.txt`; verify these versions in your target Python 3.12 environment before production.
-- Use a virtual environment and keep dependency pins under source control for reproducibility.
+- The backend requirements file is the authoritative dependency source for server-side installs.
+- The Excel export route will fail with HTTP 501 if openpyxl is missing from the server environment.
+- Dependency pins should be validated in the target Python environment before deployment.

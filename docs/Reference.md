@@ -1,25 +1,25 @@
-# Reference: Key files and responsibilities
+# Reference: Key Files and Responsibilities
 
-This quick reference maps important files to their responsibilities. Use this to quickly find implementation points.
+This quick reference maps important files to the responsibilities they implement in the current workspace.
 
-- `awro-guard/backend/app/main.py` — application entry: creates DB schema, registers routers, sets security headers and CORS.
-- `awro-guard/backend/app/core/security.py` — JWT creation/verification, bcrypt password hashing, `get_current_user` dependency.
-- `awro-guard/backend/app/core/auth_middleware.py` — header-based token extraction and `role_required` decorator.
-- `awro-guard/backend/app/core/emailer.py` — SMTP-based verification email sender.
-- `awro-guard/backend/app/database/session.py` — SQLAlchemy engine and `get_db()` dependency.
-- `awro-guard/backend/app/models/models.py` — SQLAlchemy ORM models and AI model file locations.
-- `awro-guard/backend/app/schemas/schemas.py` — Pydantic models used by API.
-- `awro-guard/backend/app/api/v1/auth.py` — registration, login, refresh, verify, resend, logout.
-- `awro-guard/backend/app/api/v1/cameras.py` — camera CRUD, zone management, stream endpoint, start analysis.
-- `awro-guard/backend/app/api/v1/users.py` — user profile, avatar upload, password change, admin user management.
-- `awro-guard/backend/app/api/v1/reports.py` — reports generation, listing, exports.
-- `awro-guard/backend/app/api/v1/settings.py` — user settings CRUD.
-- `awro-guard/backend/app/api/v1/ai.py` — AI events listing, manual event creation, screenshot download.
-- `awro-guard/backend/app/api/v1/websocket_api.py` — WebSocket endpoint for dashboard notifications.
-- `awro-guard/backend/app/ai/processor.py` — YOLOv8-based processing loop and real-time heuristics.
-- `awro-guard/backend/app/ai/tracker.py` — tracking implementations and `TrackerManager` facade.
-- `awro-guard/backend/app/services/ai_service.py` — persists AI events and broadcasts via WebSocket.
-- `awro-guard/backend/app/services/report_service.py` — report aggregation and generation orchestration.
-- `awro-guard/backend/app/utils/report_generator.py` — PDF/Excel generators for exported reports.
-- `awro-guard/frontend/src/services/api.ts` — centralized Axios client and all frontend API calls.
-- `awro-guard/frontend/src/services/socket.ts` — WebSocket connection helper and message types used by the frontend.
+- backend/app/main.py — application entry point that creates the schema, mounts uploads, and wires the routers.
+- backend/app/core/security.py — JWT creation/verification and password hashing.
+- backend/app/core/auth_middleware.py — authentication dependency and role access checks.
+- backend/app/core/emailer.py — SMTP verification email delivery helper.
+- backend/app/database/session.py — SQLAlchemy engine and DB session dependency.
+- backend/app/models/models.py — SQLAlchemy ORM models for users, cameras, reports, settings, AI events, and tracking state.
+- backend/app/schemas/schemas.py — Pydantic schemas used by the API.
+- backend/app/api/v1/auth.py — registration, login, refresh, verification, and logout flows.
+- backend/app/api/v1/cameras.py — camera CRUD, zone management, streaming, and AI start/stop routes.
+- backend/app/api/v1/users.py — profile updates, avatar upload, password changes, and user management.
+- backend/app/api/v1/reports.py — report generation, listing, and export endpoints.
+- backend/app/api/v1/settings.py — user settings CRUD and AI config reloads.
+- backend/app/api/v1/ai.py — AI event listing and manual event creation.
+- backend/app/api/v1/websocket_api.py — WebSocket dashboard endpoint.
+- backend/app/ai/processor.py — YOLOv8 processing loop and heuristic engine.
+- backend/app/ai/tracker.py — tracker facade and tracking logic.
+- backend/app/services/ai_service.py — AI event persistence and WebSocket broadcast.
+- backend/app/services/report_service.py — report aggregation and report generation orchestration.
+- backend/app/utils/report_generator.py — export generation helpers for PDF/Excel/CSV-like output.
+- frontend/src/services/api.ts — centralized Axios client for the frontend.
+- frontend/src/services/socket.ts — WebSocket connection helper and event typing.

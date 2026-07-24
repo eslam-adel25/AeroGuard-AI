@@ -1,20 +1,19 @@
-# Environment Variables (observed in source)
+# Environment Variables
 
-The backend reads a small set of environment variables. Provide these in the environment (or in a local `.env` for development). Do NOT commit secrets to source control.
+The backend reads several environment variables from the runtime environment or a local .env file. Do not commit secrets to source control.
 
-| Variable                      | Purpose                                       | Notes                                                                               |
-| ----------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `DATABASE_URL`                | SQLAlchemy DB connection string (Postgres)    | Required. Example: `postgresql+psycopg2://user:pass@host:5432/dbname`               |
-| `SECRET_KEY` or `JWT_SECRET`  | JWT signing secret used by `security.py`      | Required. Keep secret. If both unset a `super_secret` default is used (not secure). |
-| `ALGORITHM`                   | JWT signing algorithm (default `HS256`)       | Optional.                                                                           |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token expiry in minutes (default `60`) | Optional.                                                                           |
-| `SMTP_HOST`                   | SMTP server host for verification emails      | Optional; needed for email verification flows.                                      |
-| `SMTP_PORT`                   | SMTP port (e.g. `587`)                        | Optional.                                                                           |
-| `SMTP_USER`                   | SMTP username                                 | Optional.                                                                           |
-| `SMTP_PASS`                   | SMTP password                                 | Optional.                                                                           |
-| `EMAIL_FROM`                  | From address used in outgoing emails          | Defaults to `no-reply@aeroguard.local` if unset.                                    |
-| `FRONTEND_BASE`               | Frontend base URL used in verification links  | Default `http://localhost:5173`.                                                    |
+| Variable                                                   | Purpose                                            | Notes                                                                                            |
+| ---------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| DATABASE_URL                                               | SQLAlchemy database connection string              | Required. The application raises a runtime error if it is absent.                                |
+| SECRET_KEY or JWT_SECRET                                   | JWT signing secret                                 | Required for production-like deployments; otherwise the code falls back to a hard-coded default. |
+| ALGORITHM                                                  | JWT signing algorithm                              | Defaults to HS256.                                                                               |
+| ACCESS_TOKEN_EXPIRE_MINUTES                                | Access token lifetime in minutes                   | Defaults to 60.                                                                                  |
+| REQUIRE_EMAIL_VERIFICATION                                 | Enables the email-verification gate for login      | Supported values include 1/true/yes/on.                                                          |
+| EMAIL_VERIFICATION_EXPIRE_MINUTES                          | Lifetime of email-verification tokens              | Defaults to 15 minutes.                                                                          |
+| SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / EMAIL_FROM | SMTP configuration for verification email delivery | Optional; if missing, the backend logs the message content instead of sending it.                |
+| FRONTEND_BASE                                              | Frontend URL used in verification links            | Defaults to http://localhost:5173.                                                               |
+| HOST / PORT                                                | Host and port for the backend entrypoint           | Used when running backend/app/main.py directly.                                                  |
 
 Security reminder
 
-- Do not store secrets in plain text in the repo. Use secret stores (e.g., Vault), CI/CD secret variables, or environment-specific secret management.
+- Keep secrets in environment variables, CI/CD secret stores, or a managed secret provider rather than committing them to the repository.

@@ -1,19 +1,19 @@
 # Settings System
 
-The application exposes system- and user-level settings used to control AI behavior, UI preferences, and security defaults.
+The application exposes system-level and user-level settings that influence the AI engine, dashboard experience, and security defaults.
 
 Models
 
-- `SystemSettings` (`awro-guard/backend/app/models/models.py`) — global system defaults (detection confidence, tracker backend, AI toggles like `loitering_enabled`, GPU flag, `jwt_expiration`).
-- `UserSettings` — per-user settings stored in `user_settings` table (language, theme, AI per-user overrides, alert preferences).
+- SystemSettings in backend/app/models/models.py stores global defaults such as detection confidence, tracker backend, GPU usage, and AI-rule toggles.
+- UserSettings in backend/app/models/models.py stores per-user preferences including language, theme, alert behavior, and AI thresholds.
 
 API
 
-- `GET /api/v1/settings/` — returns the current user's `UserSettings` (created with defaults on first access).
-- `PUT /api/v1/settings/` — update user settings.
-- `POST /api/v1/settings/reset` — reset a user's settings to defaults.
+- GET /api/v1/settings/ returns the current user’s settings, creating defaults if they do not yet exist.
+- PUT /api/v1/settings/ updates the current user’s settings and notifies the running AI processor.
+- POST /api/v1/settings/reset restores the user’s settings to defaults.
 
 Implementation notes
 
-- `AIProcessor.update_config(settings_model)` uses `SystemSettings` values to reload model and adjust pipeline thresholds.
-- The frontend `ISystemSettings` interface in `awro-guard/frontend/src/services/api.ts` mirrors many fields from `UserSettings`/`SystemSettings`.
+- The settings API updates the running AI processor through the registered processor instance in backend/app/api/v1/settings.py.
+- The frontend service layer mirrors many of the same fields in frontend/src/services/api.ts.

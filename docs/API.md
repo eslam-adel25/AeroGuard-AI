@@ -1,90 +1,65 @@
-# REST API Reference (implementation-derived)
+# REST API Reference
 
-All backend routes are mounted under `/api/v1/` unless noted otherwise. Authentication uses Bearer JWT tokens in the `Authorization` header; the token creation code is in `awro-guard/backend/app/core/security.py`.
+All backend routes are mounted under /api/v1 unless noted otherwise. Authentication uses Bearer JWTs in the Authorization header, and the backend exposes the OpenAPI docs at /docs when the server is running.
 
-Summary of routers and key endpoints found in the codebase:
+Authentication
 
-- `POST /api/v1/auth/register` — Register new user (creates verification token, sends email link if SMTP configured).
-- `POST /api/v1/auth/login` — Authenticate user with username/password. Returns `access_token`, `refresh_token`, and `user` metadata.
-- `POST /api/v1/auth/refresh` — Exchange a refresh token for a new access token.
-- `GET /api/v1/auth/verify?token=...` — Verify an email change / email address (uses EmailVerificationToken).
-- `POST /api/v1/auth/resend-verification` — Resend verification email (rate-limited by code logic).
-- `POST /api/v1/auth/logout` — Revoke refresh token (expects `refresh_token` in body).
+- POST /api/v1/auth/register — creates a user, hashes the password, and optionally sends a verification email.
+- POST /api/v1/auth/login — authenticates a user and returns access/refresh tokens plus user metadata.
+- POST /api/v1/auth/refresh — exchanges a refresh token for a new access token.
+- GET /api/v1/auth/verify — verifies a token sent during registration or email change flows.
+- POST /api/v1/auth/resend-verification — reissues verification email data.
+- POST /api/v1/auth/logout — revokes a refresh token.
+- POST /api/v1/auth/verify-otp — verifies a six-digit email code.
 
 Cameras
 
-- `POST /api/v1/cameras/` — Add a camera. Accepts form fields and optional file upload for `camera_type=UPLOAD` (video file). Enforces extension and size checks.
-- `GET /api/v1/cameras/` — List cameras (owner-limited unless Administrator).
-- `POST /api/v1/cameras/{camera_id}/start` — Start AI processing for a camera (background task) — ownership check enforced.
-- `POST /api/v1/cameras/{camera_id}/zones` — Add restricted zone (ownership enforced).
-- `GET /api/v1/cameras/{camera_id}/zones` — List restricted zones (ownership enforced).
-- `DELETE /api/v1/cameras/{camera_id}` — Delete a camera and uploaded video file if present (ownership enforced).
-- `GET /api/v1/cameras/{camera_id}/stream` — MJPEG streaming endpoint; requires ownership.
+- POST /api/v1/cameras/ — creates a camera record and accepts form data for LIVE, USB, or UPLOAD sources.
+- GET /api/v1/cameras/ — lists cameras, scoped by ownership unless the caller is an Administrator.
+- POST /api/v1/cameras/{camera_id}/start — starts AI processing for a camera in the background.
+- POST /api/v1/cameras/{camera_id}/stop — stops AI processing for a camera.
+- POST /api/v1/cameras/{camera_id}/zones — adds a restricted zone.
+- GET /api/v1/cameras/{camera_id}/zones — lists restricted zones.
+- DELETE /api/v1/cameras/{camera_id} — deletes a camera and related records.
+- GET /api/v1/cameras/{camera_id}/stream — streams annotated MJPEG frames.
 
-Users & Profile
+Users and profile
 
-- `GET /api/v1/users/profile` — Get current user profile (token required).
-- `PUT /api/v1/users/profile` — Update current user's profile (email/username changes create verification tokens instead of immediate update).
-- `PUT|POST /api/v1/users/profile/password` — Change password, revokes refresh tokens on success.
-- `POST /api/v1/users/profile/avatar` — Upload avatar; validates extension and size; optional resizing using Pillow if available.
-- `GET /api/v1/users/profile/activity` — Returns recent activity (ActivityRepository).
-- `GET /api/v1/users/profile/sessions` — List active refresh tokens for current user.
-- `POST /api/v1/users/profile/logout-all` — Revoke all refresh tokens.
-- Admin-only routes: `GET /api/v1/users/`, `POST /api/v1/users/`, `DELETE /api/v1/users/{user_id}`, `GET /api/v1/users/roles`.
+- GET /api/v1/users/profile — returns the current user profile.
+- PUT /api/v1/users/profile — updates profile details.
+- POST /api/v1/users/profile/password — changes the password and revokes existing refresh tokens.
+- POST /api/v1/users/profile/avatar — uploads an avatar.
+- GET /api/v1/users/profile/activity — returns recent activity history.
+- GET /api/v1/users/profile/sessions — lists current sessions.
+- POST /api/v1/users/profile/logout-all — revokes all refresh tokens for the current user.
+- Admin-only endpoints exist under /api/v1/users for user management and role lookup.
 
 Reports
 
-- `POST /api/v1/reports/generate` — Generate a report for a date range and persist a report record.
-- `GET /api/v1/reports/` — List generated reports (owner-limited unless Administrator).
-- `GET /api/v1/reports/{report_id}` — Get report detail and contents.
-- `GET /api/v1/reports/export/csv?report_id=...` — Export report as CSV; report ownership enforced.
-- `GET /api/v1/reports/export/excel?report_id=...` — Export report as Excel (requires openpyxl available on server).
-- `GET /api/v1/reports/export/pdf?report_id=...` — Export report as PDF.
-- `DELETE /api/v1/reports/{report_id}` — Delete persisted report (owner-limited unless Administrator).
-- `GET /api/v1/reports/summary` and `/api/v1/reports/dashboard` — Return aggregated analytics used by the frontend dashboard.
+- GET /api/v1/reports/summary — returns a summary payload for a requested date range.
+- GET /api/v1/reports/dashboard — returns analytics payload used by the dashboard.
+- POST /api/v1/reports/generate — generates and stores a report.
+- GET /api/v1/reports/ — lists persisted reports.
+- GET /api/v1/reports/{report_id} — retrieves report contents and metadata.
+- GET /api/v1/reports/export/csv — exports a report as CSV.
+- GET /api/v1/reports/export/excel — exports a report as Excel when openpyxl is installed.
+- GET /api/v1/reports/export/pdf — exports a report as PDF.
+- DELETE /api/v1/reports/{report_id} — deletes a persisted report.
 
-AI Events
+AI events
 
-- `GET /api/v1/ai/events` — List AI events; admin or owner-limited when `camera_id` specified.
-- `GET /api/v1/ai/events/{event_id}` — Get AI event detail (ownership enforced for non-admins).
-- `GET /api/v1/ai/events/{event_id}/screenshot` — Download stored screenshot for event (ownership enforced).
-- `POST /api/v1/ai/events/manual` — Manually create AI event (accepts UploadFile screenshot optionally).
+- GET /api/v1/ai/events — lists AI events.
+- GET /api/v1/ai/events/{event_id} — fetches one event.
+- GET /api/v1/ai/events/{event_id}/screenshot — returns the stored screenshot.
+- POST /api/v1/ai/events/manual — manually creates an AI event.
 
-WebSocket
+Realtime notifications
 
-- `ws://<host>/ws/dashboard?token=<ACCESS_TOKEN>` — WebSocket endpoint for live `ai_event`, `new_alert`, `ai_status` and `camera_status` broadcasts. The frontend constructs the URL including `token` as query parameter.
+- WebSocket endpoint: ws://<host>/ws/dashboard?token=<ACCESS_TOKEN>
+- The frontend uses this endpoint to receive ai_event, new_alert, ai_status, alarm_state, and camera_status messages.
 
-Authentication / Rate limiting notes
+Implementation notes
 
-- Passwords hashed using `bcrypt` (`awro-guard/backend/app/core/security.py`).
-- JWT creation/verification lives in `awro-guard/backend/app/core/security.py`; token expiry controlled by `ACCESS_TOKEN_EXPIRE_MINUTES` env var (defaults to 60 minutes).
-- The auth router includes an in-memory throttling mechanism (login/register attempt buckets) implemented in `awro-guard/backend/app/api/v1/auth.py` to reduce brute-force attempts.
-
-Example: login request
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"SecretPass123"}'
-```
-
-Response (example)
-
-```json
-{
-  "access_token": "<jwt>",
-  "token_type": "bearer",
-  "refresh_token": "<refresh-token>",
-  "user": {
-    "user_id": "...",
-    "full_name": "Alice",
-    "username": "alice",
-    "role": "Officer"
-  }
-}
-```
-
-Notes and omissions
-
-- Full OpenAPI examples and detailed JSON schemas are available if you run the backend and access `/docs` (FastAPI OpenAPI UI).
-- This reference is strictly implementation-derived; example payloads are available from the backend OpenAPI UI at `/docs` once the server is running.
+- Passwords are hashed with bcrypt in backend/app/core/security.py.
+- JWT verification and refresh-token storage are implemented server-side.
+- Authentication endpoints use an in-memory rate-limit bucket per client and per username.

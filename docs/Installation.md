@@ -1,97 +1,67 @@
-# Installation, Build & Run (derived from code)
+# Installation, Build, and Run
 
-This document describes how to run the project locally for development and how to provision required environment variables observed in the code.
+This document reflects the local development workflow for the current repository layout.
 
 Prerequisites
 
-- Python 3.10+ (the code appears to run on modern CPython; tests ran with Python 3.12 in the environment used for inspection).
+- Python 3.10+ or 3.12+ for the backend environment.
 - Node.js 18+ and npm for the frontend.
-- PostgreSQL database for production (local SQLite is not configured; SQLAlchemy engine expects `DATABASE_URL`).
+- A database reachable through DATABASE_URL.
 
-Backend – Python environment
+Backend setup
 
-1. Create and activate virtualenv
+1. Create and activate a virtual environment.
 
 ```bash
-cd awro-guard/backend
+cd backend
 python -m venv .venv
-# Windows
 .venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
 ```
 
-2. Install dependencies
-
-Install the backend requirements from the pinned file at `requirements.txt`.
+2. Install backend dependencies.
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Environment variables (observed in code)
-
-| Variable                    |                                     Description | Example                                                  | Required |
-| --------------------------- | ----------------------------------------------: | -------------------------------------------------------- | -------: |
-| DATABASE_URL                |            SQLAlchemy database URL (PostgreSQL) | postgresql+psycopg2://user:pass@localhost:5432/aeroguard |      Yes |
-| SECRET_KEY / JWT_SECRET     |                              JWT signing secret | (keep secret)                                            |      Yes |
-| ACCESS_TOKEN_EXPIRE_MINUTES | Access token expiry in minutes (defaults to 60) | 60                                                       |       No |
-| ALGORITHM                   |               JWT algorithm (defaults to HS256) | HS256                                                    |       No |
-| SMTP_HOST                   |      SMTP server host (for verification emails) | smtp.example.com                                         |       No |
-| SMTP_PORT                   |                          SMTP server port (587) | 587                                                      |       No |
-| SMTP_USER                   |                                   SMTP username | user@example.com                                         |       No |
-| SMTP_PASS                   |                                   SMTP password | (secret)                                                 |       No |
-| EMAIL_FROM                  |                         From address for emails | no-reply@aeroguard.local                                 |       No |
-| FRONTEND_BASE               |        Frontend base URL for verification links | http://localhost:5173                                    |       No |
-
-4. Run backend (development)
+3. Set the required environment variables.
 
 ```bash
-cd awro-guard/backend
-.venv\Scripts\activate
-pip install -r requirements.txt
+set DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/aeroguard
+set SECRET_KEY=change-me
+```
+
+4. Start the API.
+
+```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Visit documentation at `http://127.0.0.1:8000/docs` once the server is running.
+The Swagger UI will be available at http://127.0.0.1:8000/docs.
 
-Frontend – Node.js
+Frontend setup
 
-1. Install dependencies
+1. Install frontend dependencies.
 
 ```bash
-cd awro-guard/frontend
+cd ../frontend
 npm install
 ```
 
-2. Development
+2. Start the Vite dev server.
 
 ```bash
 npm run dev
 ```
 
-3. Production build
+3. Build for production.
 
 ```bash
 npm run build
-# serve dist/ with any static server
 ```
 
-Notes and verification
+Notes
 
-- Frontend `api.ts` client points to `http://127.0.0.1:8000/api/v1` by default.
-- WebSocket connects to `ws://127.0.0.1:8000/ws/dashboard?token=<token>` in the frontend socket helper.
-- The repository includes Vite + TypeScript configuration in `awro-guard/frontend/` (`tsconfig.app.json`, `vite.config.ts`).
-
-Testing
-
-- Backend unit tests (small set observed):
-
-```bash
-# from awro-guard/backend/ with virtualenv active
-python -m pytest -q tests/test_security_helpers.py
-```
-
-This repo's tests exercise security helper functions.
-
-Production deployments should review pinned package versions in `awro-guard/backend/requirements.txt` and test them in the target Python environment before deployment.
+- The frontend defaults to the same-origin /api/v1 base URL when VITE_API_BASE_URL is not provided.
+- The Vite config proxies /api, /ws, and /uploads to the backend during development.
+- The current repository includes a backend test suite under backend/tests; you can run individual tests with pytest.
