@@ -5,6 +5,7 @@ uvicorn==0.22.0
 # Database
 SQLAlchemy==2.0.19
 psycopg2-binary==2.9.11
+alembic==1.13.1
 
 # Authentication
 python-jose[cryptography]==3.3.0

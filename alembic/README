@@ -1,0 +1,99 @@
+# Alembic Migration System for AeroGuard AI
+
+This directory contains the database migration scripts for AeroGuard AI using Alembic and SQLAlchemy.
+
+## Quick Start
+
+### Prerequisites
+
+- PostgreSQL database running
+- DATABASE_URL environment variable set (e.g., `postgresql://user:pass@localhost/dbname`)
+
+### Running Migrations
+
+```bash
+# View current migration status
+alembic current
+
+# Upgrade to latest version (TEST DATABASE ONLY)
+alembic upgrade head
+
+# Downgrade to previous version (TEST DATABASE ONLY)
+alembic downgrade -1
+
+# View migration history
+alembic history --verbose
+
+# Create new migration (after intentional model changes)
+alembic revision --autogenerate -m "Description of changes"
+```
+
+## Production Protection Policy
+
+- `aeroguard_db` is the live production baseline and must remain untouched by automatic synchronization.
+- Do not run `alembic upgrade`, `alembic downgrade`, `alembic stamp`, or `revision --autogenerate` against production.
+- Do not run destructive or mutating SQL operations against production through migration tooling.
+- Use a dedicated test database (for example, `aeroguard_migration_test`) for all migration execution and verification.
+
+## Architecture
+
+```
+SQLAlchemy Models (backend/app/models/models.py)
+                ↓
+           Alembic
+                ↓
+          PostgreSQL
+```
+
+## Files
+
+- `env.py` - Alembic environment configuration that imports SQLAlchemy models and Base metadata
+- `script.py.mako` - Template for generating migration files
+- `versions/` - Directory containing all migration scripts
+  - `001_initial_schema.py` - Initial migration capturing the current database schema
+
+## Configuration
+
+- `alembic.ini` - Main configuration file (in project root)
+- Uses `DATABASE_URL` environment variable for database connection
+- No credentials hardcoded in the repository
+
+## Important Notes
+
+1. **Application Startup**: The application still uses `Base.metadata.create_all()` for backwards compatibility. Alembic migrations are available for production deployments.
+
+2. **Creating Migrations**: After intentionally modifying SQLAlchemy models:
+
+   ```bash
+   alembic revision --autogenerate -m "your migration message"
+   ```
+
+3. **Verification**: Always review generated migrations and test them on a non-production database first.
+
+4. **Safety**:
+   - Test migrations on a separate test database first
+   - Never run destructive or mutating migration operations on production
+   - Production rollout requires explicit approval after successful test validation
+
+## Future Migration Workflow
+
+Future schema change process:
+
+1. Modify SQLAlchemy model intentionally.
+2. Create a new Alembic revision.
+3. Test the revision on a fresh test database.
+4. Run backend/application tests.
+5. Verify migration behavior and resulting schema.
+6. Consider production rollout only after explicit approval.
+
+Production is never automatically synchronized.
+
+## Migration Strategy
+
+- Initial migration (001) captures the current schema
+- Future migrations should be created incrementally as the schema evolves
+- Each migration should be self-contained and reversible
+
+---
+
+For detailed testing procedures, see `PHASE_7_TEST_GUIDE.md` in the project root.
