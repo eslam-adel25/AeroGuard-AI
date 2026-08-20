@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   cameraService,
+  settingsService,
   getStoredAuthToken,
   type ZoneCreateData,
   type ZoneData,
@@ -90,6 +91,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
   const [alarmActive, setAlarmActive] = useState(false);
   const [alarmSources, setAlarmSources] = useState<string[]>([]);
+  const [alertSoundsEnabled, setAlertSoundsEnabled] = useState(true);
   const [alarmSilenced, setAlarmSilenced] = useState(false);
   const fireAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const securityAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -274,6 +276,14 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         const res = await cameraService.getAll();
         const data = res.data as CameraData[];
         setCameras(data);
+        try {
+          const settingsResponse = await settingsService.get();
+          setAlertSoundsEnabled(
+            settingsResponse.data?.enable_alert_sounds ?? true,
+          );
+        } catch {
+          console.error("Failed to load alert sound setting");
+        }
         if (data.length > 0) {
           await handleCameraSelection(data[0].camera_id, true);
         }
@@ -354,7 +364,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, [stopAudio]);
 
   useEffect(() => {
-    if (!alarmActive || alarmSilenced) {
+    if (!alarmActive || alarmSilenced || !alertSoundsEnabled) {
       stopAudio(fireAlarmAudioRef);
       stopAudio(securityAlarmAudioRef);
       return;
@@ -377,6 +387,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, [
     alarmActive,
     alarmSilenced,
+    alertSoundsEnabled,
     alarmSources,
     isFireAlarmSource,
     isSecurityAlarmSource,

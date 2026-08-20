@@ -816,6 +816,9 @@ class AIProcessor:
 
                 cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
                 camera_owner_id = getattr(cam, 'owner_id', None) if cam else None
+                restricted_area_enabled = bool(
+                    getattr(self.active_settings, "restricted_area_enabled", False)
+                )
 
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
@@ -992,6 +995,8 @@ class AIProcessor:
 
                                 # Default: restricted polygon area
                                 else:
+                                    if not restricted_area_enabled:
+                                        continue
                                     polygon = np.asarray(coords, dtype=np.float32)
                                     if polygon.size and np.all(polygon >= 0.0) and np.all(polygon <= 1.0):
                                         polygon *= np.array([annotated_frame.shape[1], annotated_frame.shape[0]], dtype=np.float32)
