@@ -3,6 +3,7 @@ import asyncio
 import time
 import os
 import threading
+import math
 from pathlib import Path
 import numpy as np
 import torch
@@ -47,6 +48,30 @@ def build_detection_record(camera_id, owner_id, detection_type, confidence, stat
         is_violation=is_violation,
         violation_type=violation_type,
     )
+
+
+def _build_empty_model_result():
+    class EmptyBoxes:
+        xyxy = []
+        cls = []
+        conf = []
+
+        def __len__(self):
+            return 0
+
+    class EmptyResult:
+        boxes = EmptyBoxes()
+
+    return [EmptyResult()]
+
+
+def _get_source_frame_period(capture, is_file_source):
+    if not is_file_source:
+        return None
+    source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+    if not math.isfinite(source_fps) or source_fps <= 0:
+        return None
+    return 1.0 / source_fps
 
 
 def _normalize_zone_coords(raw_coords, camera_id=None, annotation_id=None, rule_type=None):
@@ -649,6 +674,8 @@ class AIProcessor:
 
             iteration = 0
             last_valid_frame = 0
+            frame_period = _get_source_frame_period(cap, is_file_source)
+            next_frame_deadline = time.perf_counter()
             while cap.isOpened():
                 iteration += 1
                 ret, frame = cap.read()
@@ -726,10 +753,7 @@ class AIProcessor:
                 if do_infer:
                     results = await asyncio.to_thread(self.model.predict, frame, conf=conf_thr, verbose=False)
                 else:
-                    # create empty results mimic
-                    class Empty:
-                        boxes = type("B", (), {"xyxy": [], "cls": [], "conf": []})
-                    results = [type("R", (), {"boxes": Empty.boxes})()]
+                    results = _build_empty_model_result()
                 annotated_frame = frame.copy()
 
                 detections_for_tracker = []
@@ -769,7 +793,8 @@ class AIProcessor:
                         "confidence": detection_confidence,
                     })
 
-                tracks = self.tracker.update(detections_for_tracker)
+                if do_infer:
+                    self.tracker.update(detections_for_tracker)
                 active_tracks = self.tracker.get_active_tracks()
                 active_objs_count = len(active_tracks)
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
@@ -1191,7 +1216,11 @@ class AIProcessor:
                     )
 
                 elapsed = time.time() - start_time
-                current_fps = int(1.0 / elapsed) if elapsed > 0 else 30
+                current_fps = (
+                    int(round(1.0 / frame_period))
+                    if frame_period is not None
+                    else int(1.0 / elapsed) if elapsed > 0 else 30
+                )
                 critical_alert_count = self._get_active_critical_alert_count(camera_id)
                 new_alarm_active = len(alarm_sources) > 0
                 camera_key = str(camera_id)
@@ -1225,7 +1254,15 @@ class AIProcessor:
                 })
 
                 self.last_frames[str(camera_id)] = annotated_frame
-                await asyncio.sleep(0.01)
+                if frame_period is not None:
+                    next_frame_deadline += frame_period
+                    remaining = next_frame_deadline - time.perf_counter()
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                    else:
+                        next_frame_deadline = time.perf_counter()
+                else:
+                    await asyncio.sleep(0.01)
         except Exception as exc:
             print(f"❌ [{camera_id}] unexpected termination: {type(exc).__name__}: {exc}")
         finally:
