@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from ..models.models import Detection, Camera
 
 
-def _normalize_severity(priority: str | None) -> str:
+def _normalize_severity(priority: str | None) -> str | None:
     value = (priority or "").strip().lower()
     if value == "critical":
         return "Critical"
@@ -14,7 +14,7 @@ def _normalize_severity(priority: str | None) -> str:
         return "Medium"
     if value == "low":
         return "Low"
-    return "Low"
+    return None
 
 
 def _category_from_detection_type(detection_type: str | None) -> str | None:
@@ -103,7 +103,9 @@ class ReportService:
             "Low": 0,
         }
         for priority, count in severity_rows:
-            severity_counts[_normalize_severity(priority)] += int(count or 0)
+            normalized_priority = _normalize_severity(priority)
+            if normalized_priority:
+                severity_counts[normalized_priority] += int(count or 0)
 
         # 6. تجميع أنواع التفتيش التشغيلية المطلوبة
         categorized_counts = {
@@ -252,7 +254,7 @@ class ReportService:
                 "camera_name": row.camera_name,
                 "detection_type": row.detection_type,
                 "confidence": float(row.confidence or 0),
-                "severity": _normalize_severity(row.priority),
+                "severity": _normalize_severity(row.priority) or "Unknown",
             }
             for row in recent_rows
         ]

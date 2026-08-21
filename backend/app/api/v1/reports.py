@@ -101,6 +101,7 @@ async def generate_report(
         generated_by=owner_id,
         title=title,
         report_type=report_type,
+        is_admin=is_admin,
         detection_type=detection_type,
         severity=severity,
         confidence_min=confidence_min,

@@ -13,7 +13,28 @@ class ReportGenerator:
         pdf.cell(200, 10, txt="AeroGuard AI - Operational Report", ln=True, align='C')
         pdf.set_font("Arial", size=10)
         pdf.cell(200, 10, txt=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-        pdf.ln(10)
+        metadata = data.get('metadata') or {}
+        filters = metadata.get('filters') or {}
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(200, 8, txt=f"Date range: {filters.get('start_date', '')} to {filters.get('end_date', '')}", ln=True)
+        pdf.cell(200, 8, txt=f"Camera: {filters.get('camera_id') or 'All Cameras'}", ln=True)
+        pdf.ln(4)
+
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(200, 8, txt="Analytics Summary", ln=True)
+        pdf.set_font("Arial", size=9)
+        summary = data.get('summary') or {}
+        summary_keys = [
+            'total_detections', 'critical_alerts', 'high_alerts',
+            'medium_alerts', 'low_alerts', 'average_confidence',
+            'active_cameras',
+        ]
+        for key in summary_keys:
+            if key in summary:
+                pdf.cell(70, 7, str(key), 1)
+                pdf.cell(50, 7, str(summary[key]), 1)
+                pdf.ln(7)
+        pdf.ln(5)
 
         # Table Header
         pdf.set_fill_color(239, 68, 68) # AeroGuard Red
@@ -48,7 +69,28 @@ class ReportGenerator:
         pdf.cell(200, 10, txt="AeroGuard AI - Operational Report", ln=True, align='C')
         pdf.set_font("Arial", size=10)
         pdf.cell(200, 10, txt=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-        pdf.ln(10)
+        metadata = data.get('metadata') or {}
+        filters = metadata.get('filters') or {}
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(200, 8, txt=f"Date range: {filters.get('start_date', '')} to {filters.get('end_date', '')}", ln=True)
+        pdf.cell(200, 8, txt=f"Camera: {filters.get('camera_id') or 'All Cameras'}", ln=True)
+        pdf.ln(4)
+
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(200, 8, txt="Analytics Summary", ln=True)
+        pdf.set_font("Arial", size=9)
+        summary = data.get('summary') or {}
+        summary_keys = [
+            'total_detections', 'critical_alerts', 'high_alerts',
+            'medium_alerts', 'low_alerts', 'average_confidence',
+            'active_cameras',
+        ]
+        for key in summary_keys:
+            if key in summary:
+                pdf.cell(70, 7, str(key), 1)
+                pdf.cell(50, 7, str(summary[key]), 1)
+                pdf.ln(7)
+        pdf.ln(5)
 
         # Detection table (same as before)
         pdf.set_fill_color(239, 68, 68)

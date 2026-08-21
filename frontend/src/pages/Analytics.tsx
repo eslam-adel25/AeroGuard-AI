@@ -116,7 +116,7 @@ type RecentAlertItem = {
   camera_name: string;
   detection_type: string;
   confidence: number;
-  severity: "Critical" | "High" | "Medium" | "Low";
+  severity: "Critical" | "High" | "Medium" | "Low" | "Unknown";
 };
 
 type DashboardResponse = {
@@ -339,10 +339,19 @@ const Analytics = () => {
     [dashboard],
   );
   const heatmap = useMemo(() => dashboard?.charts?.heatmap ?? [], [dashboard]);
-  const zoneFrequencyData = useMemo(
-    () => dashboard?.charts?.frequency_by_zone ?? [],
-    [dashboard],
-  );
+  const frequencyData = useMemo(() => {
+    const buckets = new Map<string, { label: string; count: number }>();
+    timeline.forEach((row) => {
+      const bucketKey = row.bucket_value ?? row.label;
+      const current = buckets.get(bucketKey);
+      if (current) {
+        current.count += row.count;
+      } else {
+        buckets.set(bucketKey, { label: row.label, count: row.count });
+      }
+    });
+    return Array.from(buckets.values());
+  }, [timeline]);
 
   const hasData = useMemo(() => {
     if (!summary) {
@@ -529,27 +538,63 @@ const Analytics = () => {
     details.forEach((item) => {
       const normalized = item.type?.trim().toLowerCase();
       if (!normalized) return;
-      if (normalized === "fire/smoke" || normalized === "fire") {
-        countsByCategory.set("Fire", item.count);
+      if (
+        normalized.includes("fire") ||
+        normalized.includes("smoke") ||
+        normalized.includes("flame")
+      ) {
+        countsByCategory.set(
+          "Fire",
+          (countsByCategory.get("Fire") ?? 0) + item.count,
+        );
         return;
       }
-      if (normalized === "person" || normalized === "persons") {
-        countsByCategory.set("Person", item.count);
+      if (
+        normalized.includes("person") ||
+        normalized.includes("human") ||
+        normalized.includes("intruder")
+      ) {
+        countsByCategory.set(
+          "Person",
+          (countsByCategory.get("Person") ?? 0) + item.count,
+        );
         return;
       }
-      if (normalized === "baggage" || normalized === "bag") {
-        countsByCategory.set("Baggage", item.count);
+      if (
+        ["baggage", "bag", "backpack", "suitcase", "luggage"].some((label) =>
+          normalized.includes(label),
+        ) ||
+        normalized.includes("owned_bag") ||
+        normalized.includes("unattended")
+      ) {
+        countsByCategory.set(
+          "Baggage",
+          (countsByCategory.get("Baggage") ?? 0) + item.count,
+        );
         return;
       }
-      if (normalized === "vehicle" || normalized === "vehicles") {
-        countsByCategory.set("Vehicle", item.count);
+      if (
+        ["vehicle", "car", "truck", "bus", "motorcycle", "bicycle"].some(
+          (label) => normalized.includes(label),
+        )
+      ) {
+        countsByCategory.set(
+          "Vehicle",
+          (countsByCategory.get("Vehicle") ?? 0) + item.count,
+        );
         return;
       }
-      if (normalized === "suspicious object" || normalized === "suspicious") {
-        countsByCategory.set("Suspicious Object", item.count);
+      if (
+        ["suspicious", "unknown", "unidentified", "object"].some((label) =>
+          normalized.includes(label),
+        )
+      ) {
+        countsByCategory.set(
+          "Suspicious Object",
+          (countsByCategory.get("Suspicious Object") ?? 0) + item.count,
+        );
         return;
       }
-      countsByCategory.set(item.type, item.count);
     });
 
     const prepared = categoryOrder.map((category) => ({
@@ -1032,7 +1077,7 @@ const Analytics = () => {
               </div>
             </div>
 
-            {/* Detection Frequency by Zone (Vertical Bar Chart) */}
+            {/* Detection Frequency Over Time (Vertical Bar Chart) */}
             <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
               <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
                 {t("analytics.chartTitles.frequency")}
@@ -1040,7 +1085,7 @@ const Analytics = () => {
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={zoneFrequencyData}
+                    data={frequencyData}
                     margin={{ top: 10, right: 5, left: -25, bottom: 5 }}
                   >
                     <CartesianGrid
@@ -1049,7 +1094,7 @@ const Analytics = () => {
                       vertical={false}
                     />
                     <XAxis
-                      dataKey="name"
+                      dataKey="label"
                       stroke="#475569"
                       fontSize={9}
                       tickLine={false}

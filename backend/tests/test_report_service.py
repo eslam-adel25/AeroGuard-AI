@@ -68,3 +68,44 @@ def test_get_report_stats_returns_dashboard_payload():
         assert payload["charts"]["frequency_by_zone"][0]["name"] == "Front Gate"
         assert payload["charts"]["timeline"][0]["camera_name"] == "Front Gate"
         assert payload["charts"]["timeline"][0]["count"] == 2
+
+
+def test_unknown_priority_is_excluded_from_severity_distribution():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        camera = Camera(
+            camera_id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
+            camera_name="Unknown Priority Camera",
+            location="Gate",
+            stream_url="rtsp://example.com/stream",
+            status="running",
+            owner_id=uuid.UUID("00000000-0000-0000-0000-000000000012"),
+        )
+        db.add(camera)
+        db.add(
+            Detection(
+                detection_id=uuid.UUID("00000000-0000-0000-0000-000000000111"),
+                camera_id=camera.camera_id,
+                owner_id=camera.owner_id,
+                detection_type="person detected",
+                priority=None,
+                confidence=0.8,
+                detected_at=datetime(2024, 1, 10, 12, 0, 0),
+                is_violation=False,
+            )
+        )
+        db.commit()
+
+        payload = ReportService.get_report_stats(
+            db,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 31),
+            is_admin=True,
+        )
+
+        assert payload["summary"]["low_alerts"] == 0
+        assert sum(
+            item["count"] for item in payload["charts"]["severity_distribution"]
+        ) == 0
