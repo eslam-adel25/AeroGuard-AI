@@ -9,6 +9,7 @@ from ...services.report_service import ReportService # استدعاء الخدم
 from ...core.auth_middleware import get_current_user
 from ...repositories.report_repository import ReportRepository
 from ...repositories.ai_repository import AIRepository
+from ...models.models import Camera
 import json
 from ...utils.report_generator import ReportGenerator
 
@@ -363,7 +364,21 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
     if not report:
         raise HTTPException(status_code=404, detail="Report not found or access denied")
 
-    filename = f"report-{report.report_id}.pdf"
+    report_time = report.generated_at or datetime.utcnow()
+    filename_timestamp = report_time.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"AeroGuard_AI_Report_{filename_timestamp}.pdf"
+    camera_scope = None
+    report_filters = report.filters or {}
+    if report_filters.get("camera_id"):
+        camera = db.query(Camera).filter(
+            Camera.camera_id == report_filters["camera_id"]
+        ).first()
+        if camera:
+            camera_scope = {
+                "camera_id": str(camera.camera_id),
+                "camera_name": camera.camera_name,
+                "location": camera.location,
+            }
     path = ReportGenerator.generate_pdf({
         "metadata": {
             "report_id": str(report.report_id),
@@ -371,6 +386,7 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
             "generated_by": str(report.generated_by),
             "generated_at": str(report.generated_at),
             "filters": report.filters,
+            "camera": camera_scope,
         },
         "summary": report.summary or {},
         "details": report.details or [],
@@ -409,6 +425,7 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
                 "generated_by": str(report.generated_by),
                 "generated_at": str(report.generated_at),
                 "filters": report.filters,
+                "camera": camera_scope,
             },
             "summary": report.summary or {},
             "details": report.details or [],

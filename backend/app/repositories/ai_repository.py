@@ -167,12 +167,15 @@ class AIRepository:
         limit: int = 100,
         offset: int = 0,
     ) -> Tuple[int, List[Dict[str, Any]]]:
-        q = self.db.query(AIEvent)
+        q = self.db.query(
+            AIEvent,
+            Camera.camera_name,
+            Camera.location,
+        ).join(Camera, Camera.camera_id == AIEvent.camera_id)
         filters = []
         if camera_id:
             filters.append(AIEvent.camera_id == camera_id)
         if owner_id:
-            q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
             filters.append(Camera.owner_id == owner_id)
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
@@ -189,17 +192,19 @@ class AIRepository:
         rows = q.order_by(AIEvent.created_at.desc()).limit(limit).offset(offset).all()
 
         items: List[Dict[str, Any]] = []
-        for r in rows:
+        for event, camera_name, location in rows:
             items.append(
                 {
-                    "event_id": str(r.event_id),
-                    "camera_id": str(r.camera_id),
-                    "detection_type": r.detection_type,
-                    "severity": r.severity,
-                    "confidence": float(r.confidence) if r.confidence is not None else None,
-                    "screenshot_path": r.screenshot_path,
-                        "metadata": r.event_metadata,
-                    "created_at": r.created_at.isoformat() if r.created_at is not None else None,
+                    "event_id": str(event.event_id),
+                    "camera_id": str(event.camera_id),
+                    "camera_name": camera_name,
+                    "location": location,
+                    "detection_type": event.detection_type,
+                    "severity": event.severity,
+                    "confidence": float(event.confidence) if event.confidence is not None else None,
+                    "screenshot_path": event.screenshot_path,
+                    "metadata": event.event_metadata,
+                    "created_at": event.created_at.isoformat() if event.created_at is not None else None,
                 }
             )
 
