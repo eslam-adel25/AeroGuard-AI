@@ -1051,32 +1051,9 @@ class AIProcessor:
                                     loiter_enabled = getattr(self.active_settings, "loitering_enabled", False) or False
                                     loiter_seconds = getattr(self.active_settings, "loitering_seconds", 30) or 30
                                 if loiter_enabled and (now_ts - rec.get("last_move", now_ts) >= loiter_seconds):
-                                    status = "DANGER"
-                                    box_color = (0, 0, 255)
+                                    status = "WARNING"
+                                    box_color = (0, 255, 255)
                                     display_label = "LOITERING"
-                                    alert_key = f"{camera_id}_{obj_id}_LOITERING"
-                                    if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                                        # register loitering event
-                                        try:
-                                            _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                            img_bytes = jpg.tobytes() if jpg is not None else None
-                                        except Exception:
-                                            img_bytes = None
-                                        ai_service.register_event(
-                                            camera_id=camera_id,
-                                            detection_type="LOITERING",
-                                            severity="High",
-                                            confidence=float(conf),
-                                            track_id=str(obj_id),
-                                            user_id=None,
-                                            metadata={"bbox": [x1, y1, x2, y2]},
-                                            screenshot_bytes=img_bytes,
-                                        )
-                                        await manager.broadcast({
-                                            "event": "new_alert",
-                                            "data": {"type": display_label, "priority": "High", "camera_id": str(camera_id)}
-                                        })
-                                        self.last_alert_time[alert_key] = time.time()
 
                     self.object_history[obj_id] = base_point
 
@@ -1185,7 +1162,8 @@ class AIProcessor:
                             except Exception:
                                 img_bytes = None
 
-                            self._register_critical_alert(camera_id)
+                            if status == "DANGER":
+                                self._register_critical_alert(camera_id)
                             ai_service.register_event(
                                 camera_id=camera_id,
                                 detection_type=display_label,
