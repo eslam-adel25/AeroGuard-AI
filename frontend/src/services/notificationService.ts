@@ -1,8 +1,5 @@
 import api, { aiService, getStoredAuthToken } from "./api";
-import {
-  createSocket,
-  type AIEventWSData,
-} from "./socket";
+import { createSocket, type AIEventWSData } from "./socket";
 
 export type NotificationSeverity =
   | "Critical"

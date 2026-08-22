@@ -575,7 +575,8 @@ function App() {
                               </div>
 
                               <div className="mt-4 h-20 w-full overflow-hidden rounded-md bg-white/5">
-                                {notification.eventId && notification.screenshot ? (
+                                {notification.eventId &&
+                                notification.screenshot ? (
                                   screenshotCache.has(notification.eventId) ? (
                                     <img
                                       src={screenshotCache.get(
