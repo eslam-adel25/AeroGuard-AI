@@ -15,6 +15,7 @@ from ..models.models import Detection, Camera, RestrictedZone, UserSettings
 from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
 from ..websocket.manager import manager
+from .identity import PersonIdentityRegistry
 from .tracker import TrackerManager
 from ..services.ai_service import AIService
 from .ownership_config import (
@@ -127,6 +128,7 @@ class AIProcessor:
         self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
         self.crowd_cooldown = {}  # camera_id -> last_alert_time
         self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
+        self.person_identity_registries = {}  # camera_id -> session-only person identities
         self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
         self.bag_owner_evidence = {}  # camera_id -> {bag_internal_id: {candidate_owner, confirm_streak, missing_streak, confirmed_owner}}
         self.bag_owner_status = {}  # camera_id -> {bag_internal_id: "owned" | "lost" | "unknown"}
@@ -351,6 +353,18 @@ class AIProcessor:
                 display_map[internal_id] = state.get(internal_id, 0)
 
         return display_map
+
+    def _assign_person_ids(self, camera_id, active_tracks, frame):
+        camera_key = str(camera_id)
+        registry = self.person_identity_registries.setdefault(
+            camera_key,
+            PersonIdentityRegistry(),
+        )
+        person_tracks = [
+            track for track in active_tracks
+            if getattr(track, "class_name", None) == "person"
+        ]
+        return registry.assign(person_tracks, frame)
 
     def _assign_bag_owner(self, camera_id, person_tracks, bag_tracks):
         """Assign a stable owner ID to bags for overlay display without changing tracker internals."""
@@ -600,6 +614,7 @@ class AIProcessor:
                 return
             self._active_cameras.add(camera_id_str)
 
+        self.person_identity_registries[camera_id_str] = PersonIdentityRegistry()
         self._stop_flags[camera_id_str] = False
         consecutive_read_failures = 0
         last_frame_pos = -1
@@ -813,7 +828,7 @@ class AIProcessor:
                 vehicle_count = sum(1 for t in active_tracks if t.class_name in {"car", "truck", "bus", "vehicle"})
                 alarm_sources = set()
 
-                display_ids = self._assign_display_ids(camera_id, active_tracks)
+                person_ids = self._assign_person_ids(camera_id, active_tracks, frame)
                 bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
                 ownership_state = self.bag_owner_status.get(str(camera_id), {})
 
@@ -846,7 +861,7 @@ class AIProcessor:
                     status = "NORMAL"
                     box_color = self._get_detection_box_color(label_name)
                     display_label = "Person" if label_name == "person" else "Baggage"
-                    display_id = display_ids.get(obj_id, 0)
+                    display_id = person_ids.get(obj_id, 0)
                     bag_state = None
                     if label_name in {"bag", "backpack", "suitcase"}:
                         overlay_owner_id = bag_owner_map.get(obj_id)
@@ -1259,6 +1274,7 @@ class AIProcessor:
                 }
             })
             self.last_frames.pop(str(camera_id), None)
+            self.person_identity_registries.pop(camera_id_str, None)
             self._stop_flags.pop(camera_id_str, None)
             with self._active_camera_lock:
                 self._active_cameras.discard(camera_id_str)
