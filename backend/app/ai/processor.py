@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from ultralytics.nn import tasks as ultralytics_tasks
 from sqlalchemy.orm import Session
 from ..database.session import SessionLocal
-from ..models.models import Detection, Camera, RestrictedZone, SystemSettings
+from ..models.models import Detection, Camera, RestrictedZone, UserSettings
 from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
 from ..websocket.manager import manager
@@ -98,6 +98,14 @@ def _normalize_zone_coords(raw_coords, camera_id=None, annotation_id=None, rule_
     raise ValueError(
         f"Unsupported zone coordinate format: camera={camera_id} annotation={annotation_id} rule={rule_type} value={raw_coords!r}"
     )
+
+
+def _line_coords_in_frame(coords, frame_shape):
+    """Convert normalized annotation points to the processor frame coordinate system."""
+    line_coords = np.asarray(coords, dtype=np.float32)
+    if line_coords.size and np.all(line_coords >= 0.0) and np.all(line_coords <= 1.0):
+        line_coords *= np.array([frame_shape[1], frame_shape[0]], dtype=np.float32)
+    return line_coords
 
 
 class AIProcessor:
@@ -248,7 +256,7 @@ class AIProcessor:
         )
         return repo.save_detection(detection)
 
-    def update_config(self, settings_model: SystemSettings):
+    def update_config(self, settings_model: UserSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
         self.active_settings = settings_model
         print(f"⚙️ AI Engine updated with new settings: Conf={settings_model.detection_confidence}")
@@ -636,9 +644,16 @@ class AIProcessor:
                 return (b[0]-a[0])*(p[1]-a[1]) - (b[1]-a[1])*(p[0]-a[0])
 
             # 3. التحقق من الإعدادات
+            cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
+            camera_owner_id = getattr(cam, "owner_id", None) if cam else None
             try:
-                if not self.active_settings:
-                    self.active_settings = local_db.query(SystemSettings).first()
+                self.active_settings = (
+                    local_db.query(UserSettings)
+                    .filter(UserSettings.owner_id == camera_owner_id)
+                    .first()
+                    if camera_owner_id
+                    else None
+                )
             except Exception as settings_exc:
                 print(f"⚠️ [{camera_id}] failed to load settings: {type(settings_exc).__name__}: {settings_exc}")
                 self.active_settings = None
@@ -679,10 +694,6 @@ class AIProcessor:
             while cap.isOpened():
                 iteration += 1
                 ret, frame = cap.read()
-                print(
-                    f"📌 [{camera_id}] loop={iteration} ret={ret} "
-                    f"frame_type={type(frame).__name__} frame_shape={None if frame is None else getattr(frame, 'shape', None)}"
-                )
                 if self._stop_flags.get(camera_id_str):
                     print(f"📌 [{camera_id}] stop signal received")
                     break
@@ -814,8 +825,6 @@ class AIProcessor:
                     print(f"⚠️ [{camera_id}] failed to reload restricted zones: {type(zone_reload_exc).__name__}: {zone_reload_exc}")
                     local_db.rollback()
 
-                cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
-                camera_owner_id = getattr(cam, 'owner_id', None) if cam else None
                 restricted_area_enabled = bool(
                     getattr(self.active_settings, "restricted_area_enabled", False)
                 )
@@ -896,22 +905,13 @@ class AIProcessor:
                                 # Direction rule (line): detect crossing and check allowed direction
                                 if "direction" in ztype:
                                     prev_point = self.object_history.get(obj_id)
-                                    a = tuple(coords[0])
-                                    b = tuple(coords[-1])
+                                    line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
+                                    a = tuple(line_coords[0])
+                                    b = tuple(line_coords[-1])
                                     cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (200, 200, 200), 1)
                                     if prev_point is not None:
                                         side_prev = _point_side(a, b, prev_point)
                                         side_curr = _point_side(a, b, base_point)
-                                        ###############################
-                                        print("=" * 80)
-                                        print("[TRIPWIRE]")
-                                        print("TRACK:", obj_id)
-                                        print("PREV:", prev_point)
-                                        print("CURR:", base_point)
-                                        print("SIDE PREV:", side_prev)
-                                        print("SIDE CURR:", side_curr)
-                                        print("=" * 80)
-                                        ##########################
                                         if side_prev * side_curr < 0:
                                             # crossed the direction line this frame
                                             move_vec = (base_point[0] - prev_point[0], base_point[1] - prev_point[1])
@@ -949,22 +949,13 @@ class AIProcessor:
                                 # Tripwire: any crossing of the defined line triggers one alert per crossing
                                 elif "tripwire" in ztype:
                                     prev_point = self.object_history.get(obj_id)
-                                    a = tuple(coords[0])
-                                    b = tuple(coords[-1])
+                                    line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
+                                    a = tuple(line_coords[0])
+                                    b = tuple(line_coords[-1])
                                     cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
                                     if prev_point is not None:
                                         side_prev = _point_side(a, b, prev_point)
                                         side_curr = _point_side(a, b, base_point)
-                                        ###################
-                                        print("=" * 80)
-                                        print("[DIRECTION]")
-                                        print("TRACK:", obj_id)
-                                        print("PREV:", prev_point)
-                                        print("CURR:", base_point)
-                                        print("SIDE PREV:", side_prev)
-                                        print("SIDE CURR:", side_curr)
-                                        print("=" * 80)
-                                        #################
                                         if side_prev * side_curr < 0:
                                             status = "DANGER"
                                             box_color = (0, 0, 255)
