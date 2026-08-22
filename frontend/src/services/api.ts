@@ -309,6 +309,8 @@ export const aiService = {
   getEvent: (event_id: string) => api.get(`/ai/events/${event_id}`),
   downloadScreenshot: (event_id: string) =>
     api.get(`/ai/events/${event_id}/screenshot`, { responseType: "blob" }),
+  markEventRead: (event_id: string) => api.patch(`/ai/events/${event_id}/read`),
+  markAllEventsRead: () => api.post("/ai/events/read-all"),
 };
 
 export default api;

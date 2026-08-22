@@ -170,13 +170,30 @@ function App() {
       const sorted = [...hydrated].sort(
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
       );
-      setNotifications(sorted);
+      setNotifications((prev) => {
+        const byId = new Map(prev.map((item) => [item.id, item]));
+        sorted.forEach((item) => {
+          const existing = byId.get(item.id);
+          byId.set(item.id, existing ? { ...item, ...existing } : item);
+        });
+        return [...byId.values()].sort(
+          (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
+        );
+      });
     };
 
     loadNotifications();
 
     socketHandle = notificationService.subscribeToLiveAlerts((notification) => {
-      setNotifications((prev) => [hydrateNotification(notification), ...prev]);
+      const hydrated = hydrateNotification(notification);
+      setNotifications((prev) => {
+        if (prev.some((item) => item.id === hydrated.id)) {
+          return prev.map((item) =>
+            item.id === hydrated.id ? { ...item, ...hydrated } : item,
+          );
+        }
+        return [hydrated, ...prev];
+      });
     });
 
     return () => {
@@ -257,13 +274,28 @@ function App() {
 
   const closeNotifications = () => setIsNotificationsOpen(false);
 
-  const markNotificationAsRead = (id: string) => {
+  const markNotificationAsRead = async (id: string) => {
+    const notification = notifications.find((item) => item.id === id);
+    if (notification?.eventId) {
+      try {
+        await aiService.markEventRead(notification.eventId);
+      } catch (err) {
+        console.error("Failed to mark notification as read", err);
+        return;
+      }
+    }
     setNotifications((prev) =>
       prev.map((item) => (item.id === id ? { ...item, status: "Read" } : item)),
     );
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
+    try {
+      await aiService.markAllEventsRead();
+    } catch (err) {
+      console.error("Failed to mark notifications as read", err);
+      return;
+    }
     setNotifications((prev) =>
       prev.map((item) => ({ ...item, status: "Read" })),
     );
@@ -470,8 +502,7 @@ function App() {
                                     <CheckCircle2 size={14} />
                                     {t("app.notifications.read")}
                                   </button>
-                                  {notification.eventId ||
-                                  notification.screenshot ? (
+                                  {notification.screenshot ? (
                                     <>
                                       <button
                                         onClick={async () => {
@@ -544,7 +575,7 @@ function App() {
                               </div>
 
                               <div className="mt-4 h-20 w-full overflow-hidden rounded-md bg-white/5">
-                                {notification.eventId ? (
+                                {notification.eventId && notification.screenshot ? (
                                   screenshotCache.has(notification.eventId) ? (
                                     <img
                                       src={screenshotCache.get(

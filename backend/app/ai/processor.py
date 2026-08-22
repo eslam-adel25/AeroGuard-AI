@@ -828,6 +828,10 @@ class AIProcessor:
                 restricted_area_enabled = bool(
                     getattr(self.active_settings, "restricted_area_enabled", False)
                 )
+                has_direction_zone = any(
+                    "direction" in (zone.zone_type or "").lower()
+                    for zone in zones
+                )
 
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
@@ -1008,7 +1012,11 @@ class AIProcessor:
                                 continue
 
                     # legacy wrong-direction vertical heuristic (kept for backward compatibility)
-                    if obj_id in self.object_history and not in_restricted:
+                    if (
+                        has_direction_zone
+                        and obj_id in self.object_history
+                        and not in_restricted
+                    ):
                         prev_point = self.object_history[obj_id]
                         prev_y = prev_point[1]
                         # Wrong direction heuristic (vertical movement upward)

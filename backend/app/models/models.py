@@ -313,6 +313,7 @@ class AIEvent(Base):
     confidence = Column(Float, nullable=True)
     screenshot_path = Column(String(400), nullable=True)
     event_metadata = Column("metadata", JSONB, nullable=True)
+    is_read = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     camera = relationship("Camera", back_populates="ai_events", foreign_keys="AIEvent.camera_id")

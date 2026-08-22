@@ -1,5 +1,8 @@
 import api, { aiService, getStoredAuthToken } from "./api";
-import { createSocket, type AlertWSData } from "./socket";
+import {
+  createSocket,
+  type AIEventWSData,
+} from "./socket";
 
 export type NotificationSeverity =
   | "Critical"
@@ -20,29 +23,16 @@ export interface NotificationItem {
   screenshot?: string | null;
 }
 
-const resolveNotificationTime = (data: AlertWSData) =>
-  String(
-    data.created_at ??
-      data.event_time ??
-      data.detection_time ??
-      data.timestamp ??
-      data.screenshot_timestamp ??
-      new Date().toISOString(),
-  );
-
-const normalizeNotification = (
-  data: AlertWSData,
-  cameraName?: string,
-): NotificationItem => ({
-  id: `${data.camera_id}-${data.type}-${data.priority}-${Date.now()}`,
-  eventId: data.event_id ?? null,
-  detectionType: data.type || "Unknown Detection",
+const normalizeAIEvent = (data: AIEventWSData): NotificationItem => ({
+  id: data.event_id,
+  eventId: data.event_id,
+  detectionType: data.detection_type || "Unknown Detection",
   cameraId: data.camera_id,
-  cameraName:
-    cameraName || data.camera_name || data.camera_id || "Unknown Camera",
-  severity: (data.priority as NotificationSeverity) ?? "Normal",
-  time: resolveNotificationTime(data),
+  cameraName: data.camera_id || "Unknown Camera",
+  severity: (data.severity as NotificationSeverity) ?? "Normal",
+  time: data.created_at ?? new Date().toISOString(),
   status: "Unread",
+  screenshot: data.screenshot ?? null,
 });
 
 export const notificationService = {
@@ -125,8 +115,8 @@ export const notificationService = {
       }
 
       return createSocket((message) => {
-        if (message.event === "new_alert") {
-          const notification = normalizeNotification(message.data);
+        if (message.event === "ai_event") {
+          const notification = normalizeAIEvent(message.data);
           callback(notification);
         }
       });
