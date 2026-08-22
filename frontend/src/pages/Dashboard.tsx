@@ -10,7 +10,6 @@ import {
   cameraService,
   settingsService,
   getStoredAuthToken,
-  type ZoneCreateData,
   type ZoneData,
 } from "../services/api";
 import { createSocket } from "../services/socket";
@@ -60,6 +59,43 @@ interface CameraData {
 
 const FIRE_ALARM_AUDIO = "/sounds/fire_alarm.mp3";
 const SECURITY_ALARM_AUDIO = "/sounds/security_alarm.mp3";
+
+type DrawingMode = "restricted" | "direction" | "tripwire";
+type DrawingPointsByType = Record<DrawingMode, Array<[number, number]>>;
+
+type AnnotationAction =
+  | { type: "point-added"; mode: DrawingMode }
+  | { type: "zone-added"; zone: ZoneData }
+  | { type: "zone-deleted"; zone: ZoneData; index: number; persisted: boolean };
+
+const cloneZones = (zones: ZoneData[]) =>
+  zones.map((zone) => ({
+    ...zone,
+    polygon_coords: zone.polygon_coords.map(
+      ([x, y]) => [x, y] as [number, number],
+    ),
+  }));
+
+const toZoneCreatePayload = (zone: ZoneData) => ({
+  zone_name: zone.zone_name,
+  zone_type: zone.zone_type,
+  polygon_coords: zone.polygon_coords,
+  video_width: zone.video_width,
+  video_height: zone.video_height,
+});
+
+const zoneTypeForDrawingMode = (mode: DrawingMode) =>
+  mode === "restricted"
+    ? "Restricted Area"
+    : mode === "direction"
+      ? "Direction"
+      : "Tripwire";
+
+const emptyDrawingPoints = (): DrawingPointsByType => ({
+  restricted: [],
+  direction: [],
+  tripwire: [],
+});
 
 const alertBadgeLabel = (alert: AlertData) => {
   const typeLabel = alert.type?.trim();
@@ -112,15 +148,25 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [drawingPoints, setDrawingPoints] = useState<Array<[number, number]>>(
-    [],
-  );
+  const [drawingPointsByType, setDrawingPointsByType] =
+    useState<DrawingPointsByType>(emptyDrawingPoints);
   const [savedZones, setSavedZones] = useState<ZoneData[]>([]);
-  const [drawingMode, setDrawingMode] = useState<
-    "restricted" | "direction" | "tripwire"
-  >("restricted");
+  const [editingZones, setEditingZones] = useState<ZoneData[]>([]);
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>("restricted");
   const [drawingInstructions, setDrawingInstructions] = useState<string>("");
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null);
+  const [annotationHistory, setAnnotationHistory] = useState<
+    AnnotationAction[]
+  >([]);
+  const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
+  const zoneRequestVersionRef = useRef(0);
+  const editorCameraRef = useRef<string | null>(null);
+  const editorActive = isDrawing;
+  const canvasZones = editorActive ? editingZones : savedZones;
+  const drawingPoints = drawingPointsByType[drawingMode];
+  const filteredSavedZones = editingZones.filter(
+    (zone) => zone.zone_type === zoneTypeForDrawingMode(drawingMode),
+  );
 
   // --- AI Operations ---
   const stopCameraSession = useCallback(async (id: string | null) => {
@@ -164,13 +210,33 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     selectedCameraRef.current = selectedCamera;
   }, [selectedCamera]);
 
-  const fetchZones = useCallback(async (cameraId: string) => {
+  const fetchZones = useCallback(async (cameraId: string, syncDraft = true) => {
+    const requestVersion = ++zoneRequestVersionRef.current;
     try {
       const response = await cameraService.getZones(cameraId);
-      setSavedZones(response.data as ZoneData[]);
+      if (
+        requestVersion !== zoneRequestVersionRef.current ||
+        selectedCameraRef.current !== cameraId
+      ) {
+        return null;
+      }
+      const zones = response.data as ZoneData[];
+      setSavedZones(zones);
+      if (syncDraft) {
+        setEditingZones(cloneZones(zones));
+      }
+      return zones;
     } catch (error) {
+      if (
+        requestVersion !== zoneRequestVersionRef.current ||
+        selectedCameraRef.current !== cameraId
+      ) {
+        return null;
+      }
       console.error("Failed to load zones:", error);
       setSavedZones([]);
+      setEditingZones([]);
+      return null;
     }
   }, []);
 
@@ -610,7 +676,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       ctx.stroke(path);
     };
 
-    savedZones.forEach((zone) =>
+    canvasZones.forEach((zone) =>
       drawZone(zone, zone.zone_type.toLowerCase().includes("restricted")),
     );
 
@@ -679,7 +745,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     drawingPoints,
     drawingMode,
     hoverPoint,
-    savedZones,
+    canvasZones,
     getSavedZoneCanvasCoords,
     mapNormalizedToCanvasCoords,
   ]);
@@ -726,118 +792,294 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
 
   useEffect(() => {
     if (selectedCamera) {
+      editorCameraRef.current = selectedCamera;
+      setIsDrawing(false);
+      setIsSidebarOpen(true);
+      setDrawingPointsByType(emptyDrawingPoints());
+      setAnnotationHistory([]);
+      setEditingZones([]);
       void fetchZones(selectedCamera);
     } else {
+      editorCameraRef.current = null;
       setSavedZones([]);
+      setEditingZones([]);
+      setDrawingPointsByType(emptyDrawingPoints());
+      setAnnotationHistory([]);
     }
   }, [selectedCamera, fetchZones]);
 
   const enterDrawingMode = useCallback(() => {
-    setDrawingPoints([]);
+    const cameraId = selectedCameraRef.current;
+    if (!cameraId) return;
+    editorCameraRef.current = cameraId;
+    setEditingZones(cloneZones(savedZones));
+    setDrawingPointsByType(emptyDrawingPoints());
+    setAnnotationHistory([]);
     setDrawingMode("restricted");
     setIsDrawing(true);
     setIsSidebarOpen(true);
     setDrawingInstructions(t("dashboard.drawingInstructions.initial"));
-  }, [t]);
+  }, [savedZones, t]);
+
+  const startNewRegion = useCallback(() => {
+    if (!selectedCameraRef.current) return;
+    setDrawingPointsByType((prev) => ({
+      ...prev,
+      [drawingMode]: [],
+    }));
+    setAnnotationHistory((prev) =>
+      prev.filter(
+        (action) =>
+          action.type !== "point-added" || action.mode !== drawingMode,
+      ),
+    );
+    setIsDrawing(true);
+    setIsSidebarOpen(true);
+    setHoverPoint(null);
+    setDrawingInstructions(t("dashboard.drawingInstructions.initial"));
+  }, [drawingMode, t]);
 
   const exitDrawingMode = useCallback(() => {
     setIsDrawing(false);
+    setIsSidebarOpen(true);
+    setEditingZones(cloneZones(savedZones));
+    setDrawingPointsByType(emptyDrawingPoints());
+    setAnnotationHistory([]);
     setDrawingInstructions("");
     setHoverPoint(null);
-  }, []);
+  }, [savedZones]);
 
-  const undoLastPoint = useCallback(() => {
-    setDrawingPoints((prev) => prev.slice(0, -1));
+  const undoLastAction = useCallback(async () => {
+    const lastAction = annotationHistory[annotationHistory.length - 1];
+    if (!lastAction) return;
+
+    if (lastAction.type === "point-added") {
+      setDrawingPointsByType((prev) => ({
+        ...prev,
+        [lastAction.mode]: prev[lastAction.mode].slice(0, -1),
+      }));
+    } else if (lastAction.type === "zone-added") {
+      setEditingZones((prev) =>
+        prev.filter((zone) => zone.zone_id !== lastAction.zone.zone_id),
+      );
+    } else {
+      let restoredZone = cloneZones([lastAction.zone])[0];
+      if (lastAction.persisted && selectedCamera) {
+        try {
+          const response = await cameraService.addZone(
+            selectedCamera,
+            toZoneCreatePayload(restoredZone),
+          );
+          restoredZone = response.data;
+          await fetchZones(selectedCamera, false);
+        } catch (error) {
+          console.error("Failed to restore zone:", error);
+          return;
+        }
+      }
+      setEditingZones((prev) => {
+        const next = [...prev];
+        next.splice(lastAction.index, 0, restoredZone);
+        return next;
+      });
+    }
+    setAnnotationHistory((prev) => prev.slice(0, -1));
     setDrawingInstructions(t("dashboard.drawingInstructions.removed"));
     setTimeout(
       () => setDrawingInstructions(t("dashboard.drawingInstructions.initial")),
       1800,
     );
-  }, [t]);
-
-  const clearDrawing = useCallback(() => {
-    setDrawingPoints([]);
-    setDrawingInstructions(t("dashboard.drawingInstructions.cleared"));
-    setTimeout(() => setDrawingInstructions(""), 1800);
-  }, [t]);
+  }, [annotationHistory, fetchZones, selectedCamera, t]);
 
   const deleteZone = useCallback(
     async (zoneId: string) => {
-      if (!selectedCamera) return;
-      try {
-        await cameraService.deleteZone(selectedCamera, zoneId);
-        await fetchZones(selectedCamera);
-      } catch (err) {
-        console.error("Failed to delete zone:", err);
+      const index = editingZones.findIndex((zone) => zone.zone_id === zoneId);
+      if (index < 0) return;
+      const zone = editingZones[index];
+      const persisted = !zone.zone_id.startsWith("draft-");
+      if (persisted && selectedCamera) {
+        try {
+          await cameraService.deleteZone(selectedCamera, zoneId);
+          await fetchZones(selectedCamera, false);
+        } catch (error) {
+          console.error("Failed to delete zone:", error);
+          return;
+        }
       }
+      setEditingZones((prev) => prev.filter((item) => item.zone_id !== zoneId));
+      if (persisted) {
+        setSavedZones((prev) => prev.filter((item) => item.zone_id !== zoneId));
+      }
+      setAnnotationHistory((history) => [
+        ...history,
+        {
+          type: "zone-deleted",
+          zone: cloneZones([zone])[0],
+          index,
+          persisted,
+        },
+      ]);
     },
-    [fetchZones, selectedCamera],
+    [editingZones, fetchZones, selectedCamera],
   );
 
-  const saveDrawing = useCallback(async () => {
+  const saveAnnotations = useCallback(async () => {
+    if (!selectedCamera || isSavingAnnotations) return;
+    setIsSavingAnnotations(true);
     try {
-      setIsDrawing(false);
       setDrawingInstructions(
         t("dashboard.drawingInstructions.saving") ||
           t("dashboard.drawingInstructions.saved"),
       );
-      const vid = videoRef.current;
-      if (!selectedCamera) throw new Error("No camera selected");
-      if (!vid) throw new Error("No video available");
+      const selectedZoneType = zoneTypeForDrawingMode(drawingMode);
+      const savedForMode = savedZones.filter(
+        (zone) => zone.zone_type === selectedZoneType,
+      );
+      const editingForMode = editingZones.filter(
+        (zone) => zone.zone_type === selectedZoneType,
+      );
+      const savedIds = new Set(savedForMode.map((zone) => zone.zone_id));
+      const editingIds = new Set(editingForMode.map((zone) => zone.zone_id));
+      const zonesToDelete = savedForMode.filter(
+        (zone) => !editingIds.has(zone.zone_id),
+      );
+      const zonesToCreate = editingForMode.filter(
+        (zone) => !savedIds.has(zone.zone_id),
+      );
 
-      const nativeW = (vid as HTMLImageElement).naturalWidth;
-      const nativeH = (vid as HTMLImageElement).naturalHeight;
-      const zoneType =
-        drawingMode === "restricted"
-          ? "Restricted Area"
-          : drawingMode === "direction"
-            ? "Direction"
-            : "Tripwire";
-      const zoneName = `${t("dashboard.inCameraAnnotation")} - ${zoneType}`;
-
-      const payload: ZoneCreateData = {
-        zone_name: zoneName,
-        zone_type: zoneType,
-        polygon_coords: drawingPoints,
-        video_width: nativeW || undefined,
-        video_height: nativeH || undefined,
-      };
-
-      try {
-        await cameraService.addZone(selectedCamera, payload);
-        setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
-        await fetchZones(selectedCamera);
-      } catch (err) {
-        console.error("Failed to save zone:", err);
-        setDrawingInstructions(
-          t("dashboard.drawingInstructions.saveFailed") ||
-            "Failed to save zone",
+      for (const zone of zonesToDelete) {
+        await cameraService.deleteZone(selectedCamera, zone.zone_id);
+      }
+      for (const zone of zonesToCreate) {
+        const response = await cameraService.addZone(
+          selectedCamera,
+          toZoneCreatePayload(zone),
+        );
+        setEditingZones((prev) =>
+          prev.map((item) =>
+            item.zone_id === zone.zone_id ? response.data : item,
+          ),
         );
       }
+      const freshZones = await fetchZones(selectedCamera, false);
+      if (!freshZones) {
+        throw new Error("Unable to refresh saved annotations");
+      }
+      const freshForMode = freshZones.filter(
+        (zone) => zone.zone_type === selectedZoneType,
+      );
+      setEditingZones((prev) => [
+        ...prev.filter((zone) => zone.zone_type !== selectedZoneType),
+        ...cloneZones(freshForMode),
+      ]);
+      setDrawingPointsByType((prev) => ({
+        ...prev,
+        [drawingMode]: [],
+      }));
+      setAnnotationHistory((prev) =>
+        prev.filter(
+          (action) =>
+            action.type !== "point-added" || action.mode !== drawingMode,
+        ),
+      );
+      setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
+    } catch (err) {
+      console.error("Failed to save annotations:", err);
+      setDrawingInstructions(
+        t("dashboard.drawingInstructions.saveFailed") ||
+          "Failed to save annotations",
+      );
     } finally {
+      setIsSavingAnnotations(false);
       setHoverPoint(null);
-      setIsSidebarOpen(false);
       setTimeout(() => setDrawingInstructions(""), 2200);
     }
-  }, [t, drawingPoints, drawingMode, selectedCamera, fetchZones]);
+  }, [
+    drawingMode,
+    editingZones,
+    fetchZones,
+    isSavingAnnotations,
+    savedZones,
+    selectedCamera,
+    t,
+  ]);
+
+  const finishDrawing = useCallback(
+    (points = drawingPoints) => {
+      if (points.length === 0 || !selectedCamera) return;
+      const vid = videoRef.current;
+      if (!vid) return;
+      const zoneType = zoneTypeForDrawingMode(drawingMode);
+      const pointRequirement = drawingMode === "restricted" ? 3 : 2;
+      if (
+        drawingMode === "restricted"
+          ? points.length < pointRequirement
+          : points.length !== pointRequirement
+      ) {
+        setDrawingInstructions(
+          drawingMode === "restricted"
+            ? "Restricted Area requires at least 3 points."
+            : `${zoneType} requires exactly 2 points.`,
+        );
+        return;
+      }
+      const zone = {
+        zone_id: `draft-${crypto.randomUUID()}`,
+        zone_name: `${t("dashboard.inCameraAnnotation")} - ${zoneType}`,
+        zone_type: zoneType,
+        polygon_coords: cloneZones([
+          {
+            zone_id: "draft",
+            zone_name: "draft",
+            zone_type: zoneType,
+            polygon_coords: points,
+          },
+        ])[0].polygon_coords,
+        video_width: vid.naturalWidth || undefined,
+        video_height: vid.naturalHeight || undefined,
+      } satisfies ZoneData;
+      setEditingZones((prev) => [...prev, zone]);
+      setAnnotationHistory((prev) => [
+        ...prev.filter(
+          (action) =>
+            action.type !== "point-added" || action.mode !== drawingMode,
+        ),
+        { type: "zone-added", zone: cloneZones([zone])[0] },
+      ]);
+      setDrawingPointsByType((prev) => ({
+        ...prev,
+        [drawingMode]: [],
+      }));
+      setHoverPoint(null);
+      setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
+    },
+    [drawingMode, drawingPoints, selectedCamera, t],
+  );
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
     const normalized = getNormalizedVideoCoords(event);
     if (!normalized) return;
-    setDrawingPoints((prev) => [...prev, normalized]);
+    setDrawingPointsByType((prev) => ({
+      ...prev,
+      [drawingMode]: [...prev[drawingMode], normalized],
+    }));
+    setAnnotationHistory((prev) => [
+      ...prev,
+      { type: "point-added", mode: drawingMode },
+    ]);
   };
 
   const onCanvasDoubleClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
     event.preventDefault();
-    saveDrawing();
+    finishDrawing(drawingPoints.slice(0, -1));
   };
 
   const onCanvasContextMenu = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
     event.preventDefault();
-    undoLastPoint();
+    undoLastAction();
   };
 
   const onCanvasMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
@@ -871,17 +1113,17 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         exitDrawingMode();
       }
       if (event.key === "Enter") {
-        saveDrawing();
+        finishDrawing();
       }
       if (event.key === "Backspace") {
         event.preventDefault();
-        undoLastPoint();
+        undoLastAction();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isDrawing, saveDrawing, exitDrawingMode, undoLastPoint]);
+  }, [isDrawing, finishDrawing, exitDrawingMode, undoLastAction]);
 
   return (
     <div className="min-h-screen bg-ag-dark text-ag-primary p-2 md:p-3 font-sans overflow-hidden">
@@ -1165,30 +1407,41 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       {drawingInstructions}
                     </p>
 
-                    {/* Points Counter */}
-                    <div className="text-[11px] text-gray-400">
-                      {t("common.points")}:{" "}
-                      <span className="text-white font-bold">
-                        {drawingPoints.length}
-                      </span>
+                    {/* Current drawing points */}
+                    <div className="space-y-1 text-[11px] text-gray-400">
+                      <div className="uppercase tracking-[0.2em]">
+                        Current Drawing
+                      </div>
+                      <div>
+                        {t("common.points")}:{" "}
+                        <span className="text-white font-bold">
+                          {drawingPoints.length}
+                        </span>
+                      </div>
                     </div>
 
-                    {savedZones.length > 0 ? (
-                      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-white">
-                        <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-gray-400">
-                          <span>{t("dashboard.savedZones")}</span>
-                          <span className="text-white/70">
-                            {savedZones.length}
-                          </span>
-                        </div>
+                    <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-white">
+                      <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-gray-400">
+                        <span>{t("dashboard.savedZones")}</span>
+                        <span className="text-white/70">
+                          {filteredSavedZones.length}
+                        </span>
+                      </div>
+                      {filteredSavedZones.length > 0 ? (
                         <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                          {savedZones.map((zone) => (
+                          {filteredSavedZones.map((zone) => (
                             <div
                               key={zone.zone_id}
                               className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2"
                             >
                               <div className="min-w-0 text-[11px] text-white/90 overflow-hidden text-ellipsis whitespace-nowrap">
-                                {zone.zone_name}
+                                <div className="overflow-hidden text-ellipsis whitespace-nowrap">
+                                  {zone.zone_name}
+                                </div>
+                                <div className="text-[10px] text-gray-400">
+                                  {t("common.points")}:{" "}
+                                  {zone.polygon_coords.length}
+                                </div>
                               </div>
                               <button
                                 onClick={() => deleteZone(zone.zone_id)}
@@ -1199,25 +1452,26 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                             </div>
                           ))}
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
 
                     {/* Action Buttons */}
                     <div className="flex flex-wrap gap-2">
                       <button
-                        onClick={undoLastPoint}
+                        onClick={startNewRegion}
+                        className="rounded-full border border-ag-success/50 bg-ag-success/10 px-3 py-1 text-[11px] text-ag-success hover:bg-ag-success/20 transition cursor-pointer"
+                      >
+                        Add Region
+                      </button>
+                      <button
+                        onClick={undoLastAction}
                         className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
                       >
                         {t("common.undo")}
                       </button>
                       <button
-                        onClick={clearDrawing}
-                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
-                      >
-                        {t("common.clear")}
-                      </button>
-                      <button
-                        onClick={saveDrawing}
+                        onClick={saveAnnotations}
+                        disabled={isSavingAnnotations}
                         className="rounded-full bg-ag-success px-4 py-1.5 text-[11px] font-semibold text-black hover:bg-lime-400 transition cursor-pointer ml-auto"
                       >
                         {t("common.save")}
