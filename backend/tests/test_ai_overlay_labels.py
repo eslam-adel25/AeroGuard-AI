@@ -54,6 +54,48 @@ def test_bag_owner_requires_multiple_consecutive_frames_to_assign():
     assert third_assignment[88] == 14
 
 
+def test_multiple_bags_share_the_owners_persistent_person_id():
+    processor = AIProcessor.__new__(AIProcessor)
+    processor.bag_owner_state = {}
+    processor.bag_owner_person_state = {}
+    processor.bag_owner_evidence = {}
+    processor.bag_owner_status = {}
+
+    person = SimpleNamespace(track_id=14, bbox=[10, 10, 50, 120], class_name="person")
+    first_bag = SimpleNamespace(track_id=88, bbox=[20, 90, 60, 140], class_name="bag")
+    second_bag = SimpleNamespace(track_id=89, bbox=[60, 90, 100, 140], class_name="bag")
+
+    for _ in range(3):
+        owner_map = processor._assign_bag_owner(
+            "cam-1",
+            [person],
+            [first_bag, second_bag],
+            {14: 6},
+        )
+
+    assert owner_map == {88: 14, 89: 14}
+    assert processor.bag_owner_person_state["cam-1"] == {88: 6, 89: 6}
+
+
+def test_bag_persistent_owner_id_survives_owner_track_loss():
+    processor = AIProcessor.__new__(AIProcessor)
+    processor.bag_owner_state = {}
+    processor.bag_owner_person_state = {}
+    processor.bag_owner_evidence = {}
+    processor.bag_owner_status = {}
+
+    person = SimpleNamespace(track_id=14, bbox=[10, 10, 50, 120], class_name="person")
+    bag = SimpleNamespace(track_id=88, bbox=[20, 90, 60, 140], class_name="bag")
+
+    for _ in range(3):
+        processor._assign_bag_owner("cam-1", [person], [bag], {14: 6})
+    for _ in range(3):
+        processor._assign_bag_owner("cam-1", [], [bag], {})
+
+    assert processor.bag_owner_person_state["cam-1"][88] == 6
+    assert processor.bag_owner_status["cam-1"][88] == "temporary_unattended"
+
+
 def test_bag_owner_is_lost_after_consecutive_missing_frames():
     processor = AIProcessor.__new__(AIProcessor)
     processor.bag_owner_state = {}

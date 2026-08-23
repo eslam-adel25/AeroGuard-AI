@@ -130,6 +130,7 @@ class AIProcessor:
         self.display_id_state = {}  # camera_id -> {internal_track_id: display_id}
         self.person_identity_registries = {}  # camera_id -> session-only person identities
         self.bag_owner_state = {}  # camera_id -> {bag_internal_id: owner_internal_id}
+        self.bag_owner_person_state = {}  # camera_id -> {bag_internal_id: persistent_person_id}
         self.bag_owner_evidence = {}  # camera_id -> {bag_internal_id: {candidate_owner, confirm_streak, missing_streak, confirmed_owner}}
         self.bag_owner_status = {}  # camera_id -> {bag_internal_id: "owned" | "lost" | "unknown"}
         self.active_critical_alerts = {}  # camera_id -> [alert_timestamps]
@@ -366,12 +367,14 @@ class AIProcessor:
         ]
         return registry.assign(person_tracks, frame)
 
-    def _assign_bag_owner(self, camera_id, person_tracks, bag_tracks):
+    def _assign_bag_owner(self, camera_id, person_tracks, bag_tracks, person_ids=None):
         """Assign a stable owner ID to bags for overlay display without changing tracker internals."""
         camera_key = str(camera_id)
         bag_owner_state = getattr(self, "bag_owner_state", {}).setdefault(camera_key, {})
+        bag_owner_person_state = getattr(self, "bag_owner_person_state", {}).setdefault(camera_key, {})
         bag_owner_evidence = getattr(self, "bag_owner_evidence", {}).setdefault(camera_key, {})
         bag_owner_status = getattr(self, "bag_owner_status", {}).setdefault(camera_key, {})
+        person_ids = person_ids or {}
         now = time.time()
 
         person_candidates = []
@@ -396,6 +399,7 @@ class AIProcessor:
                     "confirm_streak": 0,
                     "missing_streak": 0,
                     "confirmed_owner": bag_owner_state.get(bag_id),
+                    "confirmed_owner_person_id": bag_owner_person_state.get(bag_id),
                     "state": "unknown",
                     "state_started_at": None,
                 },
@@ -454,9 +458,12 @@ class AIProcessor:
                     evidence["confirm_streak"] = max(int(evidence.get("confirm_streak", 0)), OWNERSHIP_ASSIGNMENT_REQUIRED_FRAMES)
                     evidence["candidate_owner"] = best_owner
                     evidence["confirmed_owner"] = best_owner
+                    evidence["confirmed_owner_person_id"] = person_ids.get(best_owner)
                     evidence["state"] = "owned"
                     evidence["state_started_at"] = None
                     bag_owner_state[bag_id] = best_owner
+                    if evidence["confirmed_owner_person_id"] is not None:
+                        bag_owner_person_state[bag_id] = evidence["confirmed_owner_person_id"]
                     owner_map[bag_id] = best_owner
                     bag_owner_status[bag_id] = "owned"
                 else:
@@ -469,9 +476,12 @@ class AIProcessor:
 
                     if evidence["confirm_streak"] >= OWNERSHIP_ASSIGNMENT_REQUIRED_FRAMES:
                         evidence["confirmed_owner"] = best_owner
+                        evidence["confirmed_owner_person_id"] = person_ids.get(best_owner)
                         evidence["state"] = "owned"
                         evidence["state_started_at"] = None
                         bag_owner_state[bag_id] = best_owner
+                        if evidence["confirmed_owner_person_id"] is not None:
+                            bag_owner_person_state[bag_id] = evidence["confirmed_owner_person_id"]
                         owner_map[bag_id] = best_owner
                         bag_owner_status[bag_id] = "owned"
                     else:
@@ -483,6 +493,9 @@ class AIProcessor:
         for stale_bag_id in list(bag_owner_state.keys()):
             if stale_bag_id not in visible_bag_ids:
                 del bag_owner_state[stale_bag_id]
+        for stale_bag_id in list(bag_owner_person_state.keys()):
+            if stale_bag_id not in visible_bag_ids:
+                del bag_owner_person_state[stale_bag_id]
         for stale_bag_id in list(bag_owner_evidence.keys()):
             if stale_bag_id not in visible_bag_ids:
                 del bag_owner_evidence[stale_bag_id]
@@ -492,12 +505,15 @@ class AIProcessor:
 
         if getattr(self, "bag_owner_state", None) is None:
             self.bag_owner_state = {}
+        if getattr(self, "bag_owner_person_state", None) is None:
+            self.bag_owner_person_state = {}
         if getattr(self, "bag_owner_evidence", None) is None:
             self.bag_owner_evidence = {}
         if getattr(self, "bag_owner_status", None) is None:
             self.bag_owner_status = {}
 
         self.bag_owner_state[camera_key] = bag_owner_state
+        self.bag_owner_person_state[camera_key] = bag_owner_person_state
         self.bag_owner_evidence[camera_key] = bag_owner_evidence
         self.bag_owner_status[camera_key] = bag_owner_status
 
@@ -829,7 +845,12 @@ class AIProcessor:
                 alarm_sources = set()
 
                 person_ids = self._assign_person_ids(camera_id, active_tracks, frame)
-                bag_owner_map = self._assign_bag_owner(camera_id, [t for t in active_tracks if t.class_name == "person"], [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}])
+                bag_owner_map = self._assign_bag_owner(
+                    camera_id,
+                    [t for t in active_tracks if t.class_name == "person"],
+                    [t for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"}],
+                    person_ids,
+                )
                 ownership_state = self.bag_owner_status.get(str(camera_id), {})
 
                 # Periodically refresh zones from DB so saved annotations are applied to live inference
@@ -865,11 +886,13 @@ class AIProcessor:
                     bag_state = None
                     if label_name in {"bag", "backpack", "suitcase"}:
                         overlay_owner_id = bag_owner_map.get(obj_id)
+                        owner_person_id = self.bag_owner_person_state.get(str(camera_id), {}).get(obj_id)
                         bag_evidence = self.bag_owner_evidence.get(str(camera_id), {}).get(obj_id, {})
                         bag_state = bag_evidence.get("state", ownership_state.get(obj_id, "unknown"))
                         if overlay_owner_id is not None:
                             box_color = (0, 255, 0)
-                            object_label = f"Owned ID {int(overlay_owner_id):03d} Bag"
+                            owner_label_id = owner_person_id if owner_person_id is not None else overlay_owner_id
+                            object_label = f"Owned ID {int(owner_label_id):03d} Bag"
                             display_label = "OWNED_BAG"
                             status = "NORMAL"
                             if bag_state in {"temporary_unattended", "unattended"}:
@@ -881,13 +904,21 @@ class AIProcessor:
                             if started_at is not None:
                                 remaining = max(0, int(UNATTENDED_TIMEOUT_SECONDS - (time.time() - started_at)))
                             box_color = (0, 255, 255)
-                            object_label = f"LEFT {remaining}s"
+                            object_label = (
+                                f"Owned ID {int(owner_person_id):03d} Bag\nLEFT {remaining}s"
+                                if owner_person_id is not None
+                                else f"LEFT {remaining}s"
+                            )
                             display_label = "TEMP_UNATTENDED"
                             status = "NORMAL"
                             ownership_state[obj_id] = "temporary_unattended"
                         elif bag_state == "unattended":
                             box_color = (0, 0, 255)
-                            object_label = "UNATTENDED"
+                            object_label = (
+                                f"Owned ID {int(owner_person_id):03d} Bag\nUNATTENDED"
+                                if owner_person_id is not None
+                                else "UNATTENDED"
+                            )
                             display_label = "UNATTENDED"
                             status = "DANGER"
                             ownership_state[obj_id] = "unattended"
