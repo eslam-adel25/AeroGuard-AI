@@ -1125,6 +1125,107 @@ const en = {
       },
     },
   },
+  contactPage: {
+    pageTitle: "Contact Us | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "Contact Us",
+    intro:
+      "Have a question, want to learn more about AeroGuard AI, or need to get in touch with the project team? Choose the contact method that works best for you.",
+    visitSupport: "Visit Support",
+    primaryEyebrow: "Direct Contact",
+    primaryTitle: "Get in Touch",
+    emailAeroGuard: "Email AeroGuard",
+    call: "Call",
+    secondaryEyebrow: "Stay Connected",
+    secondaryTitle: "More Ways to Connect",
+    sendEmail: "Send Email",
+    methodsTitle: "Contact Methods",
+    methods: {
+      email: {
+        title: "Email",
+        description:
+          "For general questions, project inquiries, technical questions, and direct communication.",
+        action: "Send Email",
+      },
+      phone: {
+        title: "Phone",
+        description:
+          "For direct contact regarding AeroGuard AI and project-related inquiries.",
+        action: "Call",
+      },
+      github: {
+        title: "GitHub",
+        description:
+          "Explore the AeroGuard project and related development work.",
+        action: "View GitHub",
+      },
+      linkedin: {
+        title: "LinkedIn",
+        description:
+          "Connect professionally and learn more about the project team.",
+        action: "View LinkedIn",
+      },
+      facebook: {
+        title: "Facebook",
+        description: "Connect through the official Facebook profile.",
+        action: "View Facebook",
+      },
+    },
+    reasonsTitle: "Contact Reasons",
+    reasons: {
+      general: {
+        title: "General Inquiry",
+        text: "Questions about AeroGuard AI, its purpose, or its capabilities.",
+      },
+      technical: {
+        title: "Technical Question",
+        text: "Questions about configuration, operation, or technical behavior. For operational troubleshooting, visit the Support Center.",
+      },
+      project: {
+        title: "Project Information",
+        text: "Questions about the project, technology stack, capabilities, or deployment.",
+      },
+      collaboration: {
+        title: "Collaboration / Professional Contact",
+        text: "Professional communication or collaboration-related inquiries.",
+      },
+    },
+    supportTitle: "Need help with an existing problem?",
+    supportText:
+      "For camera, RTSP, AI, alert, notification, annotation, or account issues, visit the AeroGuard Support Center.",
+    supportButton: "Visit Support Center",
+    securityTitle: "Security Notice",
+    securityText:
+      "Never include passwords, RTSP passwords, API keys, authentication tokens, private credentials, or other secrets in contact messages. Remove sensitive information from screenshots first.",
+    faqTitle: "Contact FAQ",
+    faq: {
+      howContact: {
+        question: "How can I contact AeroGuard?",
+        answer:
+          "Email Eslam.Adel2596@gmail.com or use the official social and contact links on this page.",
+      },
+      technicalHelp: {
+        question: "How can I get technical help?",
+        answer:
+          "Visit the Support Center for operational troubleshooting guides.",
+      },
+      github: {
+        question: "Can I contact AeroGuard through GitHub?",
+        answer: "Yes. The official GitHub link is available on this page.",
+      },
+      linkedinFacebook: {
+        question: "Can I contact AeroGuard through LinkedIn or Facebook?",
+        answer: "Yes. The official profiles are provided on this page.",
+      },
+      call: {
+        question: "Can I call directly?",
+        answer:
+          "Yes. The official contact phone number is +201093397961. No response-time guarantee is implied.",
+      },
+    },
+    summaryTitle: "Official Contact Information",
+    labels: { email: "Email", phone: "Phone" },
+  },
   settings: {
     title: "System Settings",
     subtitle: "Core Intelligence & Infrastructure Parameters",

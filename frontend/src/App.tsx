@@ -17,6 +17,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import Documentation from "./pages/Documentation";
 import Support from "./pages/Support";
+import Contact from "./pages/Contact";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
@@ -661,6 +662,7 @@ function App() {
         <Route path="/terms-of-service" element={<TermsOfService />} />
         <Route path="/docs" element={<Documentation />} />
         <Route path="/support" element={<Support />} />
+        <Route path="/contact" element={<Contact />} />
         <Route
           path="/"
           element={

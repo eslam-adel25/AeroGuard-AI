@@ -216,9 +216,9 @@ const PrivacyPolicy = () => {
             <Link to="/support" className="transition-colors hover:text-white">
               {t("profile.support")}
             </Link>
-            <button className="transition-colors hover:text-white">
+            <Link to="/contact" className="transition-colors hover:text-white">
               {t("profile.contact")}
-            </button>
+            </Link>
           </div>
         </div>
       </footer>

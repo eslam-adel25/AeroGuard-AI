@@ -476,7 +476,9 @@ const Documentation = () => {
             <Link to="/support" className="hover:text-white">
               {t("profile.support")}
             </Link>
-            <button className="hover:text-white">{t("profile.contact")}</button>
+            <Link to="/contact" className="hover:text-white">
+              {t("profile.contact")}
+            </Link>
           </div>
         </div>
       </footer>

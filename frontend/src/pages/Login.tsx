@@ -255,9 +255,9 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
             <Link to="/support" className="hover:text-white transition-colors">
               Support
             </Link>
-            <button className="hover:text-white transition-colors">
+            <Link to="/contact" className="hover:text-white transition-colors">
               Contact
-            </button>
+            </Link>
           </div>
         </div>
       </footer>

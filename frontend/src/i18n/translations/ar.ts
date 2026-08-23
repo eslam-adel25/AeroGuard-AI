@@ -1078,6 +1078,104 @@ const ar = {
       },
     },
   },
+  contactPage: {
+    pageTitle: "تواصل معنا | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "تواصل معنا",
+    intro:
+      "هل لديك سؤال أو تريد معرفة المزيد عن AeroGuard AI أو التواصل مع فريق المشروع؟ اختر وسيلة التواصل المناسبة لك.",
+    visitSupport: "زيارة الدعم",
+    primaryEyebrow: "تواصل مباشر",
+    primaryTitle: "تواصل معنا",
+    emailAeroGuard: "راسل AeroGuard",
+    call: "اتصال",
+    secondaryEyebrow: "ابقَ على تواصل",
+    secondaryTitle: "طرق أخرى للتواصل",
+    sendEmail: "إرسال بريد",
+    methodsTitle: "وسائل التواصل",
+    methods: {
+      email: {
+        title: "البريد الإلكتروني",
+        description:
+          "للأسئلة العامة واستفسارات المشروع والأسئلة التقنية والتواصل المباشر.",
+        action: "إرسال بريد",
+      },
+      phone: {
+        title: "الهاتف",
+        description:
+          "للتواصل المباشر بشأن AeroGuard AI والاستفسارات المتعلقة بالمشروع.",
+        action: "اتصال",
+      },
+      github: {
+        title: "GitHub",
+        description: "استكشف مشروع AeroGuard وأعمال التطوير المرتبطة به.",
+        action: "عرض GitHub",
+      },
+      linkedin: {
+        title: "LinkedIn",
+        description: "تواصل مهنياً وتعرّف على فريق المشروع.",
+        action: "عرض LinkedIn",
+      },
+      facebook: {
+        title: "Facebook",
+        description: "تواصل عبر الملف الرسمي على Facebook.",
+        action: "عرض Facebook",
+      },
+    },
+    reasonsTitle: "أسباب التواصل",
+    reasons: {
+      general: {
+        title: "استفسار عام",
+        text: "أسئلة حول AeroGuard AI أو هدفها أو قدراتها.",
+      },
+      technical: {
+        title: "سؤال تقني",
+        text: "أسئلة حول الإعداد أو التشغيل أو السلوك التقني. لاستكشاف المشكلات التشغيلية، زر مركز الدعم.",
+      },
+      project: {
+        title: "معلومات المشروع",
+        text: "أسئلة حول المشروع أو التقنيات أو القدرات أو النشر.",
+      },
+      collaboration: {
+        title: "تعاون / تواصل مهني",
+        text: "التواصل المهني أو الاستفسارات المتعلقة بالتعاون.",
+      },
+    },
+    supportTitle: "هل تحتاج مساعدة في مشكلة قائمة؟",
+    supportText:
+      "لمشكلات الكاميرات أو RTSP أو الذكاء الاصطناعي أو التنبيهات أو الإشعارات أو التعليقات أو الحساب، زر مركز دعم AeroGuard.",
+    supportButton: "زيارة مركز الدعم",
+    securityTitle: "تنبيه أمني",
+    securityText:
+      "لا تدرج كلمات المرور أو كلمات مرور RTSP أو مفاتيح API أو رموز المصادقة أو بيانات الاعتماد الخاصة أو أي أسرار في رسائل التواصل. أزل المعلومات الحساسة من لقطات الشاشة أولاً.",
+    faqTitle: "الأسئلة الشائعة للتواصل",
+    faq: {
+      howContact: {
+        question: "كيف أتواصل مع AeroGuard؟",
+        answer:
+          "أرسل بريداً إلى Eslam.Adel2596@gmail.com أو استخدم روابط التواصل والملفات الرسمية في هذه الصفحة.",
+      },
+      technicalHelp: {
+        question: "كيف أحصل على مساعدة تقنية؟",
+        answer: "زر مركز الدعم للحصول على أدلة استكشاف المشكلات التشغيلية.",
+      },
+      github: {
+        question: "هل يمكنني التواصل عبر GitHub؟",
+        answer: "نعم، رابط GitHub الرسمي متوفر في هذه الصفحة.",
+      },
+      linkedinFacebook: {
+        question: "هل يمكنني التواصل عبر LinkedIn أو Facebook؟",
+        answer: "نعم، الملفات الرسمية متوفرة في هذه الصفحة.",
+      },
+      call: {
+        question: "هل يمكنني الاتصال مباشرة؟",
+        answer:
+          "نعم، رقم الهاتف الرسمي هو +201093397961، ولا يوجد أي ضمان لوقت الاستجابة.",
+      },
+    },
+    summaryTitle: "معلومات التواصل الرسمية",
+    labels: { email: "البريد الإلكتروني", phone: "الهاتف" },
+  },
   settings: {
     title: "إعدادات النظام",
     subtitle: "معلمات الذكاء الاصطناعي والبنية التحتية الأساسية",
