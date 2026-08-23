@@ -964,10 +964,6 @@ const en = {
     contactTitle: "Contact Support",
     contactText:
       "If the troubleshooting guides do not resolve the problem, contact the official AeroGuard support channel:",
-    reportTitle: "Report a Problem",
-    reportText:
-      "Use the email link with the subject AeroGuard Support Request. Include the affected feature, camera details, time, visible error, steps tried, and a redacted screenshot or browser details where relevant.",
-    reportButton: "Report a Problem",
     securityWarning:
       "Never send passwords, RTSP passwords, API keys, authentication tokens, or private credentials. Remove secrets from screenshots before sending them.",
     groups: {

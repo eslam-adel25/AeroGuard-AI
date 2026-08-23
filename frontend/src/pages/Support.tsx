@@ -401,15 +401,6 @@ const Support = () => {
                     </p>
                   ))}
               </div>
-              {selectedId === "overview" && (
-                <a
-                  href={mailto("AeroGuard Support Request")}
-                  className="mt-8 inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 hover:bg-emerald-300"
-                >
-                  <Mail size={17} />
-                  {t("support.contactButton")}
-                </a>
-              )}
               {selectedId === "beforeContacting" && (
                 <div className="mt-8 rounded-xl border border-amber-400/30 bg-amber-400/5 p-5">
                   <div className="flex gap-3">
@@ -444,7 +435,7 @@ const Support = () => {
             </div>
           </article>
         </div>
-        <section className="mt-10 grid gap-6 lg:grid-cols-2">
+        <section className="mt-10">
           <div className="rounded-2xl border border-white/10 bg-[#0d1d2f] p-6">
             <h2 className="text-xl font-semibold text-white">
               {t("support.contactTitle")}
@@ -461,21 +452,6 @@ const Support = () => {
             >
               <Mail size={17} />
               {t("support.emailSupport")}
-            </a>
-          </div>
-          <div className="rounded-2xl border border-white/10 bg-[#0d1d2f] p-6">
-            <h2 className="text-xl font-semibold text-white">
-              {t("support.reportTitle")}
-            </h2>
-            <p className="mt-3 leading-7 text-slate-300">
-              {t("support.reportText")}
-            </p>
-            <a
-              href={mailto("AeroGuard Support Request")}
-              className="mt-5 inline-flex items-center gap-2 rounded-lg border border-emerald-400/40 px-4 py-3 text-sm font-bold text-emerald-300 hover:bg-emerald-400/10"
-            >
-              <Mail size={17} />
-              {t("support.reportButton")}
             </a>
           </div>
         </section>
