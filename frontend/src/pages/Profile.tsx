@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { userService } from "../services/api";
 import type { IUserProfile } from "../services/api";
 import { useNotification } from "../components/NotificationSystem/useNotification";
@@ -758,9 +759,12 @@ const Profile: React.FC = () => {
           © 2027 AeroGuard AI. All rights reserved.
         </p>
         <div className="flex gap-8 text-[11px] text-gray-500 font-bold tracking-tight uppercase">
-          <button className="hover:text-white transition-colors">
+          <Link
+            to="/privacy-policy"
+            className="hover:text-white transition-colors"
+          >
             {t("profile.privacyPolicy")}
-          </button>
+          </Link>
           <button className="hover:text-white transition-colors">
             {t("profile.termsOfService")}
           </button>

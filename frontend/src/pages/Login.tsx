@@ -237,9 +237,12 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
         <div className="max-w-screen-2xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500 font-medium">
           <div>© 2027 AeroGuard AI. All rights reserved.</div>
           <div className="flex flex-wrap justify-center gap-6">
-            <button className="hover:text-white transition-colors">
+            <Link
+              to="/privacy-policy"
+              className="hover:text-white transition-colors"
+            >
               Privacy Policy
-            </button>
+            </Link>
             <button className="hover:text-white transition-colors">
               Terms of Service
             </button>

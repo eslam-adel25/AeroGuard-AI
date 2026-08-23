@@ -13,6 +13,7 @@ import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
@@ -653,6 +654,7 @@ function App() {
           element={isAuthenticated ? <Navigate to="/" replace /> : <Register />}
         />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route
           path="/"
           element={

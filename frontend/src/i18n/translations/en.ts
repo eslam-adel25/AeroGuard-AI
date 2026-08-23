@@ -401,6 +401,138 @@ const en = {
     passwordHint: "Min. 32 characters",
     passwordReenter: "Re-enter password",
   },
+  privacyPolicy: {
+    pageTitle: "Privacy Policy | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "Privacy Policy",
+    lastUpdatedLabel: "Last Updated:",
+    lastUpdated: "August 23, 2026",
+    intro:
+      "AeroGuard AI is an intelligent video surveillance platform designed to help organizations monitor cameras, detect security events, and respond to potential incidents. This Privacy Policy explains what information may be processed when you use the platform, how that information is used, and how it is protected.",
+    glanceTitle: "Privacy at a Glance",
+    sectionNavigation: "Policy sections",
+    contactButton: "Contact Support",
+    glance: {
+      0: {
+        title: "Access Controlled",
+        text: "Only authorized users can access protected resources.",
+      },
+      1: {
+        title: "Camera Data",
+        text: "Camera streams are processed for security monitoring.",
+      },
+      2: {
+        title: "AI-Assisted Detection",
+        text: "AI supports security analysis and event detection.",
+      },
+      3: {
+        title: "Event Records",
+        text: "Security events may be stored for monitoring and investigation.",
+      },
+    },
+    sections: {
+      overview: {
+        title: "{{index}}. Overview",
+        p1: "AeroGuard AI is designed to assist organizations with intelligent video surveillance, security monitoring, event detection, and incident awareness.",
+        p2: "This Privacy Policy explains the categories of information that may be processed by the platform, how that information is used, how access is controlled, and how users can obtain information about the handling of their data. The exact information processed may depend on the features enabled and the deployment environment in which AeroGuard AI is operated.",
+      },
+      information: {
+        title: "{{index}}. Information We Collect",
+        p1: "Depending on the enabled features and deployment, AeroGuard AI may process the following categories of information:",
+        p2: "Account and technical information is used to provide the application and protect its resources.",
+        item1:
+          "Account information: name or username, email address, account information, and role or permissions where used.",
+        item2:
+          "Camera configuration data: camera name, location, IP address where configured, RTSP URL where configured, camera type, status, and camera-specific annotation configurations.",
+        item3:
+          "Security and detection data: detection type, severity, camera identifier, timestamp, tracking or event information, alert state, and event evidence or screenshots where generated.",
+        item4:
+          "Technical information: session or authentication state, application status information, and operational logs where applicable.",
+      },
+      camera: {
+        title: "{{index}}. Camera & Video Data",
+        p1: "AeroGuard processes video streams from cameras configured by authorized users. Video frames may be processed by the computer vision pipeline to detect people, objects, security conditions, and other configured events.",
+        p2: "Depending on the event and system configuration, selected frames or screenshots associated with security events may be stored as evidence. AeroGuard does not represent that entire camera streams are permanently stored.",
+        item1: "People and object detection",
+        item2: "Fire, flame, and smoke detection",
+        item3: "Restricted Area, direction, and tripwire events",
+        item4: "Loitering and unattended or abandoned object events",
+      },
+      ai: {
+        title: "{{index}}. AI & Analytics",
+        p1: "AeroGuard uses computer vision and AI-assisted processing to analyze camera frames and generate operational results.",
+        p2: "AI-generated detections and classifications are intended to assist security monitoring and should not be treated as guaranteed, error-free identification or decision-making.",
+        item1: "Object detection and person tracking",
+        item2: "Security-event and severity classification",
+        item3: "Ownership relationships for unattended objects",
+        item4:
+          "Persistent person display identifiers within the system's processing context",
+      },
+      use: {
+        title: "{{index}}. How We Use Information",
+        p1: "Information may be used to operate and improve the security-monitoring workflow provided by the deployment.",
+        p2: "AeroGuard does not use the information described here for advertising or ad personalization as part of its core surveillance workflow.",
+        item1: "Operate user accounts and manage configured cameras",
+        item2:
+          "Process video streams, detect security events, and generate alerts",
+        item3:
+          "Maintain event history and display dashboards, analytics, and reports",
+        item4:
+          "Maintain system reliability, diagnose operational issues, and protect the platform against unauthorized use",
+      },
+      account: {
+        title: "{{index}}. Account & Authentication",
+        p1: "AeroGuard uses account authentication, user roles, authorization checks, protected resources, and account or session state to control access to the application.",
+        p2: "Where the application provides a 'Remember this device' option, enabling it may cause a session or device token to be stored in the browser to maintain authentication for the configured period. The exact behavior depends on the deployment configuration.",
+      },
+      security: {
+        title: "{{index}}. Data Storage & Security",
+        p1: "AeroGuard applies technical, application-level, and access-control measures intended to protect stored information and limit access to authorized users.",
+        p2: "These measures may include authenticated API access, role-based authorization, database access controls, server-side validation, and restricted access to camera and event resources. The security of a deployment also depends on its infrastructure, network configuration, credentials, and operational policies.",
+      },
+      retention: {
+        title: "{{index}}. Data Retention",
+        p1: "Security events and related records may remain stored for as long as they are required for operational monitoring, investigation, reporting, or system administration.",
+        p2: "Retention periods may depend on the deployment configuration, database policies, administrator settings, storage capacity, and organizational requirements. AeroGuard does not state a fixed retention period unless one is configured by the deployment.",
+      },
+      sharing: {
+        title: "{{index}}. Data Sharing",
+        p1: "AeroGuard does not require unrelated third-party access to camera streams for the core surveillance workflow.",
+        p2: "Depending on the deployment environment, information may be processed by infrastructure or service providers used to operate, host, store, or maintain the application. Access to protected data should be limited according to the deployment's authentication, authorization, and administrative controls.",
+      },
+      rights: {
+        title: "{{index}}. User Rights",
+        p1: "Depending on the deployment and applicable policies, users may be able to request information about the handling of their data through the AeroGuard administrator or official support channel.",
+        p2: "The available process and scope of any request depend on the organization operating the deployment and applicable administrative policies.",
+        item1: "Access account information",
+        item2: "Update account information",
+        item3:
+          "Request clarification about data processing or correction of inaccurate account information",
+        item4:
+          "Request deletion where supported by the deployment and applicable administrative policies",
+      },
+      cookies: {
+        title: "{{index}}. Cookies & Local Storage",
+        p1: "The AeroGuard web application may use browser cookies, local storage, session storage, or similar browser mechanisms to support authentication, user preferences, language settings, and core application functionality.",
+        p2: "The exact mechanisms used may depend on the application configuration and deployment environment. AeroGuard does not introduce advertising or tracking storage as part of the core application workflow.",
+      },
+      thirdParty: {
+        title: "{{index}}. Third-Party Services",
+        p1: "AeroGuard AI may be deployed using third-party infrastructure, hosting, database, storage, authentication, or other operational services.",
+        p2: "The specific services involved depend on the deployment environment selected by the organization operating the platform. Users should refer to their deployment or organization administrator for information about specific infrastructure providers where required.",
+      },
+      changes: {
+        title: "{{index}}. Changes to This Policy",
+        p1: "We may update this Privacy Policy when the platform's features, data processing practices, security controls, or deployment model change.",
+        p2: "When material changes are made, the 'Last Updated' date at the top of this page will be updated accordingly.",
+      },
+      contact: {
+        title: "{{index}}. Contact",
+        p1: "Questions about privacy or data handling?",
+        p2: "For privacy-related questions, account concerns, or data-handling requests, contact the AeroGuard administrator or the official support channel provided by your deployment.",
+      },
+    },
+  },
   settings: {
     title: "System Settings",
     subtitle: "Core Intelligence & Infrastructure Parameters",

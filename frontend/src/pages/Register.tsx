@@ -339,9 +339,12 @@ const Register = () => {
           © 2027 AeroGuard AI. All rights reserved.
         </p>
         <div className="flex flex-wrap justify-center gap-6 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-          <button className="hover:text-white transition-colors">
+          <Link
+            to="/privacy-policy"
+            className="hover:text-white transition-colors"
+          >
             Privacy Policy
-          </button>
+          </Link>
           <button className="hover:text-white transition-colors">
             Terms of Service
           </button>
