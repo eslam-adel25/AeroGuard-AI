@@ -765,9 +765,12 @@ const Profile: React.FC = () => {
           >
             {t("profile.privacyPolicy")}
           </Link>
-          <button className="hover:text-white transition-colors">
+          <Link
+            to="/terms-of-service"
+            className="hover:text-white transition-colors"
+          >
             {t("profile.termsOfService")}
-          </button>
+          </Link>
           <button className="hover:text-white transition-colors">
             {t("profile.documentation")}
           </button>

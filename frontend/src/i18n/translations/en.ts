@@ -533,6 +533,128 @@ const en = {
       },
     },
   },
+  termsOfServicePage: {
+    pageTitle: "Terms of Service | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "Terms of Service",
+    lastUpdatedLabel: "Last Updated:",
+    lastUpdated: "August 23, 2026",
+    intro:
+      "These Terms of Service govern access to and use of AeroGuard AI. By accessing or using the platform, users agree to use the system responsibly, comply with applicable policies and laws, and follow the responsibilities described in these terms.",
+    glanceTitle: "Terms at a Glance",
+    sectionNavigation: "Terms sections",
+    contactButton: "Contact Support",
+    glance: {
+      0: {
+        title: "Authorized Use",
+        text: "Use AeroGuard only with appropriate permission and authority.",
+      },
+      1: {
+        title: "Account Responsibility",
+        text: "Protect account credentials and use assigned permissions appropriately.",
+      },
+      2: {
+        title: "Camera Responsibility",
+        text: "Only configure cameras and streams you are authorized to access.",
+      },
+      3: {
+        title: "AI-Assisted Monitoring",
+        text: "AI detections and alerts assist human operators and may contain inaccuracies.",
+      },
+    },
+    sections: {
+      acceptance: {
+        title: "{{index}}. Acceptance of Terms",
+        p1: "These Terms of Service govern access to and use of AeroGuard AI. By accessing or using the platform, you acknowledge that you have read and understood these terms and agree to use the service in accordance with them and with applicable policies and laws.",
+        p2: "If you do not agree with these terms, you should not use the platform. These terms describe product use responsibilities and are not a substitute for legal advice.",
+      },
+      service: {
+        title: "{{index}}. Description of the Service",
+        p1: "AeroGuard AI is an intelligent video surveillance platform designed to assist organizations with camera management, live RTSP/IP camera monitoring, video stream processing, AI-assisted object and person detection, security-event detection, annotations and security zones, alerts and notifications, event records and evidence, reports, operational monitoring, and user roles and permissions where enabled.",
+        p2: "AeroGuard is intended to assist security monitoring and situational awareness. It does not guarantee prevention or detection of every security event.",
+      },
+      eligibility: {
+        title: "{{index}}. Eligibility and User Accounts",
+        p1: "Users should have appropriate authorization to use the deployment and are responsible for information they provide to the platform. Users must protect their account credentials, avoid sharing accounts where prohibited by their deployment, and remain responsible for actions performed under their credentials.",
+        p2: "Assigned roles and permissions should be used appropriately. Access and functionality can differ based on configured roles such as Administrator, Supervisor, or Officer.",
+      },
+      acceptableUse: {
+        title: "{{index}}. Acceptable Use",
+        p1: "Users may use AeroGuard to monitor authorized cameras, configure legitimate camera sources, create legitimate annotations and monitoring rules, review security events, manage alerts and reports, and support legitimate security, monitoring, operational, or organizational purposes.",
+        p2: "Users must not use AeroGuard for unauthorized access, unlawful monitoring, credential misuse, security bypasses, disruption, malicious uploads, attacks on other systems, deceptive manipulation of alerts or event records, or other unlawful activity.",
+        item1:
+          "Access cameras without authorization or monitor individuals without appropriate legal or organizational authority.",
+        item2:
+          "Use stolen or unauthorized camera credentials, or bypass authentication or authorization controls.",
+        item3:
+          "Intentionally overload, disrupt, or interfere with platform security.",
+        item4:
+          "Upload malicious software or harmful content, or use the platform to attack other systems or networks.",
+        item5:
+          "Intentionally manipulate alerts or event records for deception or misuse the platform for unlawful activity.",
+      },
+      cameraResponsibilities: {
+        title: "{{index}}. Camera and Data Responsibilities",
+        p1: "Users who configure a camera are responsible for having authorization to access it and permission to monitor the location and subjects it captures. They are also responsible for ensuring that the configured RTSP/IP source is legitimate, camera credentials are valid and protected, and network configuration permits the connection.",
+        p2: "Users are responsible for determining whether their camera deployment and monitoring activities are permitted under applicable laws, regulations, contracts, and organizational policies. AeroGuard does not determine whether a user's camera deployment is legally authorized.",
+      },
+      aiAlerts: {
+        title: "{{index}}. AI Detection and Alerts",
+        p1: "AeroGuard uses AI and computer vision to assist with detection and monitoring of people, objects, Fire, Flame, Smoke, Restricted Area, Direction, Tripwire, Loitering, and unattended or abandoned objects.",
+        p2: "AI-generated detections, classifications, tracking results, ownership associations, and alerts may contain false positives, false negatives, tracking errors, or other inaccuracies. Users should review important events before taking consequential actions. AI-assisted output is not a guaranteed fact or substitute for human judgment.",
+      },
+      securityCredentials: {
+        title: "{{index}}. Security and Credentials",
+        p1: "Users are responsible for maintaining the confidentiality of credentials associated with their accounts and configured camera sources. Credentials should not be shared unnecessarily, and should be updated when compromise is suspected.",
+        p2: "Users should use appropriate permissions and report suspicious access through the official channel provided by their deployment. AeroGuard cannot prevent every credential compromise.",
+      },
+      userContent: {
+        title: "{{index}}. User Content and Evidence",
+        p1: "Users may configure camera metadata, annotations, monitoring rules, security-event records, and evidence or screenshots generated by the platform.",
+        p2: "Users remain responsible for ensuring they have the necessary rights and authority to use the data they provide or cause the system to process. Event screenshots and evidence are generated for operational or security purposes and may depend on system configuration; not all video or frames are retained permanently.",
+      },
+      externalCameras: {
+        title: "{{index}}. External Cameras and Third-Party Dependencies",
+        p1: "Live RTSP/IP operation can depend on physical camera hardware, NVRs, network connectivity, RTSP/RTSPS availability, camera credentials, camera configuration, firewall or router configuration, and the hosting or infrastructure environment.",
+        p2: "A camera may become unavailable because of network failures, configuration changes, incorrect credentials, power loss, firewall restrictions, or third-party infrastructure issues. AeroGuard cannot guarantee availability of external camera hardware or networks outside the application's control.",
+      },
+      availability: {
+        title: "{{index}}. Service Availability and Technical Limitations",
+        p1: "AeroGuard does not guarantee continuous uptime, uninterrupted camera streaming, uninterrupted AI processing, perfect detection, zero latency, zero system errors, or continuous network connectivity.",
+        p2: "Interruptions may result from maintenance, hardware failure, RTSP source failure, network outages, infrastructure issues, resource limitations, browser or device issues, or software bugs. No service-level or uptime commitment is created by these terms.",
+      },
+      intellectualProperty: {
+        title: "{{index}}. Intellectual Property",
+        p1: "AeroGuard software, interface, branding, design, and associated materials may be protected by applicable intellectual-property rights. Users receive permission to use the platform according to the deployment and applicable authorization.",
+        p2: "Users should not copy, resell, redistribute, reverse-engineer, or misuse the platform except where permitted by applicable law or explicit authorization. These terms do not identify a particular legal owner or entity beyond the deployment context.",
+      },
+      suspension: {
+        title: "{{index}}. Suspension and Termination",
+        p1: "AeroGuard administrators or deployment operators may restrict, suspend, or terminate access according to the policies governing the deployment.",
+        p2: "This may be appropriate in response to misuse, unauthorized access attempts, violation of these terms, intentional disruption, security threats, or administrative or deployment decisions. No elaborate enforcement process is implied.",
+      },
+      disclaimers: {
+        title: "{{index}}. Disclaimers",
+        p1: "AeroGuard AI is provided as a security-monitoring and decision-support tool. It does not guarantee detection of every incident, prevention of every security event, uninterrupted operation, or perfect camera connectivity.",
+        p2: "The platform does not guarantee complete accuracy of AI detections, person or object tracking, or ownership associations, and does not guarantee the absence of false positives or false negatives. Users remain responsible for reviewing important events and applying appropriate human judgment.",
+      },
+      liability: {
+        title: "{{index}}. Limitation of Liability",
+        p1: "To the extent permitted by applicable law, AeroGuard and its deployment operators are not responsible for losses caused by camera hardware failures, third-party network outages, incorrect RTSP configuration, unauthorized user actions, misuse of the platform, AI detection errors, missed or false alerts, infrastructure outages, or failures outside the reasonable control of the platform or deployment operator.",
+        p2: "This deployment-aware product wording is not a complete legally enforceable limitation and should be reviewed with appropriate legal counsel for the relevant deployment. No jurisdiction or monetary liability cap is specified here.",
+      },
+      changes: {
+        title: "{{index}}. Changes to These Terms",
+        p1: "We may update these Terms of Service when the platform's capabilities, policies, security practices, or deployment model change.",
+        p2: "When material changes are made, the 'Last Updated' date will be updated accordingly. Users should review the current version periodically.",
+      },
+      contact: {
+        title: "{{index}}. Contact",
+        p1: "Questions about these Terms?",
+        p2: "For questions about platform use, access, responsibilities, or deployment-specific policies, contact the AeroGuard administrator or the official support channel provided by your deployment. Do not rely on this page as formal legal advice.",
+      },
+    },
+  },
   settings: {
     title: "System Settings",
     subtitle: "Core Intelligence & Infrastructure Parameters",

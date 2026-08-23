@@ -204,9 +204,12 @@ const PrivacyPolicy = () => {
             >
               {t("profile.privacyPolicy")}
             </Link>
-            <button className="transition-colors hover:text-white">
+            <Link
+              to="/terms-of-service"
+              className="transition-colors hover:text-white"
+            >
               {t("profile.termsOfService")}
-            </button>
+            </Link>
             <button className="transition-colors hover:text-white">
               {t("profile.documentation")}
             </button>
