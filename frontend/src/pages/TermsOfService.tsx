@@ -200,9 +200,9 @@ const TermsOfService = () => {
             <Link to="/docs" className="transition-colors hover:text-white">
               {t("profile.documentation")}
             </Link>
-            <button className="transition-colors hover:text-white">
+            <Link to="/support" className="transition-colors hover:text-white">
               {t("profile.support")}
-            </button>
+            </Link>
             <button className="transition-colors hover:text-white">
               {t("profile.contact")}
             </button>

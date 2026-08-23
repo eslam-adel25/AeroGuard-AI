@@ -354,9 +354,9 @@ const Register = () => {
           <Link to="/docs" className="hover:text-white transition-colors">
             Documentation
           </Link>
-          <button className="hover:text-white transition-colors">
+          <Link to="/support" className="hover:text-white transition-colors">
             Support
-          </button>
+          </Link>
           <button className="hover:text-white transition-colors">
             Contact
           </button>

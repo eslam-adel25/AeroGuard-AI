@@ -943,6 +943,188 @@ const en = {
       },
     },
   },
+  support: {
+    pageTitle: "Support Center | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "Support Center",
+    intro:
+      "Find practical troubleshooting guides for cameras, AI detection, annotations, alerts, and account access. When self-service is not enough, contact the official support channel.",
+    searchLabel: "Search support",
+    searchPlaceholder: "Search support...",
+    clearSearch: "Clear support search",
+    noResults: "No support articles found.",
+    noResultsHint:
+      "Try camera, RTSP, alerts, sound, bag, annotation, or login.",
+    contactButton: "Contact Support",
+    quickHelp: "Quick Help",
+    navigation: "Support navigation",
+    previous: "Previous",
+    next: "Next",
+    emailSupport: "Email Support",
+    contactTitle: "Contact Support",
+    contactText:
+      "If the troubleshooting guides do not resolve the problem, contact the official AeroGuard support channel:",
+    reportTitle: "Report a Problem",
+    reportText:
+      "Use the email link with the subject AeroGuard Support Request. Include the affected feature, camera details, time, visible error, steps tried, and a redacted screenshot or browser details where relevant.",
+    reportButton: "Report a Problem",
+    securityWarning:
+      "Never send passwords, RTSP passwords, API keys, authentication tokens, or private credentials. Remove secrets from screenshots before sending them.",
+    groups: {
+      center: "Support Center",
+      account: "Account & Access",
+      cameras: "Cameras",
+      ai: "AI & Detection",
+      alerts: "Alerts & Notifications",
+      annotations: "Annotations",
+      general: "General",
+    },
+    articles: {
+      overview: {
+        title: "Support Overview",
+        summary:
+          "Start here for practical help with common AeroGuard workflows.",
+        body: "AeroGuard support covers camera registration and status, LIVE RTSP/IP connectivity, AI detection, person IDs, object ownership, abandoned bags, alerts, sounds, annotations, login, permissions, and browser behavior.\nChoose a topic from the navigation or search the complete support catalog. If you contact support, include the exact visible error, camera name and type, approximate time, affected feature, steps already tried, and a redacted screenshot.\nExpected result: support can reproduce or narrow the issue. Contact support when the source, account, or deployment requires administrator access or the documented checks do not resolve the problem.",
+      },
+      beforeContacting: {
+        title: "Before Contacting Support",
+        summary:
+          "Prepare useful, non-sensitive details so the issue can be diagnosed faster.",
+        body: "What you see: support may otherwise have only a general description and cannot identify the failing camera or event.\nCheck and include: exact error text, screenshot with secrets removed, camera name and type, approximate time, affected feature, steps that caused the issue, and browser or device information when relevant.\nSolution: describe what changed and what you already tried, then use Report a Problem with the subject AeroGuard Support Request. Expected result: the support team receives actionable context. Contact support when the issue persists after the relevant guide or needs administrator/deployment action.",
+      },
+      loginProblems: {
+        title: "Login Problems",
+        summary:
+          "Resolve failed sign-in without guessing at an unavailable password-reset flow.",
+        body: "What you see: the login form shows an error and protected pages do not open. Likely causes include incorrect credentials, an unavailable account, or a network/API problem.\nCheck: re-enter the username and password carefully, confirm the application is connected to the deployment, and verify the account with the administrator. Retry once. The current frontend does not expose a password-reset workflow.\nExpected result: valid credentials open the authenticated application shell. Contact the administrator or support with the visible error and approximate time; never send a password or token.",
+      },
+      permissionProblems: {
+        title: "Permission Problems",
+        summary:
+          "A missing feature or resource may be caused by role or ownership scope.",
+        body: "What you see: a camera, event, report, or user action is unavailable or not listed. Non-administrator access is generally scoped to resources owned by the current user; user listing, creation, and deletion are restricted to Administrator.\nCheck your assigned role and whether you own the camera or resource. Ask the system administrator to confirm authorization rather than trying to bypass access controls.\nExpected result: an authorized resource becomes available after the correct account or administrator action. Contact support when the administrator confirms access should exist but the resource remains missing, and include the account identifier and resource name without credentials.",
+      },
+      sessionProblems: {
+        title: "Session Problems",
+        summary:
+          "Account/session state can prevent access even when the page itself loads.",
+        body: "What you see: a protected request fails, you return to login, or the session no longer behaves as expected. Likely causes include session expiration, a revoked session, stale browser state, or a deployment authentication issue.\nCheck: sign in again, refresh the application, confirm the account is active, and retry the same action. Do not copy or send browser tokens. If the issue affects only one browser, compare with a supported modern browser without sharing private data.\nExpected result: a fresh valid session restores authorized access. Contact the administrator or support if repeated sign-in fails and provide the visible error, browser, time, and affected resource.",
+      },
+      browserProblems: {
+        title: "Browser Problems",
+        summary:
+          "Use safe browser checks for permissions, audio, layout, and stale application state.",
+        body: "What you see: controls do not respond, audio is blocked, Laptop Camera is unavailable, or the layout looks incomplete.\nCheck: refresh the application, use a supported modern browser, review site camera and audio permissions, verify the tab is not muted, and test the same workflow after removing only relevant site state if appropriate. Keep the application URL and account private.\nExpected result: the browser permits the required interaction and the interface reloads normally. Contact support with browser name/version, device, screenshot, and exact feature if the issue persists.",
+      },
+      cameraOffline: {
+        title: "Camera Offline",
+        summary:
+          "Check the source, network, credentials, provisioning result, and processing status.",
+        body: "What you see: the camera is Offline, unavailable, or stops after setup. Likely causes include a powered-off camera/NVR, unavailable RTSP source, incorrect credentials, network or firewall issues, invalid configuration, no video frame, or a processing failure.\nCheck: camera power, network connectivity, RTSP URL, credentials, camera/NVR configuration, firewall/router, and the AeroGuard status. For a live source, retry Provision Node so URL validation and first-frame verification run again, then start analysis and watch for Processing followed by Running.\nExpected result: the source passes verification and the dashboard becomes Running. Contact support with camera name/type, status, exact error, time, and redacted configuration when external checks pass.",
+      },
+      rtspProblems: {
+        title: "RTSP Connection Problems",
+        summary:
+          "Troubleshoot URL format, reachability, credentials, opening, frames, and timeouts.",
+        body: "What you see: an inline RTSP error, provisioning failure, timeout, unavailable stream, or a camera that remains Offline. Use this example only: rtsp://username:password@192.168.1.100:554/stream. The username and password are placeholders; use the URL supplied by the camera or NVR.\nCheck: the scheme is rtsp:// or rtsps://, host, port, path, credentials, camera power, network, and firewall/router. A valid-looking URL can still fail if the stream cannot open or no frame arrives.\nSolution: correct the source outside the app, return to LIVE RTSP/IP, enter the corrected URL, and retry provisioning. Expected result: the server opens the stream and reads a first frame. Contact support with the redacted URL shape and exact error, never the password.",
+      },
+      provisioning: {
+        title: "Camera Provisioning Failure",
+        summary:
+          "Live provisioning validates the URL and confirms a real frame before registration.",
+        body: "What you see: the camera is not registered and a persistent message appears below the RTSP field. The flow is Validate URL -> attempt connection -> confirm stream opens -> confirm first frame -> register/start camera.\nCheck: URL syntax, reachable host/port, credentials, camera/NVR availability, and whether a frame is produced. An HTTP 400 may distinguish invalid format, unable to connect, stream open failure, no frame, or timeout depending on the backend response.\nSolution: fix the external source or URL and choose Provision Node again. Expected result: successful verification creates the camera. Contact support with the exact inline message and time when a redacted, independently verified source still fails.",
+      },
+      streamProblems: {
+        title: "Stream Problems",
+        summary:
+          "Black, empty, frozen, or stopping video usually needs an external-source check.",
+        body: "What you see: a black or empty view, a frozen stream, unavailable video, or a camera that becomes Offline.\nCheck: selected camera, camera/NVR power, network, RTSP configuration and credentials, firewall/router, external source availability, and AeroGuard status. Confirm the camera is Running before troubleshooting detections.\nSolution: restore the external source or correct configuration, then retry provisioning for a live camera or restart processing from the dashboard. Expected result: frames appear and status progresses from Processing to Running. Contact support with camera type, status, time, and a screenshot if the source works elsewhere but not in AeroGuard.",
+      },
+      cameraStatus: {
+        title: "Camera Status",
+        summary:
+          "Interpret Online, Processing, Running, and Offline without treating them as identical labels.",
+        body: "What you see: the Cameras page and Dashboard can show different user-facing status labels. Dashboard states include Processing during startup, Running after active AI status, and Offline after stop or source failure. The backend and Cameras page also use Online for newly created upload or USB sources.\nCheck the dashboard status and stream together. Start analysis when appropriate and wait for Processing to become Running; inspect the external source when it becomes Offline.\nExpected result: status matches the actual processing state. Contact support with the page, exact status, camera type, and time if the labels conflict or remain unchanged.",
+      },
+      noDetection: {
+        title: "No AI Detection",
+        summary:
+          "Confirm processing, enabled modules, visibility, and camera-specific rules.",
+        body: "What you see: no person, object, fire, flame, smoke, or rule result appears.\nCheck: the camera is Running, the relevant detection setting is enabled, the object is visible, lighting and framing are usable, and the condition actually matches. For Restricted Area, Direction, or Tripwire, confirm a saved annotation exists for the current camera and type. Check notification/event history after waiting for processing.\nExpected result: a supported detection or event appears when the condition is met. Contact support with camera name/type, enabled feature, approximate time, and screenshot if the source is Running and the condition is reproducible.",
+      },
+      incorrectDetection: {
+        title: "Incorrect AI Detection",
+        summary:
+          "False positives, false negatives, tracking errors, and classification errors are possible.",
+        body: "What you see: a detection is missing, incorrectly labeled, appears at low confidence, or a rule state does not match what you expect.\nCheck camera quality, lighting, object visibility, confidence/settings where available, active rules, and annotations. Review whether the supported class and condition actually match the scene. AI output assists monitoring and is not guaranteed to be correct.\nExpected result: configuration and scene limitations are understood, though no setting guarantees perfect accuracy. Contact support with a redacted screenshot, camera type, time, visible label/confidence, and the reproducible conditions.",
+      },
+      personIds: {
+        title: "Person ID Issues",
+        summary:
+          "Displayed person IDs are short-lived, camera-local continuity aids.",
+        body: "What you see: an ID changes, a person disappears and reappears with another ID, or two people appear difficult to distinguish. The internal tracker ID and displayed appearance-based identity are separate concepts.\nCheck whether the person remained continuously visible, whether occlusion or missed frames occurred, and whether the camera/session changed. Refreshing the stream can restart processing context; observe whether the identity stabilizes without expecting cross-camera identity.\nExpected result: IDs provide useful local continuity, not guaranteed facial recognition. Contact support with camera, time, visible IDs, and a redacted screenshot if reproducible with clear visibility.",
+      },
+      ownership: {
+        title: "Object Ownership Issues",
+        summary:
+          "Bag ownership is camera-local and can change with distance, visibility, and tracking.",
+        body: "What you see: a bag has the wrong owner, no owner, or multiple bags appear associated with one person. Ownership uses the nearest person within configured distance and normally needs three consecutive matching frames. Temporary owner loss can preserve the association for configured missing frames.\nCheck the camera view, person visibility, distance, occlusion, selected camera, and whether the association persists across frames. Multiple bags can be associated with the same person when the matching conditions support it.\nExpected result: ownership reflects the current camera-local tracking context, not a permanent identity guarantee. Contact support with camera, time, object/person labels, and screenshot if the scene is clear and the association remains wrong.",
+      },
+      abandonedBags: {
+        title: "Abandoned Bag Issues",
+        summary:
+          "Yellow and red states depend on ownership loss and deployment-configured timing.",
+        body: "What you see: a bag remains owned, turns yellow, stays in a timer state, returns to normal when an owner returns, or becomes red with an event.\nCheck that the person was actually associated, the camera is Running, the bag remains visible, and the configured ownership/unattended timeout has had time to complete. The current implementation reads abandoned_bag_seconds from settings; do not assume a universal 60-second duration. When conditions are reached, it emits ABANDONED_BAG with High severity and a five-second event cooldown.\nExpected result: a returning owner may restore the association; an unattended bag can become DANGER and produce an event. Contact support with camera, time, visible owner label, state progression, and event details.",
+      },
+      noAlerts: {
+        title: "No Alerts",
+        summary:
+          "An alert needs active processing, an enabled condition, and a matching object or rule.",
+        body: "What you see: an expected notification or event is absent.\nCheck the camera is Running, the relevant feature is enabled, the correct camera is selected, the required annotation is saved for that camera and type, and the object actually satisfies the rule. Check event history and notification state. A continuing condition can be subject to cooldown and AI detections can be missed or classified differently.\nExpected result: a matching condition creates the relevant event and notification when processing and configuration allow it. Contact support with camera, rule/feature, time, status, and a screenshot when the condition is reproducible.",
+      },
+      notificationProblems: {
+        title: "Notification Problems",
+        summary:
+          "Review live websocket events, loaded history, read state, and evidence availability.",
+        body: "What you see: a notification is missing, appears after refresh, lacks details, or View/Download is unavailable. The app loads AI events, falls back to notifications, resolves camera names, and listens for ai_event websocket messages.\nCheck camera status, event time, notification bell state, read/unread state, and whether the event has evidence. Use View or Download only when those actions are available. Clearing the local notification UI does not necessarily delete the server event.\nExpected result: available events reappear from history after refresh; unavailable evidence remains unavailable. Contact support with event type, camera, severity, timestamp, and visible UI state, without tokens.",
+      },
+      eventHistory: {
+        title: "Event History",
+        summary:
+          "Historical events and live notifications use different paths but share event context.",
+        body: "What you see: a live event, a persisted event after refresh, read/unread state, or a missing event image. The notification service loads event history and merges event IDs; live ai_event websocket messages add current events.\nCheck the event camera, severity, timestamp, read state, and refresh once. View or Download depends on protected evidence being available. Do not assume clearing the UI removes the stored event.\nExpected result: persisted history can reload when the deployment endpoint returns it. Contact support with the event ID or timestamp, camera, and action that failed when a reproducible event is absent.",
+      },
+      alarmSoundProblems: {
+        title: "No Alarm Sound",
+        summary:
+          "Sound requires the setting, browser playback, and an alarm source that actually maps to audio.",
+        body: "What you see: no sound or a sound different from what you expected.\nCheck the alert sound setting, browser audio permissions, site/tab mute state, camera processing, and event type. Fire, flame, and smoke map to the fire alarm; other active alarm sources map to the security alarm. Warning-only conditions such as loitering do not guarantee sound, and the inspected explicit Wrong Direction path does not add a dedicated sound source. The Dashboard Stop control silences active audio until the alarm becomes inactive.\nExpected result: an active mapped alarm plays when sound is enabled and the browser permits it. Contact support with event type, source, setting state, browser, and time.",
+      },
+      fireSmoke: {
+        title: "Fire / Flame / Smoke Alerts",
+        summary:
+          "These detections are module-controlled critical alarm sources.",
+        body: "What you see: uppercase fire, flame, or smoke label, a red DANGER box, a critical event, and potentially fire alarm audio. Fire and flame require fire_detection_enabled; smoke requires smoke_detection_enabled.\nCheck the relevant setting, Running camera, visible scene, event history, evidence availability, and browser sound permission. Do not treat an absent screenshot as proof that no event occurred; evidence depends on configuration.\nExpected result: an enabled supported condition enters the critical path and can create an event and alarm source. Contact support with the camera, enabled module, timestamp, visible label, and event details when the condition is clear and reproducible.",
+      },
+      annotationProblems: {
+        title: "Annotation Problems",
+        summary:
+          "Check camera, mode, point count, draft state, and Save/Delete/Undo behavior.",
+        body: "What you see: a zone is not visible, points appear in the wrong mode, Save did not persist, or another camera does not contain the zone.\nCheck: select the correct camera and type. Restricted Area needs at least three points; Direction and Tripwire need exactly two. Use Add Region, finish the drawing, then Save. Undo removes the last supported draft/deletion action; Delete immediately removes a persisted zone and Save reconciles the selected mode. Escape discards drafts.\nExpected result: the saved zone appears only for its camera and annotation type. Contact support with camera, mode, point count, save/delete action, and screenshot if a reproducible saved state is wrong.",
+      },
+      commonIssues: {
+        title: "Common Issues",
+        summary:
+          "A compact first check for the most frequent support requests.",
+        body: "Camera Offline: check network, power, RTSP configuration, credentials, and status.\nNo Detection: check Running state, feature settings, object visibility, and camera-specific rules.\nNo Sound: check audio permissions, sound setting, and event type.\nZone Missing: check selected camera, annotation type, point count, and Save.\nRTSP Invalid or No Frame: check URL format and camera/NVR stream availability.\nNo Notification: check event conditions, cooldown, notification state, and history. Expected result: the relevant focused article provides the next checks. Contact support with exact error and affected resource when those checks fail.",
+      },
+      faq: {
+        title: "Frequently Asked Questions",
+        summary: "Quick answers for common AeroGuard support questions.",
+        body: "How do I contact support? Use Email Support or Report a Problem to open a message to Eslam.Adel2596@gmail.com with subject AeroGuard Support Request.\nHow do I add LIVE RTSP/IP? Use Cameras -> Register New Node -> LIVE RTSP/IP, enter the camera/NVR URL, and Provision Node.\nWhy is a camera Offline? Check source power, network, URL, credentials, firewall, and processing status.\nWhy are there no detections or alerts? Confirm Running state, enabled feature, visible condition, selected camera, and saved camera-specific rule.\nWhy does Wrong Direction not play an alarm? The inspected direction path creates a Critical event but does not add a dedicated alarm source.\nWhy did the bag turn yellow or red? Ownership was lost or configured unattended conditions completed; timing is deployment-configured.\nWhy are annotations absent on another camera? Zones are camera- and type-specific.\nWhat should I include in a report? Exact error, camera/type, time, affected feature, steps tried, browser/device, and redacted screenshot. Never include secrets.",
+      },
+    },
+  },
   settings: {
     title: "System Settings",
     subtitle: "Core Intelligence & Infrastructure Parameters",
