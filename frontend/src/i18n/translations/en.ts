@@ -239,6 +239,12 @@ const en = {
     cameraAliasPlaceholder: "Node Alias (e.g. Gate 04)",
     locationPlaceholder: "Physical Location",
     streamPlaceholder: "rtsp://admin:password@ip:port",
+    invalidStreamFormat:
+      "Invalid RTSP URL. Enter the RTSP stream URL provided by your camera or NVR. Example: rtsp://username:password@192.168.1.100:554/stream",
+    liveProvisionFailed:
+      "Unable to connect to the RTSP camera. Check the camera address and network connection.",
+    liveProvisionProbeFailed:
+      "The RTSP camera could not be opened or did not provide a video frame.",
     uploadLabel: "Select Video File",
     cameraUsedMessage: "Laptop Camera will be used",
     cameraUsedDetail: "OpenCV will connect to Camera 0 automatically.",

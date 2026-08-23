@@ -7,8 +7,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import cv2
 import asyncio
+from urllib.parse import urlparse
 
 from ...database.session import get_db
+from ...database.session import SessionLocal
 from ...models.models import Camera, RestrictedZone, AIEvent, Detection, Tracking
 from ...schemas.schemas import CameraResponse, ZoneCreate, ZoneResponse
 from ...core.auth_middleware import get_current_user
@@ -32,6 +34,59 @@ UPLOAD_DIR = Path(BASE_DIR) / "uploads" / "videos"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 MAX_VIDEO_SIZE = 200 * 1024 * 1024
+LIVE_PROBE_TIMEOUT_SECONDS = 10
+
+
+def _validate_live_rtsp_url(stream_url: str) -> str:
+    value = (stream_url or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="A valid RTSP URL is required")
+    return value
+
+
+def _probe_live_rtsp(stream_url: str) -> bool:
+    capture = cv2.VideoCapture()
+    try:
+        capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, LIVE_PROBE_TIMEOUT_SECONDS * 1000)
+        capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, LIVE_PROBE_TIMEOUT_SECONDS * 1000)
+        if not capture.open(stream_url):
+            return False
+        if not capture.isOpened():
+            return False
+        ret, frame = capture.read()
+        return bool(ret and frame is not None and frame.size > 0)
+    finally:
+        capture.release()
+
+
+async def _verify_live_rtsp(stream_url: str) -> None:
+    try:
+        available = await asyncio.wait_for(
+            asyncio.to_thread(_probe_live_rtsp, stream_url),
+            timeout=LIVE_PROBE_TIMEOUT_SECONDS + 1,
+        )
+    except Exception:
+        available = False
+    if not available:
+        raise HTTPException(
+            status_code=400,
+            detail="The RTSP camera could not be opened or did not provide a frame",
+        )
+
+
+async def _run_live_camera(camera_id: str, stream_url: str) -> None:
+    try:
+        await ai_engine.process_camera(camera_id, stream_url)
+    finally:
+        cleanup_db = SessionLocal()
+        try:
+            camera = cleanup_db.query(Camera).filter(Camera.camera_id == camera_id).first()
+            if camera:
+                camera.status = "Offline"
+                cleanup_db.commit()
+        finally:
+            cleanup_db.close()
 
 # 1. تسجيل كاميرا (بث مباشر أو رفع فيديو)
 @router.post("/", response_model=CameraResponse)
@@ -45,6 +100,9 @@ async def add_camera(
     current_user: dict = Depends(get_current_user)
 ):
     final_url = stream_url
+    if camera_type == "LIVE":
+        final_url = _validate_live_rtsp_url(stream_url)
+        await _verify_live_rtsp(final_url)
     # دعم كاميرا الجهاز (USB/Webcam)
     if camera_type == "USB":
         final_url = "0"
@@ -155,13 +213,20 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
 
+    if cam.camera_type == "LIVE":
+        live_url = _validate_live_rtsp_url(cam.stream_url)
+        await _verify_live_rtsp(live_url)
+
     if ai_engine is not None:
         ai_engine.stop_all_other_cameras(cam.camera_id)
         await asyncio.sleep(0.05)
 
     cam.status = "Processing"
     db.commit()
-    background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
+    if cam.camera_type == "LIVE":
+        background_tasks.add_task(_run_live_camera, cam.camera_id, cam.stream_url)
+    else:
+        background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 

@@ -23,6 +23,39 @@ import {
   Compass,
 } from "lucide-react";
 
+const isValidLiveRtspUrl = (value: string) => {
+  try {
+    const parsed = new URL(value.trim());
+    return (
+      ["rtsp:", "rtsps:"].includes(parsed.protocol) &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
+const getLiveProvisionErrorDetail = (
+  error: unknown,
+  fallback: string,
+  probeFailure: string,
+) => {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })
+    ?.response?.data?.detail;
+  const safeDetails = new Set([
+    "A valid RTSP URL is required",
+    "The RTSP camera could not be opened or did not provide a frame",
+  ]);
+  if (typeof detail !== "string" || !safeDetails.has(detail)) {
+    return fallback;
+  }
+
+  return detail ===
+    "The RTSP camera could not be opened or did not provide a frame"
+    ? probeFailure
+    : fallback;
+};
+
 interface Camera {
   camera_id: string;
   camera_name: string;
@@ -53,6 +86,13 @@ const Cameras = () => {
 
   // Drag and drop state for video file upload area
   const [isDragActive, setIsDragActive] = useState(false);
+  const [liveRtspProvisionError, setLiveRtspProvisionError] = useState<
+    string | null
+  >(null);
+  const liveRtspUrlInvalid =
+    uploadType === "LIVE" &&
+    formData.stream_url.trim().length > 0 &&
+    !isValidLiveRtspUrl(formData.stream_url);
 
   const fetchCameras = async () => {
     try {
@@ -85,6 +125,7 @@ const Cameras = () => {
     setSelectedFile(null);
     setUploadType("LIVE");
     setIsDragActive(false);
+    setLiveRtspProvisionError(null);
   };
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -130,7 +171,16 @@ const Cameras = () => {
           description: t("cameras.provisionSuccess"),
         });
       }
-    } catch {
+    } catch (error) {
+      if (uploadType === "LIVE") {
+        setLiveRtspProvisionError(
+          getLiveProvisionErrorDetail(
+            error,
+            t("cameras.liveProvisionFailed"),
+            t("cameras.liveProvisionProbeFailed"),
+          ),
+        );
+      }
       if (toastId) {
         if (!created) {
           toast.update(toastId, {
@@ -215,7 +265,19 @@ const Cameras = () => {
         {/* Camera Node CCTV Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {cameras.map((cam) => {
-            const isLive = cam.status === "ACTIVE";
+            const liveStatus = cam.status || "Offline";
+            const isLive =
+              cam.camera_type === "LIVE"
+                ? ["ACTIVE", "Online", "Processing", "Running"].includes(
+                    liveStatus,
+                  )
+                : cam.status === "ACTIVE";
+            const statusLabel =
+              cam.camera_type === "LIVE"
+                ? liveStatus.toUpperCase()
+                : cam.status === "ACTIVE"
+                  ? "ACTIVE"
+                  : "PENDING";
             return (
               <div
                 key={cam.camera_id}
@@ -270,7 +332,7 @@ const Cameras = () => {
                           : "bg-ag-warning/10 text-amber-300 border-amber-400/20"
                       }`}
                     >
-                      {cam.status === "ACTIVE" ? "ACTIVE" : "PENDING"}
+                      {statusLabel}
                     </span>
                   </div>
 
@@ -547,10 +609,13 @@ const Cameras = () => {
                         className="w-full bg-ag-dark border border-white/10 py-2.5 pl-10 pr-10 rounded-lg text-white font-mono text-xs outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-gray-500"
                         placeholder={t("cameras.streamPlaceholder")}
                         onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            stream_url: e.target.value,
-                          })
+                          (() => {
+                            const value = e.target.value;
+                            setFormData({ ...formData, stream_url: value });
+                            if (isValidLiveRtspUrl(value)) {
+                              setLiveRtspProvisionError(null);
+                            }
+                          })()
                         }
                         required
                       />
@@ -558,6 +623,18 @@ const Cameras = () => {
                         <Eye size={15} />
                       </span>
                     </div>
+
+                    {liveRtspUrlInvalid && (
+                      <p className="text-amber-300 text-[11px] leading-relaxed mt-2">
+                        {t("cameras.invalidStreamFormat")}
+                      </p>
+                    )}
+
+                    {!liveRtspUrlInvalid && liveRtspProvisionError && (
+                      <p className="text-amber-300 text-[11px] leading-relaxed mt-2">
+                        {liveRtspProvisionError}
+                      </p>
+                    )}
 
                     {/* Industrial feedback box */}
                     <div className="flex items-start gap-3 bg-white/5 border border-white/10 rounded-lg p-3.5 text-xs text-sky-300 mt-4">

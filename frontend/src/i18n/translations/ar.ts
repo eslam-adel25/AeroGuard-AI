@@ -235,6 +235,12 @@ const ar = {
     cameraAliasPlaceholder: "اسم العقدة (مثل البوابة 04)",
     locationPlaceholder: "الموقع المادي",
     streamPlaceholder: "rtsp://admin:password@ip:port",
+    invalidStreamFormat:
+      "رابط RTSP غير صحيح. أدخل رابط بث الكاميرا الذي يوفره جهاز الكاميرا أو الـNVR. مثال: rtsp://username:password@192.168.1.100:554/stream",
+    liveProvisionFailed:
+      "تعذر الاتصال بكاميرا RTSP. تحقق من عنوان الكاميرا واتصال الشبكة.",
+    liveProvisionProbeFailed:
+      "تعذر فتح كاميرا RTSP أو لم يتم استلام إطار فيديو.",
     uploadLabel: "اختر ملف فيديو",
     cameraUsedMessage: "سيتم استخدام كاميرا الحاسوب المحمول",
     cameraUsedDetail: "سيتم توصيل OpenCV بكاميرا 0 تلقائيًا.",
