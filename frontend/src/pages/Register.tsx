@@ -351,9 +351,9 @@ const Register = () => {
           >
             Terms of Service
           </Link>
-          <button className="hover:text-white transition-colors">
+          <Link to="/docs" className="hover:text-white transition-colors">
             Documentation
-          </button>
+          </Link>
           <button className="hover:text-white transition-colors">
             Support
           </button>

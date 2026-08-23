@@ -655,6 +655,294 @@ const en = {
       },
     },
   },
+  documentation: {
+    pageTitle: "Documentation | AeroGuard AI",
+    eyebrow: "AeroGuard AI",
+    title: "Documentation",
+    intro:
+      "Learn how to configure, monitor, and operate AeroGuard AI, from account access and camera setup to AI-assisted detection, security rules, alerts, and event monitoring.",
+    heroCallout:
+      "AeroGuard is an operator-facing video surveillance platform. Start with the quick guide, then choose an article from the navigation when you need a focused explanation.",
+    getStarted: "Get Started",
+    cameraSetup: "Camera Setup",
+    searchLabel: "Search documentation",
+    searchPlaceholder: "Search documentation...",
+    clearSearch: "Clear search",
+    noResults: "No matching articles found.",
+    noResultsHint: "Try camera, RTSP, alerts, tripwire, bag, or AI.",
+    navigation: "Documentation navigation",
+    previous: "Previous",
+    next: "Next",
+    groups: {
+      gettingStarted: "Getting Started",
+      cameras: "Camera Management",
+      dashboard: "Dashboard",
+      ai: "AI & Detection",
+      rules: "Security Rules",
+      annotations: "Annotations",
+      alerts: "Alerts & Events",
+      users: "Users & Access",
+      troubleshooting: "Troubleshooting",
+      reference: "Reference",
+    },
+    articles: {
+      introduction: {
+        title: "Introduction",
+        summary:
+          "AeroGuard helps authorized operators monitor cameras, analyze video, configure rules, and respond to security events.",
+        body: "The basic flow is Camera -> Video stream -> AI processing -> Detection and tracking -> Security rules -> Events -> Notifications or alarms. A camera supplies frames, the processor analyzes supported objects and conditions, rules add context, and the application presents results for an operator to review.\nUse the sidebar to learn one task at a time. Behavior can depend on camera configuration, enabled settings, network conditions, and the deployment.",
+      },
+      login: {
+        title: "Login & Authentication",
+        summary:
+          "Sign in with the account credentials provided for your deployment.",
+        body: "Open the application and enter your username and password, then submit the login form. A successful login takes you to the authenticated application shell. Failed credentials are shown as an error and do not open protected pages.\nThe deployment uses account/session state to protect resources. Password reset is not documented here because no reset workflow was found in the current frontend. The Remember this device behavior is deployment-dependent and should only be described when that option is present in the running build.",
+      },
+      quickStart: {
+        title: "Quick Start",
+        summary: "A short first session for a new operator.",
+        body: "1. Sign in.\n2. Open Cameras and choose LIVE RTSP/IP, Video Archive, or Laptop Camera.\n3. Add the source and wait for the result of validation or upload.\n4. Select a camera and open Dashboard.\n5. Start monitoring, confirm the status and video view, and review overlays.\n6. If required, select the camera, configure an annotation or security rule, and save it.\n7. Review notifications and event evidence when an event is produced. If a camera stays offline, use Camera Offline and RTSP Problems in Troubleshooting.",
+      },
+      roles: {
+        title: "Roles & Permissions",
+        summary:
+          "Access is determined by the deployment role and camera ownership.",
+        body: "New registration defaults to the Officer role. The repository defines roles as named records, but the explicit global administrator checks use the exact name Administrator. Administrators can manage users and generally receive global access; other roles are normally limited to resources owned by the current user.\nCameras, events, and reports use owner-scoped access for non-administrators. User listing, creation, and deletion are restricted to Administrator. There is no separate Supervisor permission policy verified in the current authorization code, so a Supervisor role should not be assumed to have a special capability. A missing feature may therefore reflect role scope rather than a broken button.",
+      },
+      cameraOverview: {
+        title: "Camera Overview",
+        summary:
+          "The Cameras page is where sources are registered, selected, and managed.",
+        body: "Camera records include a name or alias, location, source type, stream URL where applicable, status, and ownership information. The available source choices are LIVE RTSP/IP, Video Archive upload, and Laptop Camera/USB. The list is filtered by ownership for non-administrators.\nUse the camera list to select a source, inspect its status, and open the dashboard workflow. If a source is missing, confirm that you are using the authorized account that owns it or an Administrator account.",
+      },
+      liveRtsp: {
+        title: "Add LIVE RTSP/IP Camera",
+        summary:
+          "Register a network camera or NVR stream by validating its URL and first frame.",
+        body: "Open Cameras -> Register New Node -> LIVE RTSP/IP. Enter the Node Alias, Physical Location, and the RTSP URL, then choose Provision Node.\nExample only:\nrtsp://username:password@192.168.1.100:554/stream\nUse the URL supplied by the camera or NVR. The username, password, IP address, port, and path above are placeholders and may differ. The server accepts rtsp:// or rtsps:// URLs with a network location, probes the stream with OpenCV, reads a real frame, and only then saves the camera.\nInvalid format, an unreachable source, incorrect credentials, a timeout, or no frame produces an inline provisioning error under the RTSP field. A live camera is initially represented as Offline until analysis is started.",
+      },
+      videoArchive: {
+        title: "Video Archive",
+        summary:
+          "Upload a supported video file for archive-based processing instead of a live RTSP source.",
+        body: "Choose Video Archive in the camera registration flow and select a video file. The backend accepts mp4, mov, avi, mkv, and webm extensions and stores the upload under the deployment's video upload directory with a generated name.\nThe backend limit is 200 MiB, even though the current UI contains a stale 2GB helper label. Archive records are not provisioned by probing an RTSP URL. If the upload is rejected, check its extension and size, then review the returned error.",
+      },
+      laptopCamera: {
+        title: "Laptop Camera",
+        summary:
+          "Use the computer's default camera through the USB source option.",
+        body: "Choose Laptop Camera or USB when registering a source. The application stores the source as 0, which the processor maps to the default OpenCV camera and CAP_DSHOW on Windows.\nAllow camera access in the browser and operating system when prompted. The camera must be connected and available to the machine running the processor. To stop using it, stop the camera analysis or remove the source according to your deployment controls. Permission denial, a busy camera, or a missing device can leave the source unavailable.",
+      },
+      cameraStatus: {
+        title: "Camera Status",
+        summary:
+          "Status tells you whether the source is being processed or has stopped.",
+        body: "The dashboard displays Running, Offline, and Processing based on camera and websocket state. Processing means startup or analysis work is in progress; Running means the dashboard has received the active AI status; Offline means analysis has stopped or the source is unavailable.\nThe Cameras page also exposes backend status values such as Online, Processing, and Offline. Labels are not perfectly aligned across all views, so use the dashboard state and stream view together when diagnosing a source.",
+      },
+      cameraSelection: {
+        title: "Camera Selection",
+        summary:
+          "Choose the camera whose stream, overlays, rules, and events you are reviewing.",
+        body: "Selecting a camera stops the previous dashboard session and starts the selected one. The selected source controls the stream and the camera-local event context. An annotation created for Camera A does not automatically apply to Camera B.\nIf an overlay or rule seems absent, confirm the selected camera and the selected annotation type before editing or saving.",
+      },
+      dashboard: {
+        title: "Dashboard Overview",
+        summary:
+          "The Dashboard combines camera monitoring, overlays, controls, and notifications.",
+        body: "Use the camera selector to choose a source, inspect the current status, and monitor the live view. The dashboard can show AI bounding boxes and labels, person or ownership identifiers, security overlays, notification access, screenshot actions, start/stop controls, fullscreen, and annotation controls when the relevant state is available.\nControls can be affected by camera status and role ownership. Start with the selected camera and confirm that it is Running before expecting live detections.",
+      },
+      liveView: {
+        title: "Live Camera View",
+        summary:
+          "Read the stream, detection boxes, labels, identities, and security state together.",
+        body: "A running view can show bounding boxes around supported detections, labels such as person, baggage, fire, smoke, or flame, and rule labels such as RESTRICTED AREA, WRONG DIRECTION, or TRIPWIRE. Red/DANGER indicates a critical security condition in the processor path; yellow/WARNING indicates a warning condition such as loitering.\nPerson display IDs are continuity aids within a camera session, not guaranteed facial identities. If the view is blank or stale, check the camera status, source connectivity, and the stream troubleshooting articles.",
+      },
+      cameraControls: {
+        title: "Camera Controls",
+        summary:
+          "Use the controls that are visible for the selected dashboard state.",
+        body: "Start begins analysis for the selected camera when it is not running. Stop ends the active analysis and returns the source toward Offline. Screenshot captures the current view when the dashboard provides that action. Notification controls open the event history and related actions. Annotation controls switch between editing modes and draft operations.\nA control may be unavailable while a camera is processing, when no camera is selected, or when the current role cannot access the resource. Treat the visible state as authoritative rather than assuming every control is available everywhere.",
+      },
+      fullscreen: {
+        title: "Fullscreen View",
+        summary:
+          "Expand the monitoring view when you need a larger inspection area.",
+        body: "Use the fullscreen control shown with the dashboard camera view. It expands the current monitoring surface using the browser's available viewport; exit with the browser or view control provided by the running interface.\nFullscreen does not change camera ownership, rules, or AI processing. If the control is absent, confirm that a camera view is active and that the browser permits fullscreen requests.",
+      },
+      aiDetection: {
+        title: "AI Detection",
+        summary:
+          "The processor analyzes frames using supported model classes and configurable modules.",
+        body: "The current processor keeps person, baggage-related classes, vehicles, fire, smoke, and flame detections and discards unsupported model classes. Confidence expresses how strongly the model supports a detection; it is not a guarantee that the result is correct. Person confidence uses a lower recall-oriented threshold bounded between 0.25 and 0.5.\nDetection records are throttled per camera, track, and type, so one visible object does not necessarily create a database record on every frame. Use AI output as monitoring assistance and review important events yourself.",
+      },
+      fireSmoke: {
+        title: "Fire / Flame / Smoke",
+        summary:
+          "Fire, flame, and smoke are handled as critical alarm sources when their modules are enabled.",
+        body: "Fire and flame use the fire_detection_enabled setting; smoke uses smoke_detection_enabled. Enabled detections are labeled in uppercase, shown as DANGER with red boxes, added to alarm sources, and sent through the critical alert path.\nThe dashboard plays the fire alarm audio for fire, flame, or smoke when sounds are enabled. Confirm the source and the evidence before taking consequential action; the AI result is not a guarantee of an actual fire.",
+      },
+      personTracking: {
+        title: "Person Tracking",
+        summary:
+          "Tracking links observations of a person across nearby frames on one camera.",
+        body: "The processor keeps track positions and movement state per camera so it can maintain continuity and evaluate rules such as loitering or direction. A track can disappear because of occlusion, missed frames, or source conditions.\nTracking is operational context, not a permanent identity. Alert creation is throttled, so a continuing condition may not create a new event every frame.",
+      },
+      personIds: {
+        title: "Persistent Person IDs",
+        summary:
+          "Displayed IDs provide short-lived continuity within the application's camera processing context.",
+        body: "The interface may show a label such as ID:006 Person. The identity registry is appearance-based, camera-local, and session-only. It can preserve an ID through temporary track loss when histogram similarity exceeds 0.92, and identities expire after 60 seconds; a cleared registry starts again from 1.\nThese IDs are not database identities, guaranteed facial recognition, or cross-camera global identities. Treat them as a practical display and tracking aid.",
+      },
+      ownership: {
+        title: "Object Ownership",
+        summary:
+          "A nearby person can be associated with a baggage object for camera-local monitoring.",
+        body: "Ownership is assigned using the nearest person within the configured distance and normally requires three consecutive matching frames. An overlay can therefore show Person ID:006 and Bag A -> Owned ID 006.\nTemporary owner loss can preserve the association for the configured missing-frame count. After that, the bag can become temporarily unattended and later unattended, which changes its security state. Ownership is camera-local and can be affected by occlusion, distance, and tracking quality.",
+      },
+      abandonedBags: {
+        title: "Abandoned Bags",
+        summary:
+          "The abandoned-bag workflow uses ownership and deployment-configured elapsed conditions.",
+        body: "A bag is first associated with a nearby owner when the matching conditions are met. If the owner is temporarily missing, ownership may be preserved; after the configured missing-frame and unattended conditions, the bag becomes unattended and is shown as DANGER. The processor emits an ABANDONED_BAG event with High severity and a five-second event cooldown when the configured elapsed conditions are reached.\nThe current implementation reads abandoned_bag_seconds from settings; it does not prove a universal 60-second behavior. A returning owner can restore the association when tracking matches again. Review the event and evidence rather than relying on color alone.",
+      },
+      restrictedArea: {
+        title: "Restricted Area",
+        summary:
+          "A polygon rule detects when a bounding box intersects a configured restricted zone.",
+        body: "Select Restricted Area, choose Add Region, click at least three boundary points, finish the polygon, review it, and Save. The rule is camera-specific and requires restricted_area_enabled. When a supported object's box intersects the polygon, the processor labels it RESTRICTED AREA, marks it DANGER/red, and sends a critical alert through the common path.\nIf it does not trigger, confirm the selected camera, saved points, module setting, object position, and that the camera is processing.",
+      },
+      wrongDirection: {
+        title: "Wrong Direction",
+        summary:
+          "A Direction line evaluates movement relative to its configured orientation.",
+        body: "Select Direction, choose Add Region, place exactly two endpoints, finish the line, and Save. The processor evaluates side crossing and the movement vector relative to the configured line; a negative dot-product crossing is labeled WRONG DIRECTION, marked DANGER, and emits a Critical AI event. A separate legacy vertical heuristic is also gated by wrong_direction_enabled.\nThe inspected processor alarm-source path does not add a dedicated wrong-direction sound source. Do not assume a sound; review the visual event and current alert behavior.",
+      },
+      tripwire: {
+        title: "Tripwire",
+        summary:
+          "A tripwire is a two-point line that detects an object's side crossing.",
+        body: "Select Tripwire, choose Add Region, place exactly two endpoints, finish, and Save. A side crossing marks the object DANGER, labels it TRIPWIRE, and emits one Critical event per object and zone within the five-second alert cooldown.\nIf the line is not effective, verify that it belongs to the selected camera and type, that it was saved, and that the object actually crosses the line while processing is active.",
+      },
+      loitering: {
+        title: "Loitering",
+        summary:
+          "Loitering identifies a person who remains near the same position for the configured time.",
+        body: "When loitering is enabled, the processor tracks a person's position. Movement greater than 20 pixels resets the movement timestamp; remaining near the same position until loitering_seconds is reached marks the person WARNING/High.\nLoitering is a warning condition in the inspected implementation, not a Critical alarm. If it is absent, check the setting, the selected camera, the configured duration, and whether the person has moved enough to reset the timer.",
+      },
+      annotationModes: {
+        title: "Annotation Modes",
+        summary:
+          "The editor has separate modes for Restricted Area, Direction, and Tripwire.",
+        body: "Choose the mode before drawing. Restricted Area uses a polygon with at least three points. Direction and Tripwire use lines with exactly two points. Switching modes changes what the editor is creating; points from one type do not become another type.\nThe draft is associated with the current camera. Select the correct source before changing a saved rule.",
+      },
+      addRegion: {
+        title: "Add Region",
+        summary:
+          "Add Region starts a draft shape for the selected annotation mode.",
+        body: "Select the desired mode first, then choose Add Region. Click the points on the camera view, finish the drawing, and review the draft. Restricted Area needs three or more points; Direction and Tripwire need two. The completed shape remains a local draft until Save is used.\nIf the shape is wrong, use Undo or Escape according to the editor state, then redraw it.",
+      },
+      undo: {
+        title: "Undo",
+        summary:
+          "Undo reverses the most recent supported draft or deletion action.",
+        body: "The current editor records drawing history. Undo can remove the last point or draft action and can recreate a deleted persisted zone through the backend add-zone operation. Backspace or right-click also invokes the editor's undo behavior; Enter finishes a drawing and Escape exits and discards drafts.\nIf a change has already been saved and is not in the editor history, select the correct camera and type, then use the supported delete and save workflow rather than assuming browser undo will restore it.",
+      },
+      delete: {
+        title: "Delete",
+        summary:
+          "Delete removes a saved region for the current camera and annotation type.",
+        body: "Use Delete while editing the selected camera and mode. For a persisted zone, the dashboard calls the backend immediately and records the action for undo. The saved zone is removed from the current editor state; use Save to reconcile the current mode's remaining draft with persisted data.\nDeletion is camera-specific. Confirm the selected camera and mode before removing a region.",
+      },
+      save: {
+        title: "Save",
+        summary:
+          "Save reconciles additions and deletions for the currently selected drawing mode.",
+        body: "Save compares the current draft with persisted zones for the selected camera and mode. Missing persisted zones are deleted and draft zones are created. The backend stores normalized points with source dimensions and returns normalized zone data.\nSave one annotation type at a time. After saving, refresh or reselect the camera if the view does not immediately show the updated overlays. Other cameras and other annotation types are not automatically changed.",
+      },
+      cameraZones: {
+        title: "Camera-Specific Zones",
+        summary:
+          "Saved annotations belong to both a camera and an annotation type.",
+        body: "Camera A can have Restricted Area A1 while Camera B has Restricted Area B1. Camera B does not automatically use Camera A's zones. Direction and Tripwire regions are also separate types.\nWhen a rule appears missing, select the camera that owns it, choose the matching mode, and confirm that the region was saved.",
+      },
+      alertLevels: {
+        title: "Alert Levels",
+        summary: "Severity communicates how the processor classified an event.",
+        body: "Persisted standard detections default to Medium. In the common detection path, DANGER maps to Critical and WARNING maps to High. The AI event path also stores explicit severities such as Critical or High.\nThe separate decision engine contains additional mappings, but the inspected processor path does not visibly invoke it. Use the severity shown on the actual notification or event rather than inferring a level from an object label.",
+      },
+      notifications: {
+        title: "Notification Center",
+        summary:
+          "The notification center collects AI events and provides event actions.",
+        body: "The application loads AI events, falls back to the notifications endpoint when needed, resolves camera names from camera metadata, and listens for ai_event websocket messages. A notification can show event type, camera, severity, timestamp, and available evidence.\nUse Read or mark-all-read actions as available, View to inspect an event, and Download when protected evidence is available. Clear behavior is local to the notification UI; do not assume that clearing changes the server record.",
+      },
+      eventDetails: {
+        title: "Event Details",
+        summary:
+          "Event details provide the operational context needed to review an alert.",
+        body: "Depending on the event, details can include an event ID, camera, detection type, severity, timestamp, confidence, and evidence reference. Camera names are resolved from camera metadata when available.\nReview the camera and timestamp alongside the image or detection context. Missing evidence does not mean that every frame was stored; evidence depends on event and system configuration.",
+      },
+      evidence: {
+        title: "Evidence & Screenshots",
+        summary:
+          "Selected security events may include a screenshot that can be viewed or downloaded.",
+        body: "When an event has protected evidence, use View to open it or Download to save it through the authenticated AI endpoint. The notification UI supports screenshot viewing and download for available event evidence.\nNot every event has an image. If evidence is unavailable, review the event fields, camera stream, and deployment configuration instead of assuming a capture failed.",
+      },
+      alarmSounds: {
+        title: "Alarm Sounds",
+        summary:
+          "Sound mapping depends on the alarm source and the global sound setting.",
+        body: "When sounds are enabled, fire, flame, and smoke sources use the fire alarm audio. Other alarm sources use the security alarm audio. The processor broadcasts alarm_state messages and the dashboard loops the appropriate audio while active.\nThe dashboard Stop control pauses both alarm sounds until the alarm becomes inactive. Warning-only conditions such as loitering, and the inspected wrong-direction path, should not be documented as guaranteed sound sources. Browser audio permission and the user sound setting can also prevent playback.",
+      },
+      settings: {
+        title: "User Settings",
+        summary:
+          "Settings controls are user-scoped and affect processing modules and session behavior.",
+        body: "The Settings page loads or creates user-scoped settings and supports partial updates and reset to defaults. Current controls include sound enablement, reconnect, JWT expiration, tracking, face recognition, GPU, frame skip, loitering, crowd density, abandoned bag, wrong direction, restricted area, fire, and smoke.\nThe crowd-density setting is persisted and displayed, but no corresponding processing branch was found in the inspected processor. Only rely on settings that visibly affect the current deployment and check your role if a settings control is unavailable.",
+      },
+      cameraOffline: {
+        title: "Camera Offline",
+        summary:
+          "An offline source needs a source, network, credential, and status check.",
+        body: "Check the RTSP URL, camera or NVR power, network connectivity, credentials, camera configuration, firewall, and application status. For a live source, provisioning must pass URL validation and a real first-frame probe. Then start analysis and watch for Processing followed by Running.\nIf the source stops later, inspect the dashboard websocket status and the camera's external network before changing rules.",
+      },
+      rtspProblems: {
+        title: "RTSP Problems",
+        summary:
+          "Most RTSP failures occur before registration or while the external source is unreachable.",
+        body: "Use the format supplied by the camera or NVR, for example:\nrtsp://username:password@192.168.1.100:554/stream\nConfirm the scheme is rtsp or rtsps, the host and port are reachable, credentials are correct, and the path is valid. Provisioning probes the stream and reads a frame, so a syntactically valid but unavailable URL still fails with an inline error. Check firewall/router rules and the camera/NVR independently.",
+      },
+      noAlerts: {
+        title: "No Alerts",
+        summary:
+          "An alert requires active processing, an enabled condition, and a matching object or rule.",
+        body: "Confirm that the selected camera is Running, the relevant AI or rule setting is enabled, and a saved rule exists for that same camera. Verify that the object actually satisfies the polygon, line, direction, loitering, ownership, or abandoned-bag condition.\nThen inspect notifications and event cooldown behavior. A continuing condition can be throttled, and a model detection can be missed or classified differently.",
+      },
+      noSound: {
+        title: "No Sound",
+        summary:
+          "Sound requires an active alarm source, enabled sound, and browser playback permission.",
+        body: "Check the sound setting, browser audio permissions, the alarm source, and whether the event is warning-only. Fire, flame, and smoke map to the fire alarm; other active sources map to the security alarm. Loitering is WARNING/High and should not be treated as a guaranteed alarm.\nThe Dashboard Stop control silences active audio until the alarm becomes inactive, so wait for the state to clear before retesting.",
+      },
+      annotationProblems: {
+        title: "Annotation Problems",
+        summary:
+          "Most editor issues come from the selected camera, mode, points, or an unsaved draft.",
+        body: "Confirm the selected camera and annotation type. Use at least three points for Restricted Area and exactly two for Direction or Tripwire. Finish the drawing, then Save. Use Undo for the last draft or deletion, and remember that Escape discards drafts.\nIf another camera does not show the zone, that is expected: annotations are camera-specific. If a saved zone remains wrong, delete it in the correct mode and save the reconciled state.",
+      },
+      faq: {
+        title: "FAQ",
+        summary: "Answers to common operator questions.",
+        body: "What is RTSP? It is the stream address supplied by a network camera or NVR; AeroGuard validates it and reads a first frame during live provisioning.\nWhy did a bag turn yellow or red? Ownership was temporarily lost or the configured unattended conditions were reached; review the camera-local owner state and event.\nWhy does Wrong Direction not play a sound? The inspected explicit direction path creates a Critical event but does not add a dedicated alarm source.\nWhy are zones missing on another camera? Zones are saved per camera and annotation type.\nWhy is a notification still visible after refresh? The app reloads event history from its event/notification endpoints; clearing the local UI does not necessarily delete a server event.",
+      },
+      systemOverview: {
+        title: "System Overview",
+        summary:
+          "Use this reference chain to understand how a security event reaches an operator.",
+        body: "Camera source -> Stream -> AI processing -> Tracking -> Persistent display identity or ownership -> Security rules -> Event -> Notification or alarm.\nThe source provides frames. Processing detects supported classes. Tracking links nearby observations. The identity registry provides short-lived camera-local IDs and ownership associates baggage with a nearby person. Rules evaluate zones, lines, movement, or time. The resulting event is persisted or broadcast, then the dashboard presents a notification, evidence, and an alarm source when applicable.",
+      },
+    },
+  },
   settings: {
     title: "System Settings",
     subtitle: "Core Intelligence & Infrastructure Parameters",
