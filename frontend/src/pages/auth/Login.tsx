@@ -237,27 +237,46 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
         <div className="max-w-screen-2xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-500 font-medium">
           <div>© 2027 AeroGuard AI. All rights reserved.</div>
           <div className="flex flex-wrap justify-center gap-6">
-            <Link
-              to="/privacy-policy"
+            <a
+              href="/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
               className="hover:text-white transition-colors"
             >
               Privacy Policy
-            </Link>
-            <Link
-              to="/terms-of-service"
+            </a>
+            <a
+              href="/terms-of-service"
+              target="_blank"
+              rel="noopener noreferrer"
               className="hover:text-white transition-colors"
             >
               Terms of Service
-            </Link>
-            <Link to="/docs" className="hover:text-white transition-colors">
+            </a>
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
               Documentation
-            </Link>
-            <Link to="/support" className="hover:text-white transition-colors">
+            </a>
+            <a
+              href="/support"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
               Support
-            </Link>
-            <Link to="/contact" className="hover:text-white transition-colors">
+            </a>
+            <a
+              href="/contact"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white transition-colors"
+            >
               Contact
-            </Link>
+            </a>
           </div>
         </div>
       </footer>

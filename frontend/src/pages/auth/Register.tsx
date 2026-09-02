@@ -339,27 +339,46 @@ const Register = () => {
           © 2027 AeroGuard AI. All rights reserved.
         </p>
         <div className="flex flex-wrap justify-center gap-6 text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-          <Link
-            to="/privacy-policy"
+          <a
+            href="/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-white transition-colors"
           >
             Privacy Policy
-          </Link>
-          <Link
-            to="/terms-of-service"
+          </a>
+          <a
+            href="/terms-of-service"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-white transition-colors"
           >
             Terms of Service
-          </Link>
-          <Link to="/docs" className="hover:text-white transition-colors">
+          </a>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white transition-colors"
+          >
             Documentation
-          </Link>
-          <Link to="/support" className="hover:text-white transition-colors">
+          </a>
+          <a
+            href="/support"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white transition-colors"
+          >
             Support
-          </Link>
-          <Link to="/contact" className="hover:text-white transition-colors">
+          </a>
+          <a
+            href="/contact"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-white transition-colors"
+          >
             Contact
-          </Link>
+          </a>
         </div>
       </footer>
     </div>

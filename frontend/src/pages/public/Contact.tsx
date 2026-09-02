@@ -276,24 +276,46 @@ const Contact = () => {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs font-medium text-slate-500 md:flex-row">
           <p>{t("profile.copyright")}</p>
           <div className="flex flex-wrap justify-center gap-6">
-            <Link to="/privacy-policy" className="hover:text-white">
+            <a
+              href="/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white"
+            >
               {t("profile.privacyPolicy")}
-            </Link>
-            <Link to="/terms-of-service" className="hover:text-white">
+            </a>
+            <a
+              href="/terms-of-service"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white"
+            >
               {t("profile.termsOfService")}
-            </Link>
-            <Link to="/docs" className="hover:text-white">
+            </a>
+            <a
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white"
+            >
               {t("profile.documentation")}
-            </Link>
-            <Link to="/support" className="hover:text-white">
+            </a>
+            <a
+              href="/support"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white"
+            >
               {t("profile.support")}
-            </Link>
-            <Link
-              to="/contact"
+            </a>
+            <a
+              href="/contact"
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-emerald-400 hover:text-emerald-300"
             >
               {t("profile.contact")}
-            </Link>
+            </a>
           </div>
         </div>
       </footer>

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { userService } from "../services/api";
 import type { IUserProfile } from "../services/api";
 import { useNotification } from "../components/NotificationSystem/useNotification";
@@ -759,27 +758,46 @@ const Profile: React.FC = () => {
           © 2027 AeroGuard AI. All rights reserved.
         </p>
         <div className="flex gap-8 text-[11px] text-gray-500 font-bold tracking-tight uppercase">
-          <Link
-            to="/privacy-policy"
+          <a
+            href="/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-white transition-colors"
           >
             {t("profile.privacyPolicy")}
-          </Link>
-          <Link
-            to="/terms-of-service"
+          </a>
+          <a
+            href="/terms-of-service"
+            target="_blank"
+            rel="noopener noreferrer"
             className="hover:text-white transition-colors"
           >
             {t("profile.termsOfService")}
-          </Link>
-          <Link to="/docs" className="transition-colors hover:text-white">
+          </a>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-white"
+          >
             {t("profile.documentation")}
-          </Link>
-          <Link to="/support" className="transition-colors hover:text-white">
+          </a>
+          <a
+            href="/support"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-white"
+          >
             {t("profile.support")}
-          </Link>
-          <Link to="/contact" className="transition-colors hover:text-white">
+          </a>
+          <a
+            href="/contact"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-white"
+          >
             {t("profile.contact")}
-          </Link>
+          </a>
         </div>
       </footer>
     </div>
