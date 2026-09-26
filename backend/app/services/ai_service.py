@@ -63,6 +63,7 @@ class AIService:
         owner_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         screenshot_bytes: Optional[bytes] = None,
+        broadcast: bool = True,
     ):
         payload = {
             "camera_id": camera_id,
@@ -104,23 +105,86 @@ class AIService:
             except Exception:
                 payload["screenshot_path"] = None
         ev = self.repo.create_event(payload)
-        # send websocket notification (non-blocking callers should await if needed)
+        if broadcast:
+            # send websocket notification (non-blocking callers should await if needed)
+            try:
+                import asyncio
+                asyncio.create_task(manager.broadcast(
+                    {
+                        "event": "ai_event",
+                        "data": {
+                            "event_id": str(ev.event_id),
+                            "camera_id": str(ev.camera_id),
+                            "detection_type": ev.detection_type,
+                            "severity": ev.severity,
+                            "confidence": ev.confidence,
+                            "created_at": ev.created_at.isoformat(),
+                            "screenshot": ev.screenshot_path,
+                        }
+                    },
+                    audience_user_id=(
+                        str(getattr(camera, "owner_id", "")) if camera else None
+                    ),
+                ))
+            except Exception:
+                # if websocket manager unavailable, continue silently
+                pass
+        return ev
+
+    async def attach_screenshot(self, event_id: str, image_bytes: bytes):
+        ev = self.repo.get_event(event_id)
+        if not ev or ev.screenshot_path:
+            return ev
+
+        camera = None
+        if hasattr(self.repo, "db") and hasattr(self.repo.db, "query"):
+            try:
+                camera = self.repo.db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
+            except Exception:
+                camera = None
+
         try:
-            import asyncio
-            asyncio.create_task(manager.broadcast({
-                "event": "ai_event",
-                "data": {
-                    "event_id": str(ev.event_id),
-                    "camera_id": str(ev.camera_id),
-                    "detection_type": ev.detection_type,
-                    "severity": ev.severity,
-                    "confidence": ev.confidence,
-                    "created_at": ev.created_at.isoformat(),
-                    "screenshot": ev.screenshot_path,
-                }
-            }))
+            path = self._save_screenshot(
+                image_bytes,
+                camera_name=getattr(camera, "camera_name", None) if camera else None,
+                detection_type=ev.detection_type,
+                when=datetime.utcnow(),
+            )
         except Exception:
-            # if websocket manager unavailable, continue silently
+            return ev
+
+        metadata = dict(ev.event_metadata or {})
+        metadata.pop("_pending_screenshot", None)
+        ev = self.repo.update_event(
+            str(ev.event_id),
+            screenshot_path=path,
+            event_metadata=metadata,
+        )
+        if ev is None:
+            return None
+
+        try:
+            await manager.broadcast(
+                {
+                    "event": "ai_event",
+                    "data": {
+                        "event_id": str(ev.event_id),
+                        "camera_id": str(ev.camera_id),
+                        "detection_type": ev.detection_type,
+                        "severity": ev.severity,
+                        "confidence": ev.confidence,
+                        "created_at": ev.created_at.isoformat(),
+                        "screenshot": ev.screenshot_path,
+                    }
+                },
+                audience_user_id=(
+                    str(
+                        getattr(camera, "owner_id", None)
+                        or getattr(ev, "detected_by", "")
+                    )
+                ),
+            )
+        except Exception:
             pass
         return ev
         

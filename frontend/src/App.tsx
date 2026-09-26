@@ -41,6 +41,9 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] =
     useState(!!getStoredAuthToken());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const knownNotificationIdsRef = useRef(new Set<string>());
+  const liveNotificationIdsRef = useRef(new Set<string>());
   const [cameraMap, setCameraMap] = useState<Record<string, string>>({});
   const [screenshotModalEventId, setScreenshotModalEventId] = useState<
     string | null
@@ -51,10 +54,6 @@ function App() {
 
   const panelRef = useRef<HTMLDivElement>(null);
   const bellRef = useRef<HTMLButtonElement>(null);
-
-  const unreadCount = notifications.filter(
-    (item) => item.status === "Unread",
-  ).length;
 
   const sortedNotifications = useMemo(
     () =>
@@ -107,6 +106,10 @@ function App() {
   const handleLogout = () => {
     closeActiveSocket();
     localStorage.removeItem("ag_token");
+    setNotifications([]);
+    setUnreadNotificationCount(0);
+    knownNotificationIdsRef.current.clear();
+    liveNotificationIdsRef.current.clear();
     setIsAuthenticated(false);
     setActivePage("dashboard");
   };
@@ -169,9 +172,26 @@ function App() {
       };
     };
 
+    const mergeNotification = (
+      existing: NotificationItem,
+      incoming: NotificationItem,
+    ): NotificationItem => ({
+      ...existing,
+      ...incoming,
+      eventId: incoming.eventId ?? existing.eventId,
+      status: existing.status === "Read" ? "Read" : incoming.status,
+      screenshot: incoming.screenshot ?? existing.screenshot ?? null,
+    });
+
     const loadNotifications = async () => {
       const fetched = await notificationService.fetchNotifications();
-      const hydrated = fetched.map(hydrateNotification);
+      const hydrated = fetched.items.map(hydrateNotification);
+      const fetchedIds = new Set(hydrated.map((item) => item.id));
+      hydrated.forEach((item) => knownNotificationIdsRef.current.add(item.id));
+      const liveOnlyCount = [...liveNotificationIdsRef.current].filter(
+        (id) => !fetchedIds.has(id),
+      ).length;
+      setUnreadNotificationCount(fetched.unreadCount + liveOnlyCount);
       const sorted = [...hydrated].sort(
         (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
       );
@@ -179,7 +199,10 @@ function App() {
         const byId = new Map(prev.map((item) => [item.id, item]));
         sorted.forEach((item) => {
           const existing = byId.get(item.id);
-          byId.set(item.id, existing ? { ...item, ...existing } : item);
+          byId.set(
+            item.id,
+            existing ? mergeNotification(existing, item) : item,
+          );
         });
         return [...byId.values()].sort(
           (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
@@ -191,10 +214,17 @@ function App() {
 
     socketHandle = notificationService.subscribeToLiveAlerts((notification) => {
       const hydrated = hydrateNotification(notification);
+      const alreadyTracked =
+        knownNotificationIdsRef.current.has(hydrated.id) ||
+        liveNotificationIdsRef.current.has(hydrated.id);
+      liveNotificationIdsRef.current.add(hydrated.id);
+      if (!alreadyTracked && hydrated.status === "Unread") {
+        setUnreadNotificationCount((count) => count + 1);
+      }
       setNotifications((prev) => {
         if (prev.some((item) => item.id === hydrated.id)) {
           return prev.map((item) =>
-            item.id === hydrated.id ? { ...item, ...hydrated } : item,
+            item.id === hydrated.id ? mergeNotification(item, hydrated) : item,
           );
         }
         return [hydrated, ...prev];
@@ -292,6 +322,10 @@ function App() {
     setNotifications((prev) =>
       prev.map((item) => (item.id === id ? { ...item, status: "Read" } : item)),
     );
+    if (notification?.status === "Unread") {
+      liveNotificationIdsRef.current.delete(notification.id);
+      setUnreadNotificationCount((count) => Math.max(0, count - 1));
+    }
   };
 
   const markAllAsRead = async () => {
@@ -304,9 +338,14 @@ function App() {
     setNotifications((prev) =>
       prev.map((item) => ({ ...item, status: "Read" })),
     );
+    setUnreadNotificationCount(0);
+    liveNotificationIdsRef.current.clear();
   };
 
-  const clearNotifications = () => setNotifications([]);
+  const clearNotifications = () => {
+    setNotifications([]);
+    setUnreadNotificationCount(0);
+  };
 
   const getSeverityStyle = (severity: NotificationSeverity) => {
     switch (severity) {
@@ -374,9 +413,9 @@ function App() {
                 aria-expanded={isNotificationsOpen}
               >
                 <Bell size={18} />
-                {unreadCount > 0 && (
+                {unreadNotificationCount > 0 && (
                   <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">
-                    {unreadCount}
+                    {unreadNotificationCount}
                   </span>
                 )}
               </button>

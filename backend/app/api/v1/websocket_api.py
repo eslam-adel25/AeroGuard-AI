@@ -17,7 +17,11 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    await manager.connect(websocket)
+    await manager.connect(
+        websocket,
+        user_id=str(payload.get("user_id")) if payload.get("user_id") else None,
+        role=payload.get("role"),
+    )
     try:
         while True:
             await websocket.receive_text()

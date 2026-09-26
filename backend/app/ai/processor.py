@@ -123,6 +123,7 @@ class AIProcessor:
         # مخازن الذاكرة الحية
         self.last_frames = {}
         self.last_alert_time = {}
+        self.alert_persistence = {}
         self.object_history = {}
         self.loitering_tracker = {}  # camera_id -> {track_id: {first_seen, last_pos, last_move_time}}
         self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
@@ -237,6 +238,74 @@ class AIProcessor:
         alerts.append(time.time())
         now = time.time()
         self.active_critical_alerts[camera_key] = [ts for ts in alerts if now - ts < 5]
+
+    async def _register_persistent_alert(
+        self,
+        ai_service,
+        camera_id,
+        alert_key,
+        detection_type,
+        severity,
+        confidence,
+        track_id,
+        owner_id,
+        metadata,
+        annotated_frame,
+        active_alert_keys,
+        capture_screenshot=False,
+    ):
+        active_alert_keys.add(alert_key)
+        now = time.monotonic()
+        state = self.alert_persistence.get(alert_key)
+
+        if state is None:
+            if time.time() - self.last_alert_time.get(alert_key, 0) <= 5:
+                return
+            event = ai_service.register_event(
+                camera_id=camera_id,
+                detection_type=detection_type,
+                severity=severity,
+                confidence=confidence,
+                track_id=track_id,
+                user_id=owner_id,
+                metadata={**metadata, "_pending_screenshot": True},
+                screenshot_bytes=None,
+                broadcast=False,
+            )
+            state = {
+                "started_at": now,
+                "event_id": str(event.event_id),
+                "screenshot_captured": False,
+            }
+            self.alert_persistence[alert_key] = state
+            self.last_alert_time[alert_key] = time.time()
+
+        if (
+            not capture_screenshot
+            or state["screenshot_captured"]
+            or now - state["started_at"] < 5
+        ):
+            return
+
+        try:
+            encoded, jpg = cv2.imencode(".jpg", annotated_frame)
+            if not encoded:
+                return
+            updated_event = await ai_service.attach_screenshot(
+                state["event_id"],
+                jpg.tobytes(),
+            )
+        except Exception:
+            return
+
+        if updated_event is not None and updated_event.screenshot_path:
+            state["screenshot_captured"] = True
+
+    def _reset_inactive_alert_persistence(self, camera_id, active_alert_keys):
+        prefix = f"{camera_id}_"
+        for alert_key in list(self.alert_persistence):
+            if alert_key.startswith(prefix) and alert_key not in active_alert_keys:
+                self.alert_persistence.pop(alert_key, None)
 
     def _persist_detection(self, db_session, camera_id, owner_id, detection_type, confidence, track_id, status=None):
         if not owner_id:
@@ -869,6 +938,7 @@ class AIProcessor:
                     for zone in zones
                 )
 
+                active_alert_keys = set()
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
                         print(f"📌 [{camera_id}] track loop break due to max_objs={max_objs}")
@@ -932,6 +1002,7 @@ class AIProcessor:
                         object_label = self._format_overlay_label(display_id, label_name)
 
                     overlay_label = object_label
+                    alert_key = None
                     in_restricted = False
                     should_skip_rule_engine = (
                         label_name in {"bag", "backpack", "suitcase"}
@@ -974,27 +1045,19 @@ class AIProcessor:
                                                 display_label = "WRONG DIRECTION"
                                                 overlay_label = f"{object_label}\nWRONG DIRECTION"
                                                 alert_key = f"{camera_id}_{obj_id}_WRONG_DIR_{getattr(zone, 'zone_id', '')}"
-                                                if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                                                    try:
-                                                        _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                                        img_bytes = jpg.tobytes() if jpg is not None else None
-                                                    except Exception:
-                                                        img_bytes = None
-                                                    ai_service.register_event(
-                                                        camera_id=camera_id,
-                                                        detection_type=display_label,
-                                                        severity="Critical",
-                                                        confidence=float(conf),
-                                                        track_id=str(obj_id),
-                                                        user_id=None,
-                                                        metadata={"bbox": [x1, y1, x2, y2]},
-                                                        screenshot_bytes=img_bytes,
-                                                    )
-                                                    await manager.broadcast({
-                                                        "event": "new_alert",
-                                                        "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
-                                                    })
-                                                    self.last_alert_time[alert_key] = time.time()
+                                                await self._register_persistent_alert(
+                                                    ai_service,
+                                                    camera_id,
+                                                    alert_key,
+                                                    display_label,
+                                                    "Critical",
+                                                    float(conf),
+                                                    str(obj_id),
+                                                    camera_owner_id,
+                                                    {"bbox": [x1, y1, x2, y2]},
+                                                    annotated_frame,
+                                                    active_alert_keys,
+                                                )
 
                                 # Tripwire: any crossing of the defined line triggers one alert per crossing
                                 elif "tripwire" in ztype:
@@ -1012,27 +1075,19 @@ class AIProcessor:
                                             display_label = "TRIPWIRE"
                                             overlay_label = f"{object_label}\nTRIPWIRE CROSSED"
                                             alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
-                                            if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                                                try:
-                                                    _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                                    img_bytes = jpg.tobytes() if jpg is not None else None
-                                                except Exception:
-                                                    img_bytes = None
-                                                ai_service.register_event(
-                                                    camera_id=camera_id,
-                                                    detection_type=display_label,
-                                                    severity="Critical",
-                                                    confidence=float(conf),
-                                                    track_id=str(obj_id),
-                                                    user_id=None,
-                                                    metadata={"bbox": [x1, y1, x2, y2]},
-                                                    screenshot_bytes=img_bytes,
-                                                )
-                                                await manager.broadcast({
-                                                    "event": "new_alert",
-                                                    "data": {"type": display_label, "priority": "Critical", "camera_id": str(camera_id)}
-                                                })
-                                                self.last_alert_time[alert_key] = time.time()
+                                            await self._register_persistent_alert(
+                                                ai_service,
+                                                camera_id,
+                                                alert_key,
+                                                display_label,
+                                                "Critical",
+                                                float(conf),
+                                                str(obj_id),
+                                                camera_owner_id,
+                                                {"bbox": [x1, y1, x2, y2]},
+                                                annotated_frame,
+                                                active_alert_keys,
+                                            )
 
                                 # Default: restricted polygon area
                                 else:
@@ -1149,27 +1204,19 @@ class AIProcessor:
                                 last_near = bag_rec.get("last_near_person", 0)
                                 if (now_ts - first_seen >= abandoned_seconds) and (now_ts - last_near >= abandoned_seconds):
                                     alert_key = f"{camera_id}_{obj_id}_ABANDONED"
-                                    if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                                        try:
-                                            _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                            img_bytes = jpg.tobytes() if jpg is not None else None
-                                        except Exception:
-                                            img_bytes = None
-                                        ai_service.register_event(
-                                            camera_id=camera_id,
-                                            detection_type="ABANDONED_BAG",
-                                            severity="High",
-                                            confidence=float(conf),
-                                            track_id=str(obj_id),
-                                            user_id=None,
-                                            metadata={"bbox": [x1, y1, x2, y2]},
-                                            screenshot_bytes=img_bytes,
-                                        )
-                                        await manager.broadcast({
-                                            "event": "new_alert",
-                                            "data": {"type": "ABANDONED_BAG", "priority": "High", "camera_id": str(camera_id)}
-                                        })
-                                        self.last_alert_time[alert_key] = time.time()
+                                    await self._register_persistent_alert(
+                                        ai_service,
+                                        camera_id,
+                                        alert_key,
+                                        "ABANDONED_BAG",
+                                        "High",
+                                        float(conf),
+                                        str(obj_id),
+                                        camera_owner_id,
+                                        {"bbox": [x1, y1, x2, y2]},
+                                        annotated_frame,
+                                        active_alert_keys,
+                                    )
 
                     # Fire / Smoke immediate critical events
                     # Check if fire/smoke detection is enabled
@@ -1198,38 +1245,22 @@ class AIProcessor:
                     if status in ["DANGER", "WARNING"]:
                         if overlay_label == object_label:
                             overlay_label = f"{object_label}\n{display_label}"
-                        alert_key = f"{camera_id}_{obj_id}_{status}"
-                        if time.time() - self.last_alert_time.get(alert_key, 0) > 5:
-                            # also register AIEvent and broadcast
-                            try:
-                                # capture a quick JPEG of the annotated frame
-                                _, jpg = cv2.imencode('.jpg', annotated_frame)
-                                img_bytes = jpg.tobytes() if jpg is not None else None
-                            except Exception:
-                                img_bytes = None
-
-                            if status == "DANGER":
-                                self._register_critical_alert(camera_id)
-                            ai_service.register_event(
-                                camera_id=camera_id,
-                                detection_type=display_label,
-                                severity="Critical" if status == "DANGER" else "High",
-                                confidence=float(conf),
-                                track_id=str(obj_id),
-                                user_id=camera_owner_id,
-                                metadata={"bbox": [x1, y1, x2, y2]},
-                                screenshot_bytes=img_bytes,
-                            )
-
-                            await manager.broadcast({
-                                "event": "new_alert",
-                                "data": {
-                                    "type": display_label,
-                                    "priority": "Critical" if status == "DANGER" else "High",
-                                    "camera_id": str(camera_id)
-                                }
-                            })
-                            self.last_alert_time[alert_key] = time.time()
+                        alert_key = alert_key or f"{camera_id}_{obj_id}_{display_label}"
+                        if status == "DANGER" and alert_key not in self.alert_persistence:
+                            self._register_critical_alert(camera_id)
+                        await self._register_persistent_alert(
+                            ai_service,
+                            camera_id,
+                            alert_key,
+                            display_label,
+                            "Critical" if status == "DANGER" else "High",
+                            float(conf),
+                            str(obj_id),
+                            camera_owner_id,
+                            {"bbox": [x1, y1, x2, y2]},
+                            annotated_frame,
+                            active_alert_keys,
+                        )
 
                     draw_settings = self._get_overlay_draw_settings(annotated_frame.shape)
                     self._draw_detection_overlay(
@@ -1242,6 +1273,24 @@ class AIProcessor:
                         box_color,
                         draw_settings,
                     )
+
+                    if alert_key is not None:
+                        await self._register_persistent_alert(
+                            ai_service,
+                            camera_id,
+                            alert_key,
+                            display_label,
+                            "Critical" if status == "DANGER" else "High",
+                            float(conf),
+                            str(obj_id),
+                            camera_owner_id,
+                            {"bbox": [x1, y1, x2, y2]},
+                            annotated_frame,
+                            active_alert_keys,
+                            capture_screenshot=True,
+                        )
+
+                self._reset_inactive_alert_persistence(camera_id, active_alert_keys)
 
                 elapsed = time.time() - start_time
                 current_fps = (
@@ -1297,6 +1346,7 @@ class AIProcessor:
             if cap is not None:
                 cap.release()
                 print(f"📌 [{camera_id}] cap released and processing ended")
+            self._reset_inactive_alert_persistence(camera_id, set())
             await manager.broadcast({
                 "event": "camera_status",
                 "data": {

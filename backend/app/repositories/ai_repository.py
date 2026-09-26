@@ -126,6 +126,7 @@ class AIRepository:
         camera_id: Optional[str] = None,
         user_id: Optional[str] = None,
         owner_id: Optional[str] = None,
+        exclude_pending_screenshots: bool = False,
         detection_type: Optional[str] = None,
         severity: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -142,6 +143,9 @@ class AIRepository:
         if owner_id:
             q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
             filters.append(Camera.owner_id == owner_id)
+        if exclude_pending_screenshots:
+            pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
+            filters.append(or_(pending.is_(None), pending.is_(False)))
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
         if severity:
@@ -154,6 +158,26 @@ class AIRepository:
             q = q.filter(and_(*filters))
         q = q.order_by(AIEvent.created_at.desc()).limit(limit).offset(offset)
         return q.all()
+
+    def count_unread_events(
+        self,
+        camera_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        exclude_pending_screenshots: bool = False,
+    ) -> int:
+        q = self.db.query(func.count(AIEvent.event_id)).filter(
+            AIEvent.is_read.is_(False)
+        )
+        if camera_id:
+            q = q.filter(AIEvent.camera_id == camera_id)
+        if owner_id:
+            q = q.join(Camera, Camera.camera_id == AIEvent.camera_id).filter(
+                Camera.owner_id == owner_id
+            )
+        if exclude_pending_screenshots:
+            pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
+            q = q.filter(or_(pending.is_(None), pending.is_(False)))
+        return int(q.scalar() or 0)
 
     # For reports: returns (total, items)
     def query_events_for_report(

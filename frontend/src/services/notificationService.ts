@@ -20,6 +20,11 @@ export interface NotificationItem {
   screenshot?: string | null;
 }
 
+export interface NotificationHistory {
+  items: NotificationItem[];
+  unreadCount: number;
+}
+
 const normalizeAIEvent = (data: AIEventWSData): NotificationItem => ({
   id: data.event_id,
   eventId: data.event_id,
@@ -33,7 +38,7 @@ const normalizeAIEvent = (data: AIEventWSData): NotificationItem => ({
 });
 
 export const notificationService = {
-  fetchNotifications: async (): Promise<NotificationItem[]> => {
+  fetchNotifications: async (): Promise<NotificationHistory> => {
     try {
       // Prefer AI events as the notifications history
       const resp = await aiService.listEvents({ limit: 50 });
@@ -42,7 +47,7 @@ export const notificationService = {
           ? resp.data.items
           : resp.data
       ) as Array<Record<string, unknown>>;
-      return payload.map((item) => ({
+      const items = payload.map((item) => ({
         id: String(
           item.event_id ??
             item.id ??
@@ -76,13 +81,20 @@ export const notificationService = {
           (item.screenshot as string) ??
           null,
       }));
+      return {
+        items,
+        unreadCount: Number(
+          resp.data?.unread_count ??
+            items.filter((item) => item.status === "Unread").length,
+        ),
+      };
     } catch (err) {
       console.error("fetchNotifications failed", err);
       try {
         // fallback to legacy notifications endpoint
         const response = await api.get("/notifications/");
         const payload = response.data as Array<Record<string, unknown>>;
-        return payload.map((item) => ({
+        const items = payload.map((item) => ({
           id: String(
             item.id ?? `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
           ),
@@ -96,8 +108,12 @@ export const notificationService = {
           status: item.status === "Read" ? "Read" : "Unread",
           screenshot: null,
         }));
+        return {
+          items,
+          unreadCount: items.filter((item) => item.status === "Unread").length,
+        };
       } catch {
-        return [];
+        return { items: [], unreadCount: 0 };
       }
     }
   },

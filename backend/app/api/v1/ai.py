@@ -23,20 +23,34 @@ def list_ai_events(camera_id: Optional[str] = None, limit: int = 100, offset: in
         if not camera or camera.owner_id != current_user.get("user_id"):
             raise HTTPException(status_code=403, detail="Forbidden")
     owner_id = None if is_admin else current_user.get("user_id")
-    items = repo.list_events(camera_id=camera_id, owner_id=owner_id, limit=limit, offset=offset)
-    return {"items": [
-        {
-            "event_id": str(i.event_id),
-            "camera_id": str(i.camera_id),
-            "detection_type": i.detection_type,
-            "severity": i.severity,
-            "confidence": i.confidence,
-            "screenshot_path": i.screenshot_path,
-            "created_at": i.created_at.isoformat(),
-            "status": "Read" if i.is_read else "Unread",
-            "metadata": i.event_metadata,
-        } for i in items
-    ]}
+    items = repo.list_events(
+        camera_id=camera_id,
+        owner_id=owner_id,
+        exclude_pending_screenshots=True,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [
+            {
+                "event_id": str(i.event_id),
+                "camera_id": str(i.camera_id),
+                "detection_type": i.detection_type,
+                "severity": i.severity,
+                "confidence": i.confidence,
+                "screenshot_path": i.screenshot_path,
+                "created_at": i.created_at.isoformat(),
+                "status": "Read" if i.is_read else "Unread",
+                "metadata": i.event_metadata,
+            }
+            for i in items
+        ],
+        "unread_count": repo.count_unread_events(
+            camera_id=camera_id,
+            owner_id=owner_id,
+            exclude_pending_screenshots=True,
+        ),
+    }
 
 @router.patch("/ai/events/{event_id}/read")
 def mark_ai_event_read(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
