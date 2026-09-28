@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -12,9 +12,17 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+export type ActivePage =
+  | "dashboard"
+  | "cameras"
+  | "reports"
+  | "alerts"
+  | "users"
+  | "settings";
+
 interface SidebarProps {
-  activePage: string;
-  setActivePage: (page: string) => void;
+  activePage: ActivePage;
+  setActivePage: Dispatch<SetStateAction<ActivePage>>;
   onLogout: () => void;
 }
 
@@ -37,7 +45,7 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
     { id: "reports", label: t("sidebar.analytics"), icon: FileText },
     { id: "users", label: t("sidebar.profile"), icon: User },
     { id: "settings", label: t("sidebar.control"), icon: Settings },
-  ];
+  ] as const;
 
   return (
     <aside
