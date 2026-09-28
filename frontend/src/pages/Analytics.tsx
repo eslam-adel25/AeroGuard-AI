@@ -1,23 +1,30 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
-import { cameraService, reportService } from "../services/api";
+import { aiService, cameraService, reportService } from "../services/api";
 import { createSocket, type WSMessage } from "../services/socket";
+import { useNotification } from "../components/NotificationSystem/useNotification";
 import {
   AlertTriangle,
   Car,
+  Copy,
   Crosshair,
+  Eye,
+  FileText,
   Flame,
   Gauge,
+  ImageOff,
+  Loader2,
   Radar,
   RefreshCw,
+  Search,
+  Shield,
   ShieldAlert,
   ShieldCheck,
   Siren,
   Users,
   Video,
-  Shield,
-  FileText,
+  X,
   Calendar,
   ChevronDown,
 } from "lucide-react";
@@ -39,6 +46,40 @@ import {
 type CameraOption = {
   camera_id: string;
   camera_name: string;
+  location?: string;
+};
+
+const alertTypeDescriptions: Record<string, string> = {
+  ABANDONED_BAG: "Abandoned bag detected",
+  LOITERING: "Loitering detected",
+  "RESTRICTED AREA": "Restricted area detected",
+};
+
+const getAlertDescription = (value: unknown) => {
+  const eventType = typeof value === "string" ? value.trim() : "";
+  if (!eventType) return "Unknown event type";
+
+  return (
+    alertTypeDescriptions[eventType.toUpperCase()] ??
+    eventType
+      .replace(/[_-]+/g, " ")
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (character) => character.toUpperCase())
+  );
+};
+
+const formatEventTimestamp = (value: unknown) => {
+  if (typeof value !== "string") return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 };
 
 type SummaryPayload = {
@@ -224,12 +265,184 @@ const Analytics = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [alertEventId, setAlertEventId] = useState("");
+  const [alertEvent, setAlertEvent] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [alertEventError, setAlertEventError] = useState("");
+  const [isSearchingAlert, setIsSearchingAlert] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false);
+  const [eventSuggestions, setEventSuggestions] = useState<
+    Array<Record<string, unknown>>
+  >([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] =
+    useState(0);
+  const screenshotUrlRef = useRef<string | null>(null);
+  const suggestionRequestId = useRef(0);
+  const { toast } = useNotification();
+
+  const revokeScreenshotUrl = useCallback(() => {
+    if (screenshotUrlRef.current) {
+      URL.revokeObjectURL(screenshotUrlRef.current);
+      screenshotUrlRef.current = null;
+    }
+    setScreenshotUrl(null);
+  }, []);
+
+  const clearAlertInvestigation = useCallback(() => {
+    setAlertEventId("");
+    setAlertEvent(null);
+    setAlertEventError("");
+    setIsSearchingAlert(false);
+    setScreenshotLoading(false);
+    setEventSuggestions([]);
+    setSuggestionsLoading(false);
+    setShowSuggestions(false);
+    setHighlightedSuggestionIndex(0);
+    revokeScreenshotUrl();
+    setShowScreenshotModal(false);
+  }, [revokeScreenshotUrl]);
+
+  const performAlertSearch = useCallback(
+    async (nextValue: string) => {
+      const normalizedValue = nextValue.trim();
+      if (!normalizedValue) {
+        setAlertEventError("Please enter an Event ID.");
+        return;
+      }
+      if (
+        !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/i.test(
+          normalizedValue,
+        )
+      ) {
+        setAlertEventError("Please enter a valid Event ID.");
+        return;
+      }
+
+      setAlertEventError("");
+      setIsSearchingAlert(true);
+      setAlertEvent(null);
+      setShowSuggestions(false);
+      revokeScreenshotUrl();
+
+      try {
+        const response = await aiService.getEvent(normalizedValue);
+        const payload = response.data as Record<string, unknown>;
+        setAlertEvent(payload);
+
+        setScreenshotLoading(true);
+        try {
+          const screenshotResponse =
+            await aiService.downloadScreenshot(normalizedValue);
+          const blob = screenshotResponse.data as Blob;
+          if (!(blob instanceof Blob) || blob.size === 0) {
+            return;
+          }
+          const objectUrl = URL.createObjectURL(blob);
+          screenshotUrlRef.current = objectUrl;
+          setScreenshotUrl(objectUrl);
+        } catch {
+          return;
+        } finally {
+          setScreenshotLoading(false);
+        }
+      } catch (error: unknown) {
+        const status = (error as { response?: { status?: number } })?.response
+          ?.status;
+        if (status === 404) {
+          setAlertEventError("Alert not found");
+        } else if (status === 401) {
+          setAlertEventError("Please sign in to continue.");
+        } else if (status === 403) {
+          setAlertEventError("You are not authorized to view this alert.");
+        } else {
+          setAlertEventError("Alert not found");
+        }
+      } finally {
+        setIsSearchingAlert(false);
+      }
+    },
+    [revokeScreenshotUrl],
+  );
+
+  useEffect(() => {
+    return () => {
+      revokeScreenshotUrl();
+    };
+  }, [revokeScreenshotUrl]);
+
+  useEffect(() => {
+    const trimmed = alertEventId.trim();
+    const isCompleteEventId =
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/i.test(
+        trimmed,
+      );
+    if (!trimmed || trimmed.length < 4 || isCompleteEventId) {
+      setEventSuggestions([]);
+      setShowSuggestions(false);
+      setSuggestionsLoading(false);
+      return;
+    }
+
+    const requestId = ++suggestionRequestId.current;
+    const timeout = window.setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const response = await aiService.listEvents({
+          event_id_prefix: trimmed,
+          limit: 8,
+        });
+        const payload = response.data as Record<string, unknown>;
+        const rawItems = Array.isArray(payload?.items)
+          ? (payload.items as Array<Record<string, unknown>>)
+          : Array.isArray(payload)
+            ? (payload as Array<Record<string, unknown>>)
+            : [];
+        const matches = rawItems
+          .filter((item) => {
+            const value =
+              typeof item.event_id === "string" ? item.event_id : "";
+            return value.toLowerCase().startsWith(trimmed.toLowerCase());
+          })
+          .slice(0, 8)
+          .map((item) => ({
+            event_id: String(item.event_id ?? ""),
+            detection_type: item.detection_type ?? "",
+            severity: item.severity ?? "",
+            camera_name: item.camera_name ?? item.camera_id ?? "",
+          }));
+
+        if (requestId !== suggestionRequestId.current) {
+          return;
+        }
+        setEventSuggestions(matches);
+        setShowSuggestions(true);
+        setHighlightedSuggestionIndex(0);
+      } catch {
+        if (requestId === suggestionRequestId.current) {
+          setEventSuggestions([]);
+          setShowSuggestions(true);
+        }
+      } finally {
+        if (requestId === suggestionRequestId.current) {
+          setSuggestionsLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [alertEventId]);
 
   const loadCameras = useCallback(async () => {
     const res = await cameraService.getAll();
     const mapped = (res.data as CameraOption[]).map((cam) => ({
       camera_id: cam.camera_id,
       camera_name: cam.camera_name,
+      location: cam.location,
     }));
     setCameraOptions(mapped);
   }, []);
@@ -334,10 +547,6 @@ const Analytics = () => {
     () => dashboard?.charts?.top_cameras ?? [],
     [dashboard],
   );
-  const recentAlerts = useMemo(
-    () => dashboard?.recent_alerts ?? [],
-    [dashboard],
-  );
   const heatmap = useMemo(() => dashboard?.charts?.heatmap ?? [], [dashboard]);
   const frequencyData = useMemo(() => {
     const buckets = new Map<string, { label: string; count: number }>();
@@ -369,6 +578,11 @@ const Analytics = () => {
         ?.camera_name ?? t("analytics.allCameras")
     );
   }, [cameraOptions, filters.camera_id, t]);
+  const alertCamera = alertEvent
+    ? cameraOptions.find(
+        (camera) => camera.camera_id === String(alertEvent.camera_id ?? ""),
+      )
+    : undefined;
 
   // Map and style KPIs according to reference screenshot layout
   const kpis = useMemo<KPIItem[]>(() => {
@@ -1125,54 +1339,347 @@ const Analytics = () => {
               </div>
             </div>
 
-            {/* Recent Alerts Feed */}
-            <div className="bg-[#0d1527] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
+            {/* Alert Investigation */}
+            <div className="bg-[#111b2e] border border-[#162235] rounded-xl p-5 flex flex-col justify-between">
               <h3 className="text-sm font-bold font-display tracking-wide text-white mb-5">
-                {t("analytics.chartTitles.recentAlerts")}
+                Alert Investigation
               </h3>
 
-              <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[224px] pr-1">
-                {recentAlerts.map((alert, idx) => (
-                  <div
-                    key={`${alert.camera_id}-${alert.time}-${idx}`}
-                    className="flex items-center justify-between gap-3 pb-3 border-b border-white/5 last:pb-0 last:border-0"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      {/* Alert Icon (Alarm Beacon style) */}
-                      <div className="p-2 bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg text-[#ef4444] shrink-0">
-                        <Siren size={14} className="animate-pulse" />
+              <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[224px] pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
+                    Search by Alert ID
+                  </label>
+
+                  <div className="flex items-start gap-2">
+                    <div className="relative flex-1 min-w-0">
+                      <input
+                        value={alertEventId}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setAlertEventId(nextValue);
+                          setAlertEventError("");
+                          if (!nextValue.trim()) {
+                            setEventSuggestions([]);
+                            setShowSuggestions(false);
+                          }
+                        }}
+                        onFocus={() => {
+                          if (alertEventId.trim().length >= 4) {
+                            setShowSuggestions(true);
+                          }
+                        }}
+                        onBlur={() => {
+                          window.setTimeout(
+                            () => setShowSuggestions(false),
+                            120,
+                          );
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "ArrowDown" &&
+                            showSuggestions &&
+                            eventSuggestions.length > 0
+                          ) {
+                            event.preventDefault();
+                            setHighlightedSuggestionIndex((current) =>
+                              current + 1 < eventSuggestions.length
+                                ? current + 1
+                                : 0,
+                            );
+                            return;
+                          }
+                          if (
+                            event.key === "ArrowUp" &&
+                            showSuggestions &&
+                            eventSuggestions.length > 0
+                          ) {
+                            event.preventDefault();
+                            setHighlightedSuggestionIndex((current) =>
+                              current - 1 >= 0
+                                ? current - 1
+                                : eventSuggestions.length - 1,
+                            );
+                            return;
+                          }
+                          if (event.key === "Escape") {
+                            setShowSuggestions(false);
+                            return;
+                          }
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            if (!isSearchingAlert) {
+                              if (
+                                showSuggestions &&
+                                eventSuggestions.length > 0
+                              ) {
+                                const selected =
+                                  eventSuggestions[highlightedSuggestionIndex];
+                                if (selected?.event_id) {
+                                  setAlertEventId(String(selected.event_id));
+                                  setShowSuggestions(false);
+                                  void performAlertSearch(
+                                    String(selected.event_id),
+                                  );
+                                  return;
+                                }
+                              }
+                              void performAlertSearch(alertEventId);
+                            }
+                          }
+                        }}
+                        placeholder="Enter the Event ID from the Alert PDF."
+                        className="h-14 w-full min-w-0 rounded-xl border border-[#1f2e45] bg-[#0b1220] px-4 py-3 text-sm font-mono text-slate-100 shadow-inner placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none"
+                      />
+
+                      {showSuggestions && (
+                        <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-[#1f2e45] bg-[#0b1220] shadow-xl">
+                          {suggestionsLoading ? (
+                            <div className="flex items-center gap-2 px-3 py-2 text-[10px] text-slate-300">
+                              <Loader2 size={10} className="animate-spin" />
+                              Loading matches...
+                            </div>
+                          ) : eventSuggestions.length > 0 ? (
+                            <div className="max-h-44 overflow-y-auto">
+                              {eventSuggestions.map((suggestion, index) => (
+                                <button
+                                  type="button"
+                                  key={String(suggestion.event_id)}
+                                  onMouseDown={(mouseEvent) =>
+                                    mouseEvent.preventDefault()
+                                  }
+                                  onClick={() => {
+                                    const selectedId = String(
+                                      suggestion.event_id,
+                                    );
+                                    setAlertEventId(selectedId);
+                                    setShowSuggestions(false);
+                                    void performAlertSearch(selectedId);
+                                  }}
+                                  className={`flex w-full items-start justify-between gap-2 border-b border-white/5 px-3 py-2 text-left last:border-b-0 ${
+                                    highlightedSuggestionIndex === index
+                                      ? "bg-[#142235]"
+                                      : "bg-transparent"
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="truncate font-mono text-[10px] text-slate-100">
+                                      {String(suggestion.event_id)}
+                                    </div>
+                                    <div className="mt-1 truncate text-[9px] text-slate-400">
+                                      {String(suggestion.detection_type || "")}{" "}
+                                      {suggestion.detection_type &&
+                                      suggestion.severity
+                                        ? "·"
+                                        : ""}{" "}
+                                      {String(suggestion.severity || "")}
+                                      {suggestion.camera_name
+                                        ? ` · ${String(suggestion.camera_name)}`
+                                        : ""}
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="px-3 py-2 text-[10px] text-slate-400">
+                              No matching Alert IDs found.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void performAlertSearch(alertEventId)}
+                      disabled={isSearchingAlert}
+                      className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#1d4ed8] text-white shadow-md transition hover:bg-[#2d5ce8] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSearchingAlert ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        <Search size={16} />
+                      )}
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400">
+                    Enter the Event ID from the Alert PDF.
+                  </p>
+
+                  {alertEventError && (
+                    <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-2 py-2 text-[11px] text-red-200">
+                      {alertEventError === "Alert not found" ? (
+                        <>
+                          <div className="font-bold">Alert not found</div>
+                          <div className="text-red-200/80">
+                            No alert matches this Event ID.
+                          </div>
+                        </>
+                      ) : (
+                        alertEventError
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {!alertEvent && !alertEventError && !isSearchingAlert && (
+                  <div className="rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220]/60 p-3 text-[11px] text-slate-400">
+                    No alert selected.
+                  </div>
+                )}
+
+                {isSearchingAlert && (
+                  <div className="flex items-center gap-2 rounded-lg border border-[#1f2e45] bg-[#0b1220] px-3 py-2 text-[11px] text-slate-300">
+                    <Loader2
+                      size={12}
+                      className="animate-spin text-[#60a5fa]"
+                    />
+                    Loading alert details...
+                  </div>
+                )}
+
+                {alertEvent && !isSearchingAlert && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 text-sm font-bold text-white">
+                        {getAlertDescription(alertEvent.detection_type)}
                       </div>
-                      <div className="min-w-0 leading-tight">
-                        <p className="text-[11px] font-bold tracking-wide text-slate-100 uppercase truncate">
-                          {alert.detection_type}
-                        </p>
-                        <p className="text-[10px] font-semibold text-slate-400 mt-1 uppercase">
-                          {alert.camera_name}
-                        </p>
+                      <button
+                        type="button"
+                        onClick={clearAlertInvestigation}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#1f2e45] bg-[#0b1220] px-2 py-1 text-[10px] text-slate-200"
+                      >
+                        <X size={10} /> Clear
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-300">
+                      <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                        <div className="text-slate-500">Severity</div>
+                        <div className="mt-1 text-slate-100">
+                          {String(alertEvent.severity ?? "-")}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                        <div className="text-slate-500">Confidence</div>
+                        <div className="mt-1 text-slate-100">
+                          {typeof alertEvent.confidence === "number"
+                            ? `${(alertEvent.confidence * 100).toFixed(1)}%`
+                            : "-"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                        <div className="text-slate-500">Camera</div>
+                        <div className="mt-1 text-slate-100">
+                          {alertCamera?.camera_name ?? "-"}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                        <div className="text-slate-500">Location</div>
+                        <div className="mt-1 text-slate-100">
+                          {alertCamera?.location ?? "-"}
+                        </div>
+                      </div>
+                      <div className="col-span-2 rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                        <div className="text-slate-500">Detected At</div>
+                        <div className="mt-1 text-slate-100">
+                          {formatEventTimestamp(alertEvent.created_at)}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0 text-right">
-                      <div className="leading-tight">
-                        <span className="text-[10px] font-mono text-slate-300 block">
-                          {(alert.confidence * 100).toFixed(1)}%
-                        </span>
-                        <span className="text-[10px] font-bold text-[#ef4444] mt-0.5 block">
-                          {alert.severity}
-                        </span>
+                    <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-3">
+                      <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
+                        <span>Evidence</span>
+                        {screenshotUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setShowScreenshotModal(true)}
+                            className="inline-flex items-center gap-1 text-slate-200"
+                          >
+                            <Eye size={10} /> View
+                          </button>
+                        )}
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500 max-w-[70px] truncate leading-tight block">
-                        {new Date(alert.time).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        })}
-                      </span>
+
+                      {screenshotLoading ? (
+                        <div className="flex min-h-[120px] items-center justify-center gap-2 rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220] text-[11px] text-slate-300">
+                          <Loader2 size={12} className="animate-spin" /> Loading
+                          evidence...
+                        </div>
+                      ) : screenshotUrl ? (
+                        <img
+                          src={screenshotUrl}
+                          alt="Alert evidence"
+                          className="max-h-[160px] w-full rounded-lg object-contain"
+                        />
+                      ) : (
+                        <div className="flex min-h-[120px] items-center justify-center gap-2 rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220] text-[11px] text-slate-400">
+                          <ImageOff size={12} /> Evidence image unavailable.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
+                            Technical Reference
+                          </div>
+                          <div className="mt-1 text-slate-500">Event ID</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const eventId = String(alertEvent.event_id ?? "");
+                            if (!eventId) return;
+                            try {
+                              await navigator.clipboard.writeText(eventId);
+                              toast.success(
+                                "Event ID copied",
+                                "The Event ID was copied to the clipboard.",
+                              );
+                            } catch {
+                              toast.error(
+                                "Copy failed",
+                                "Unable to copy the Event ID.",
+                              );
+                            }
+                          }}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#1f2e45] bg-[#0d1527] px-2 py-1 text-[10px] text-slate-200"
+                        >
+                          <Copy size={10} /> Copy ID
+                        </button>
+                      </div>
+                      <div className="mt-1 break-all font-mono text-[10px] text-slate-100">
+                        {String(alertEvent.event_id ?? "-")}
+                      </div>
                     </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
+
+            {showScreenshotModal && screenshotUrl && (
+              <div className="fixed inset-0 z-[50] flex items-center justify-center bg-black/70 p-4">
+                <div className="relative max-h-[90vh] max-w-[90vw] overflow-hidden rounded-xl border border-[#162235] bg-[#0d1527] p-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowScreenshotModal(false)}
+                    className="absolute right-3 top-3 rounded-md bg-white/5 p-1 text-slate-300"
+                  >
+                    <X size={14} />
+                  </button>
+                  <img
+                    src={screenshotUrl}
+                    alt="Expanded alert evidence"
+                    className="max-h-[80vh] max-w-[80vw] rounded-lg object-contain"
+                  />
+                </div>
+              </div>
+            )}
           </section>
 
           {/* FOURTH ROW - HEATMAP & TOP CAMERAS */}

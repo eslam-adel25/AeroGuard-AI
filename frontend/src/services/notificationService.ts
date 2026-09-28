@@ -47,40 +47,42 @@ export const notificationService = {
           ? resp.data.items
           : resp.data
       ) as Array<Record<string, unknown>>;
-      const items = payload.map((item) => ({
-        id: String(
-          item.event_id ??
-            item.id ??
-            `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
-        ),
-        eventId: item.event_id
-          ? String(item.event_id)
-          : item.id
-            ? String(item.id)
-            : null,
-        detectionType: String(
-          item.detection_type ?? item.type ?? "Unknown Detection",
-        ),
-        cameraId: item.camera_id ? String(item.camera_id) : undefined,
-        cameraName: String(
-          item.camera_name ?? item.camera_id ?? "Unknown Camera",
-        ),
-        severity:
-          (item.severity as NotificationSeverity) ??
-          (item.priority as NotificationSeverity) ??
-          "Normal",
-        time: String(
-          item.created_at ??
-            item.time ??
-            item.timestamp ??
-            new Date().toISOString(),
-        ),
-        status: item.status === "Read" ? "Read" : "Unread",
-        screenshot:
-          (item.screenshot_path as string) ??
-          (item.screenshot as string) ??
-          null,
-      }));
+      const items = payload.map(
+        (item): NotificationItem => ({
+          id: String(
+            item.event_id ??
+              item.id ??
+              `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
+          ),
+          eventId: item.event_id
+            ? String(item.event_id)
+            : item.id
+              ? String(item.id)
+              : null,
+          detectionType: String(
+            item.detection_type ?? item.type ?? "Unknown Detection",
+          ),
+          cameraId: item.camera_id ? String(item.camera_id) : undefined,
+          cameraName: String(
+            item.camera_name ?? item.camera_id ?? "Unknown Camera",
+          ),
+          severity:
+            (item.severity as NotificationSeverity) ??
+            (item.priority as NotificationSeverity) ??
+            "Normal",
+          time: String(
+            item.created_at ??
+              item.time ??
+              item.timestamp ??
+              new Date().toISOString(),
+          ),
+          status: item.status === "Read" ? "Read" : "Unread",
+          screenshot:
+            (item.screenshot_path as string) ??
+            (item.screenshot as string) ??
+            null,
+        }),
+      );
       return {
         items,
         unreadCount: Number(
@@ -94,20 +96,23 @@ export const notificationService = {
         // fallback to legacy notifications endpoint
         const response = await api.get("/notifications/");
         const payload = response.data as Array<Record<string, unknown>>;
-        const items = payload.map((item) => ({
-          id: String(
-            item.id ?? `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
-          ),
-          eventId: item.id ? String(item.id) : null,
-          detectionType: String(item.type ?? "Unknown Detection"),
-          cameraName: String(
-            item.camera_name ?? item.camera_id ?? "Unknown Camera",
-          ),
-          severity: (item.priority as NotificationSeverity) ?? "Normal",
-          time: String(item.time ?? new Date().toISOString()),
-          status: item.status === "Read" ? "Read" : "Unread",
-          screenshot: null,
-        }));
+        const items = payload.map(
+          (item): NotificationItem => ({
+            id: String(
+              item.id ??
+                `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
+            ),
+            eventId: item.id ? String(item.id) : null,
+            detectionType: String(item.type ?? "Unknown Detection"),
+            cameraName: String(
+              item.camera_name ?? item.camera_id ?? "Unknown Camera",
+            ),
+            severity: (item.priority as NotificationSeverity) ?? "Normal",
+            time: String(item.time ?? new Date().toISOString()),
+            status: item.status === "Read" ? "Read" : "Unread",
+            screenshot: null,
+          }),
+        );
         return {
           items,
           unreadCount: items.filter((item) => item.status === "Unread").length,

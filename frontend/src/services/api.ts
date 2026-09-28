@@ -303,6 +303,7 @@ export const reportService = {
 export const aiService = {
   listEvents: (params?: {
     camera_id?: string;
+    event_id_prefix?: string;
     limit?: number;
     offset?: number;
   }) => api.get(`/ai/events`, { params }),
