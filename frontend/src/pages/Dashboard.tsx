@@ -55,6 +55,7 @@ interface CameraData {
   camera_id: string;
   camera_name: string;
   location: string;
+  status?: string;
 }
 
 const FIRE_ALARM_AUDIO = "/sounds/fire_alarm.mp3";
@@ -351,7 +352,17 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           console.error("Failed to load alert sound setting");
         }
         if (data.length > 0) {
-          await handleCameraSelection(data[0].camera_id, true);
+          const activeCamera =
+            data.find((camera) =>
+              ["Processing", "Running"].includes(camera.status ?? ""),
+            ) ?? data[0];
+          await handleCameraSelection(activeCamera.camera_id, false);
+          if (
+            activeCamera.status === "Processing" ||
+            activeCamera.status === "Running"
+          ) {
+            setCameraStatus(activeCamera.status);
+          }
         }
       } catch {
         console.error("Link failed");

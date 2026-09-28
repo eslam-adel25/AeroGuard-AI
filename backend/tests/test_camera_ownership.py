@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 import uuid
 
 from sqlalchemy import create_engine
@@ -11,6 +12,7 @@ from app.database.session import Base
 from app.models.models import AIEvent, Camera, User
 from app.repositories.camera_repository import CameraRepository
 from app.repositories.ai_repository import AIRepository
+from app.api.v1 import cameras as cameras_api
 
 
 def _build_session():
@@ -123,5 +125,54 @@ def test_ai_repository_filters_events_by_camera_owner():
         items = repo.list_events(owner_id=owner.user_id)
         assert len(items) == 1
         assert items[0].camera_id == owner_cam.camera_id
+    finally:
+        db.close()
+
+
+def test_camera_list_status_uses_active_processor_state(monkeypatch):
+    db = _build_session()
+    try:
+        owner = User(
+            user_id=uuid.uuid4(),
+            full_name="Owner",
+            username="camera_status_owner",
+            email="camera_status_owner@example.com",
+            password_hash="hash",
+        )
+        active_camera = Camera(
+            camera_id=uuid.uuid4(),
+            camera_name="Active Cam",
+            location="A",
+            stream_url="rtsp://active",
+            camera_type="LIVE",
+            status="Processing",
+            owner_id=owner.user_id,
+        )
+        stale_camera = Camera(
+            camera_id=uuid.uuid4(),
+            camera_name="Stale Cam",
+            location="B",
+            stream_url="rtsp://stale",
+            camera_type="LIVE",
+            status="Processing",
+            owner_id=owner.user_id,
+        )
+        db.add_all([owner, active_camera, stale_camera])
+        db.commit()
+
+        class ProcessorState:
+            _active_camera_lock = threading.Lock()
+            _active_cameras = {str(active_camera.camera_id)}
+
+        monkeypatch.setattr(cameras_api, "ai_engine", ProcessorState())
+
+        responses = cameras_api.get_cameras(
+            db,
+            {"user_id": str(owner.user_id), "role": "User"},
+        )
+        statuses = {str(camera.camera_id): camera.status for camera in responses}
+
+        assert statuses[str(active_camera.camera_id)] == "Processing"
+        assert statuses[str(stale_camera.camera_id)] == "Offline"
     finally:
         db.close()

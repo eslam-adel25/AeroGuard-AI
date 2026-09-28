@@ -246,7 +246,22 @@ async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_u
 def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = CameraRepository(db)
     is_admin = current_user.get("role") == "Administrator"
-    return repo.get_all_cameras(owner_id=current_user.get("user_id"), is_admin=is_admin)
+    cameras = repo.get_all_cameras(
+        owner_id=current_user.get("user_id"), is_admin=is_admin
+    )
+    active_camera_ids = set()
+    if ai_engine is not None:
+        with ai_engine._active_camera_lock:
+            active_camera_ids = set(ai_engine._active_cameras)
+
+    responses = [CameraResponse.model_validate(camera) for camera in cameras]
+    for camera, response in zip(cameras, responses):
+        camera_id = str(camera.camera_id)
+        if camera_id in active_camera_ids:
+            response.status = "Processing"
+        elif response.status == "Processing":
+            response.status = "Offline"
+    return responses
 
 # 5. حذف كاميرا
 @router.delete("/{camera_id}")

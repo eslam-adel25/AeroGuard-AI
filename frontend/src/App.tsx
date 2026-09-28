@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { Bell, X, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import Sidebar from "./components/Sidebar";
+import Sidebar, { type ActivePage } from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import Cameras from "./pages/Cameras";
 import Analytics from "./pages/Analytics";
@@ -35,9 +35,37 @@ import {
   type NotificationSeverity,
 } from "./services/notificationService";
 
+const ACTIVE_PAGE_IDS = [
+  "dashboard",
+  "cameras",
+  "reports",
+  "alerts",
+  "users",
+  "settings",
+] as const satisfies readonly ActivePage[];
+
+const isActivePage = (page: string): page is ActivePage =>
+  ACTIVE_PAGE_IDS.some((validPage) => validPage === page);
+
+const getStoredActivePage = (): ActivePage | null => {
+  const savedPage = localStorage.getItem("ag_active_page");
+
+  if (!savedPage || !isActivePage(savedPage)) {
+    return null;
+  }
+
+  return savedPage;
+};
+
 function App() {
   const { t } = useTranslation();
-  const [activePage, setActivePage] = useState("dashboard");
+  const [activePage, setActivePage] = useState<ActivePage>(() => {
+    if (!getStoredAuthToken()) {
+      return "dashboard";
+    }
+
+    return getStoredActivePage() ?? "reports";
+  });
   const [isAuthenticated, setIsAuthenticated] =
     useState(!!getStoredAuthToken());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -80,9 +108,19 @@ function App() {
 
   const handleLogin = (token: string) => {
     localStorage.setItem("ag_token", token);
+    localStorage.removeItem("ag_active_page");
     setIsAuthenticated(true);
-    setActivePage("dashboard");
+    setActivePage("reports");
   };
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      localStorage.removeItem("ag_active_page");
+      return;
+    }
+
+    localStorage.setItem("ag_active_page", activePage);
+  }, [activePage, isAuthenticated]);
 
   // Load user-specific settings after login
   useEffect(() => {
@@ -103,9 +141,26 @@ function App() {
     }
   }, [isAuthenticated]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     closeActiveSocket();
+    try {
+      const response = await cameraService.getAll();
+      if (Array.isArray(response.data)) {
+        const activeCameras = (
+          response.data as Array<{ camera_id: string; status?: string }>
+        ).filter((camera) =>
+          ["Processing", "Running"].includes(camera.status ?? ""),
+        );
+        await Promise.allSettled(
+          activeCameras.map((camera) => cameraService.stop(camera.camera_id)),
+        );
+      }
+    } catch (error) {
+      console.warn("Failed to stop active cameras during logout", error);
+    }
+
     localStorage.removeItem("ag_token");
+    localStorage.removeItem("ag_active_page");
     setNotifications([]);
     setUnreadNotificationCount(0);
     knownNotificationIdsRef.current.clear();
