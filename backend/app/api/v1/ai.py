@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import String, cast, or_, select
 from ...database.session import get_db
 from ...core.auth_middleware import get_current_user
 from ...services.ai_service import AIService, build_screenshot_filename
@@ -14,22 +14,44 @@ from datetime import datetime
 router = APIRouter()
 
 @router.get("/ai/events")
-def list_ai_events(camera_id: Optional[str] = None, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[str] = None, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = AIRepository(db)
     is_admin = current_user.get("role") == "Administrator"
     if camera_id and not is_admin:
-        from ...models.models import Camera
         camera = db.query(Camera).filter(Camera.camera_id == camera_id).first()
         if not camera or camera.owner_id != current_user.get("user_id"):
             raise HTTPException(status_code=403, detail="Forbidden")
     owner_id = None if is_admin else current_user.get("user_id")
-    items = repo.list_events(
-        camera_id=camera_id,
-        owner_id=owner_id,
-        exclude_pending_screenshots=True,
-        limit=limit,
-        offset=offset,
-    )
+    if event_id_prefix is not None:
+        prefix = event_id_prefix.strip()
+        if len(prefix) < 4 or any(char not in "0123456789abcdefABCDEF-" for char in prefix):
+            raise HTTPException(status_code=422, detail="Invalid Event ID prefix")
+
+        event_query = db.query(AIEvent)
+        if not is_admin:
+            event_query = event_query.join(Camera, Camera.camera_id == AIEvent.camera_id).filter(
+                or_(
+                    cast(AIEvent.detected_by, String) == str(current_user.get("user_id")),
+                    cast(Camera.owner_id, String) == str(current_user.get("user_id")),
+                )
+            )
+        if camera_id:
+            event_query = event_query.filter(AIEvent.camera_id == camera_id)
+        items = (
+            event_query.filter(cast(AIEvent.event_id, String).ilike(f"{prefix}%"))
+            .order_by(AIEvent.created_at.desc())
+            .limit(min(limit, 8))
+            .offset(offset)
+            .all()
+        )
+    else:
+        items = repo.list_events(
+            camera_id=camera_id,
+            owner_id=owner_id,
+            exclude_pending_screenshots=True,
+            limit=limit,
+            offset=offset,
+        )
     return {
         "items": [
             {
