@@ -10,7 +10,7 @@ const LanguageProvider = ({ children }: LanguageProviderProps) => {
   useEffect(() => {
     const savedLanguage = localStorage.getItem("ag_language") || "en";
     i18n.changeLanguage(savedLanguage);
-    document.documentElement.dir = savedLanguage === "ar" ? "rtl" : "ltr";
+    document.documentElement.dir = "ltr";
     document.documentElement.lang = savedLanguage;
   }, []);
 
