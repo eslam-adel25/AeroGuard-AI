@@ -98,9 +98,7 @@ The following matrix documents the operational readiness of features in the curr
 | **Crowd Density & Advanced Settings** | Partial | Settings schema and UI controls exist; not all configuration fields are consumed by the runtime engine. |
 | **Real-Time Telemetry & Alarms** | Implemented | Dispatched over the dashboard WebSocket; note that audience isolation filtering varies by message type. |
 | **Reporting & Export Pipeline** | Implemented | Aggregated from relational detection records; supports JSON snapshots, PDF, CSV, and Excel exports. |
-| **Face Detection / Recognition** | Not Implemented | Not connected to the camera-processing workflow; schema/settings fields do not indicate active processing. |
-| **SMS & Distributed Processing** | Not Implemented | No SMS gateway, multi-node message queue, or Kubernetes orchestration present in the codebase. |
-| **Capture Cards / Remote USB** | Not Implemented | `USB` mode binds strictly to local OpenCV device index `0` on the backend host. |
+
 
 > [!NOTE]
 > The designation **Implemented** reflects executable code paths. It does not constitute a guaranteed detection accuracy threshold or service-level agreement (SLA). Environmental visibility, model class mapping, zone definitions, and host hardware resources directly dictate operational behavior.
@@ -346,7 +344,7 @@ sequenceDiagram
     Worker-->>UI: Broadcast 'Running' & telemetry via WebSocket
     
     UI->>API: Stop request: POST /cameras/{id}/stop
-    API->>Engine: Set cooperative stop flag; set status 'Offline'
+    API->>Engine: Set cooperative stop flag and set status 'Offline'
     Worker->>Worker: Detect stop flag, exit frame loop
     Worker-->>UI: Broadcast 'Offline' and clear active alarms
     Worker->>Engine: Release VideoCapture and purge in-memory state
