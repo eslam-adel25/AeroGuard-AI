@@ -4,14 +4,7 @@
 
 # AeroGuard AI
 
-<strong>Languages:</strong> <code>Python</code> · <code>TypeScript</code> · <code>HTML</code> · <code>CSS</code> · <code>SQL</code><br>
-<strong>Frontend:</strong> <code>React</code> · <code>React Router</code> · <code>Tailwind CSS</code> · <code>Axios</code> · <code>Recharts</code> · <code>Framer Motion</code> · <code>i18next</code> · <code>Lucide React</code><br>
-<strong>Backend:</strong> <code>FastAPI</code> · <code>Starlette</code> · <code>Pydantic</code> · <code>python-multipart</code> · <code>Pillow (optional avatar resizing)</code><br>
-<strong>AI &amp; Vision:</strong> <code>Ultralytics YOLO</code> · <code>PyTorch</code> · <code>OpenCV</code> · <code>NumPy</code><br>
-<strong>Database:</strong> <code>PostgreSQL</code> · <code>SQLAlchemy</code> · <code>psycopg2</code><br>
-<strong>APIs &amp; Security:</strong> <code>REST/JSON</code> · <code>WebSockets</code> · <code>JWT (python-jose)</code> · <code>bcrypt</code> · <code>SMTP email</code><br>
-<strong>Reporting:</strong> <code>PDF (fpdf2)</code> · <code>CSV</code> · <code>Excel (openpyxl)</code> · <code>pandas</code><br>
-<strong>Development:</strong> <code>Vite</code> · <code>TypeScript compiler</code> · <code>ESLint</code> · <code>pytest</code> · <code>Alembic migrations</code> · <code>Node.js/npm</code>
+<img src="docs/assets/technology-stack.svg" alt="AeroGuard AI technology stack grouped by languages, frontend, backend, AI and vision, database, APIs and security, reporting, and development tools" width="100%" />
 
 **Camera monitoring, AI-assisted detection, event review, and operational reporting**
 
