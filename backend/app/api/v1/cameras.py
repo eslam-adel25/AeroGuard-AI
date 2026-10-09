@@ -221,11 +221,7 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
 
-    if cam.camera_type == "LIVE":
-        live_url = _validate_live_rtsp_url(cam.stream_url)
-        await _verify_live_rtsp(live_url)
-
-    start_state = ai_engine.reserve_camera_start(cam.camera_id)
+    start_state = ai_engine.reserve_camera_startup(cam.camera_id)
     if start_state == "stopping":
         raise HTTPException(
             status_code=409,
@@ -233,8 +229,25 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
         )
     if start_state == "active":
         return {"status": "started", "camera_id": str(cam.camera_id)}
+    if start_state == "starting":
+        raise HTTPException(
+            status_code=409,
+            detail="Camera startup is already in progress",
+        )
 
+    startup_activated = False
     try:
+        if cam.camera_type == "LIVE":
+            live_url = _validate_live_rtsp_url(cam.stream_url)
+            await _verify_live_rtsp(live_url)
+
+        if ai_engine.activate_camera_startup(cam.camera_id) != "reserved":
+            raise HTTPException(
+                status_code=409,
+                detail="Camera start was cancelled",
+            )
+        startup_activated = True
+
         cam.status = "Processing"
         db.commit()
         if cam.camera_type == "LIVE":
@@ -253,7 +266,10 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
                 True,
             )
     except Exception:
-        ai_engine.release_camera_start(cam.camera_id)
+        if startup_activated:
+            ai_engine.release_camera_start(cam.camera_id)
+        else:
+            ai_engine.release_camera_startup(cam.camera_id)
         raise
     return {"status": "started", "camera_id": str(cam.camera_id)}
 

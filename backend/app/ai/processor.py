@@ -137,6 +137,7 @@ class AIProcessor:
         self._detection_persist_cooldown = {}  # key -> last persisted timestamp
         self._stop_flags = {}
         self._active_cameras = set()
+        self._starting_cameras = set()
         self._active_camera_lock = threading.Lock()
         self._active_alarm_state = {}  # camera_id -> bool
         self._active_alarm_sources = {}  # camera_id -> list[str]
@@ -369,9 +370,45 @@ class AIProcessor:
         with self._active_camera_lock:
             if camera_key in self._active_cameras:
                 return "stopping" if self._stop_flags.get(camera_key, False) else "active"
+            if camera_key in self._starting_cameras:
+                return "stopping" if self._stop_flags.get(camera_key, False) else "starting"
             self._active_cameras.add(camera_key)
             self._stop_flags[camera_key] = False
             return "reserved"
+
+    def reserve_camera_startup(self, camera_id):
+        """Reserve a camera start without marking it as actively processing."""
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            if camera_key in self._active_cameras:
+                return "stopping" if self._stop_flags.get(camera_key, False) else "active"
+            if camera_key in self._starting_cameras:
+                return "stopping" if self._stop_flags.get(camera_key, False) else "starting"
+            self._starting_cameras.add(camera_key)
+            self._stop_flags[camera_key] = False
+            return "reserved"
+
+    def activate_camera_startup(self, camera_id):
+        """Promote a validated startup to active processing unless Stop cancelled it."""
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            if camera_key not in self._starting_cameras:
+                return "cancelled"
+            if self._stop_flags.get(camera_key, False):
+                self._starting_cameras.discard(camera_key)
+                self._stop_flags.pop(camera_key, None)
+                return "cancelled"
+            self._starting_cameras.remove(camera_key)
+            self._active_cameras.add(camera_key)
+            return "reserved"
+
+    def release_camera_startup(self, camera_id):
+        """Release only a pending startup reservation."""
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            if camera_key in self._starting_cameras:
+                self._starting_cameras.remove(camera_key)
+                self._stop_flags.pop(camera_key, None)
 
     def release_camera_start(self, camera_id):
         """Release a reserved start if scheduling or setup fails before worker cleanup."""
@@ -379,6 +416,7 @@ class AIProcessor:
         with self._active_camera_lock:
             self._stop_flags.pop(camera_key, None)
             self._active_cameras.discard(camera_key)
+            self._starting_cameras.discard(camera_key)
 
     def _camera_stop_requested(self, camera_id):
         with self._active_camera_lock:
@@ -1479,13 +1517,17 @@ class AIProcessor:
                 with self._active_camera_lock:
                     self._stop_flags.pop(camera_id_str, None)
                     self._active_cameras.discard(camera_id_str)
+                    self._starting_cameras.discard(camera_id_str)
                 if own_db and local_db is not None:
                     local_db.close()
 
     def stop_camera(self, camera_id):
         camera_key = str(camera_id)
         with self._active_camera_lock:
-            if camera_key in self._active_cameras:
+            if (
+                camera_key in self._active_cameras
+                or camera_key in self._starting_cameras
+            ):
                 self._stop_flags[camera_key] = True
 
     def stop_all_other_cameras(self, keep_camera_id):

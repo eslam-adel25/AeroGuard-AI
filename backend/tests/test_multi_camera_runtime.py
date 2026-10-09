@@ -4,7 +4,8 @@ from threading import Barrier, Lock, Event, Thread
 from time import sleep
 from types import SimpleNamespace
 
-from fastapi import BackgroundTasks
+import pytest
+from fastapi import BackgroundTasks, HTTPException
 
 from app.ai import processor as processor_module
 from app.api.v1 import cameras as cameras_api
@@ -16,6 +17,7 @@ def _processor_state():
     )
     processor._active_camera_lock = Lock()
     processor._active_cameras = set()
+    processor._starting_cameras = set()
     processor._stop_flags = {}
     processor._model_lock = Lock()
     processor._settings_lock = Lock()
@@ -313,3 +315,161 @@ def test_camera_start_endpoint_keeps_other_camera_active(monkeypatch):
     assert first["status"] == second["status"] == duplicate["status"] == "started"
     assert processor._active_cameras == {"camera-a", "camera-b"}
     assert len(background_tasks.tasks) == 2
+
+
+def test_live_camera_stop_during_validation_cancels_start_without_affecting_other_camera(monkeypatch):
+    processor = _processor_state()
+    processor.reserve_camera_start("camera-b")
+    validation_entered = asyncio.Event()
+    allow_validation_to_finish = asyncio.Event()
+
+    async def pause_validation(_url):
+        validation_entered.set()
+        await allow_validation_to_finish.wait()
+
+    camera = SimpleNamespace(
+        camera_id="camera-a",
+        camera_type="LIVE",
+        stream_url="rtsp://camera-a/stream",
+        status="Offline",
+    )
+    monkeypatch.setattr(cameras_api, "ai_engine", processor)
+    monkeypatch.setattr(
+        cameras_api,
+        "_get_camera_for_user",
+        lambda _db, _camera_id, _user: camera,
+    )
+    monkeypatch.setattr(cameras_api, "_validate_live_rtsp_url", lambda url: url)
+    monkeypatch.setattr(cameras_api, "_verify_live_rtsp", pause_validation)
+
+    class FakeDB:
+        def commit(self):
+            pass
+
+    class FakeCameraRepository:
+        def __init__(self, _db):
+            pass
+
+        def get_all_cameras(self, **_kwargs):
+            return [camera]
+
+    class FakeCameraResponse:
+        @classmethod
+        def model_validate(cls, camera_record):
+            return SimpleNamespace(status=camera_record.status)
+
+    monkeypatch.setattr(cameras_api, "CameraRepository", FakeCameraRepository)
+    monkeypatch.setattr(cameras_api, "CameraResponse", FakeCameraResponse)
+
+    async def exercise_race():
+        background_tasks = BackgroundTasks()
+        user = {"user_id": "owner", "role": "User"}
+        start_task = asyncio.create_task(
+            cameras_api.start_analysis(
+                "camera-a",
+                background_tasks,
+                FakeDB(),
+                user,
+            )
+        )
+        await validation_entered.wait()
+
+        assert "camera-a" in processor._starting_cameras
+        assert "camera-a" not in processor._active_cameras
+        assert cameras_api.get_cameras(
+            FakeDB(),
+            user,
+        )[0].status == "Offline"
+        with pytest.raises(HTTPException) as duplicate_error:
+            await cameras_api.start_analysis(
+                "camera-a",
+                background_tasks,
+                FakeDB(),
+                user,
+            )
+        assert duplicate_error.value.status_code == 409
+        assert not background_tasks.tasks
+
+        await cameras_api.stop_analysis(
+            "camera-a",
+            FakeDB(),
+            user,
+        )
+        assert processor._stop_flags["camera-a"] is True
+        assert camera.status == "Offline"
+        assert "camera-b" in processor._active_cameras
+        assert processor._stop_flags["camera-b"] is False
+
+        allow_validation_to_finish.set()
+        with pytest.raises(HTTPException) as cancelled_error:
+            await start_task
+        assert cancelled_error.value.status_code == 409
+        assert not background_tasks.tasks
+        assert "camera-a" not in processor._starting_cameras
+        assert "camera-a" not in processor._active_cameras
+        assert "camera-a" not in processor._stop_flags
+        assert camera.status == "Offline"
+        assert "camera-b" in processor._active_cameras
+        assert processor._stop_flags["camera-b"] is False
+
+    asyncio.run(exercise_race())
+
+
+def test_live_camera_validation_failure_releases_startup_for_retry(monkeypatch):
+    processor = _processor_state()
+    camera = SimpleNamespace(
+        camera_id="camera-a",
+        camera_type="LIVE",
+        stream_url="rtsp://camera-a/stream",
+        status="Offline",
+    )
+    monkeypatch.setattr(cameras_api, "ai_engine", processor)
+    monkeypatch.setattr(
+        cameras_api,
+        "_get_camera_for_user",
+        lambda _db, _camera_id, _user: camera,
+    )
+    monkeypatch.setattr(cameras_api, "_validate_live_rtsp_url", lambda url: url)
+
+    class FakeDB:
+        def commit(self):
+            pass
+
+    async def exercise_retry():
+        failed_tasks = BackgroundTasks()
+
+        async def fail_validation(_url):
+            raise HTTPException(status_code=400, detail="invalid stream")
+
+        monkeypatch.setattr(cameras_api, "_verify_live_rtsp", fail_validation)
+        with pytest.raises(HTTPException) as validation_error:
+            await cameras_api.start_analysis(
+                "camera-a",
+                failed_tasks,
+                FakeDB(),
+                {"user_id": "owner", "role": "User"},
+            )
+        assert validation_error.value.status_code == 400
+        assert not failed_tasks.tasks
+        assert "camera-a" not in processor._starting_cameras
+        assert "camera-a" not in processor._active_cameras
+        assert "camera-a" not in processor._stop_flags
+        assert camera.status == "Offline"
+
+        async def pass_validation(_url):
+            return None
+
+        monkeypatch.setattr(cameras_api, "_verify_live_rtsp", pass_validation)
+        retry_tasks = BackgroundTasks()
+        response = await cameras_api.start_analysis(
+            "camera-a",
+            retry_tasks,
+            FakeDB(),
+            {"user_id": "owner", "role": "User"},
+        )
+        assert response == {"status": "started", "camera_id": "camera-a"}
+        assert len(retry_tasks.tasks) == 1
+        assert "camera-a" in processor._active_cameras
+        assert "camera-a" not in processor._starting_cameras
+
+    asyncio.run(exercise_retry())
