@@ -600,8 +600,7 @@ The service calculates:
 
 1. **Snapshot Generation**: `POST /reports/generate` runs the aggregation query and saves the parameters, summaries, and charts into a `Report` record. Subsequent queries read this snapshot directly.
 2. **Export Processing**:
-   - **CSV**: Assembled dynamically in memory, with optional enrichment from matching `AIEvent` rows.
-   - **Excel (`.xlsx`)**: Assembled dynamically using `openpyxl`.
+  
    - **PDF**: Rendered via `fpdf2` and saved to `backend/uploads/reports/` before being streamed back to the client.
 
 ---
