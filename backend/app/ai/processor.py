@@ -217,8 +217,13 @@ class AIProcessor:
         self.active_critical_alerts[camera_key] = active
         return len(active)
 
-    async def _broadcast_alarm_state(self, camera_id, active, sources=None):
-        camera_key = str(camera_id)
+    async def _broadcast_alarm_state(
+        self,
+        camera_id,
+        active,
+        sources=None,
+        audience_user_id=None,
+    ):
         try:
             await manager.broadcast({
                 "event": "alarm_state",
@@ -227,7 +232,7 @@ class AIProcessor:
                     "active": bool(active),
                     "sources": sorted(sources) if sources else [],
                 },
-            })
+            }, audience_user_id=str(audience_user_id) if audience_user_id else None)
         except Exception:
             pass
 
@@ -832,6 +837,7 @@ class AIProcessor:
         consecutive_read_failures = 0
         last_frame_pos = -1
         status_broadcasted = False
+        camera_owner_id = None
         try:
             local_db = db if db is not None else SessionLocal()
             if self._camera_stop_requested(camera_id_str):
@@ -1473,6 +1479,7 @@ class AIProcessor:
                         camera_id,
                         new_alarm_active,
                         current_alarm_sources,
+                        camera_owner_id,
                     )
 
                 await manager.broadcast({
@@ -1505,6 +1512,13 @@ class AIProcessor:
                 if cap is not None:
                     cap.release()
                     print(f"📌 [{camera_id}] cap released and processing ended")
+                if self._active_alarm_state.get(camera_id_str, False):
+                    await self._broadcast_alarm_state(
+                        camera_id,
+                        False,
+                        [],
+                        camera_owner_id,
+                    )
                 await manager.broadcast({
                     "event": "camera_status",
                     "data": {

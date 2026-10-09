@@ -45,6 +45,10 @@ export type AlarmStateWSData = {
   sources: string[];
 };
 
+export type AlarmStateSnapshotWSData = {
+  states: Record<string, Omit<AlarmStateWSData, "camera_id">>;
+};
+
 export type CameraStatusWSData = {
   camera_id: string;
   status: string;
@@ -55,6 +59,7 @@ export type WSMessage =
   | { event: "ai_status"; data: DashboardStats }
   | { event: "ai_event"; data: AIEventWSData }
   | { event: "alarm_state"; data: AlarmStateWSData }
+  | { event: "alarm_state_snapshot"; data: AlarmStateSnapshotWSData }
   | { event: "camera_status"; data: CameraStatusWSData };
 
 export type SocketHandle = {

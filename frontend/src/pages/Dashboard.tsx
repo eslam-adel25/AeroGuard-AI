@@ -60,6 +60,7 @@ interface CameraData {
 
 const FIRE_ALARM_AUDIO = "/sounds/fire_alarm.mp3";
 const SECURITY_ALARM_AUDIO = "/sounds/security_alarm.mp3";
+const EMPTY_ALARM_SOURCES: string[] = [];
 
 type DrawingMode = "restricted" | "direction" | "tripwire";
 type DrawingPointsByType = Record<DrawingMode, Array<[number, number]>>;
@@ -129,12 +130,16 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
-  const [alarmActive, setAlarmActive] = useState(false);
-  const [alarmSources, setAlarmSources] = useState<string[]>([]);
+  const [alarmStateByCamera, setAlarmStateByCamera] = useState<
+    Record<string, { active: boolean; sources: string[] }>
+  >({});
   const [alertSoundsEnabled, setAlertSoundsEnabled] = useState(true);
   const [alarmSilenced, setAlarmSilenced] = useState(false);
   const fireAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const securityAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
+  const alarmEventsSinceSnapshotRef = useRef<
+    Record<string, { active: boolean; sources: string[] }>
+  >({});
   const [localDateTime, setLocalDateTime] = useState(() =>
     formatLocalDateTime(new Date()),
   );
@@ -143,6 +148,11 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   >("Offline");
   const selectedCameraName =
     cameras.find((c) => c.camera_id === selectedCamera)?.camera_name || "";
+  const selectedAlarmState = selectedCamera
+    ? alarmStateByCamera[selectedCamera]
+    : undefined;
+  const alarmActive = selectedAlarmState?.active ?? false;
+  const alarmSources = selectedAlarmState?.sources ?? EMPTY_ALARM_SOURCES;
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
@@ -203,6 +213,45 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       await cameraService.start(id);
     } catch {
       console.log("AI initializing...");
+      try {
+        const response = await cameraService.getAll();
+        const updatedCameras = response.data as CameraData[];
+        const statuses = new Map(
+          updatedCameras.map((camera) => [camera.camera_id, camera.status]),
+        );
+        setCameras((current) =>
+          current.map((camera) =>
+            camera.camera_id === id
+              ? {
+                  ...camera,
+                  status: isCameraRunning(statuses.get(id))
+                    ? statuses.get(id)
+                    : "Offline",
+                }
+              : statuses.has(camera.camera_id)
+                ? { ...camera, status: statuses.get(camera.camera_id) }
+                : camera,
+          ),
+        );
+        if (selectedCameraRef.current === id) {
+          const status = statuses.get(id);
+          const running = isCameraRunning(status);
+          setCameraStatus(
+            running ? (status as "Running" | "Processing") : "Offline",
+          );
+          setIsPaused(!running);
+        }
+      } catch {
+        setCameras((current) =>
+          current.map((camera) =>
+            camera.camera_id === id ? { ...camera, status: "Offline" } : camera,
+          ),
+        );
+        if (selectedCameraRef.current === id) {
+          setCameraStatus("Offline");
+          setIsPaused(true);
+        }
+      }
     }
   }, []);
 
@@ -325,6 +374,16 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                 : camera,
             ),
           );
+          if (status === "Offline") {
+            alarmEventsSinceSnapshotRef.current[cameraId] = {
+              active: false,
+              sources: [],
+            };
+            setAlarmStateByCamera((current) => ({
+              ...current,
+              [cameraId]: { active: false, sources: [] },
+            }));
+          }
         }
         if (cameraId === selectedCameraRef.current) {
           setCameraStatus(status);
@@ -350,21 +409,33 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       }
 
       if (message.event === "alarm_state") {
+        const alarmState = {
+          active: message.data.active,
+          sources: message.data.sources ?? [],
+        };
+        alarmEventsSinceSnapshotRef.current[message.data.camera_id] =
+          alarmState;
+        setAlarmStateByCamera((current) => ({
+          ...current,
+          [message.data.camera_id]: alarmState,
+        }));
         if (
-          message.data.camera_id &&
-          selectedCameraRef.current &&
-          message.data.camera_id !== selectedCameraRef.current
+          !message.data.active &&
+          message.data.camera_id === selectedCameraRef.current
         ) {
-          return;
-        }
-        setAlarmActive(message.data.active);
-        setAlarmSources(message.data.sources ?? []);
-        if (!message.data.active) {
           setAlarmSilenced(false);
         }
       }
+
+      if (message.event === "alarm_state_snapshot") {
+        setAlarmStateByCamera({
+          ...message.data.states,
+          ...alarmEventsSinceSnapshotRef.current,
+        });
+      }
     };
 
+    alarmEventsSinceSnapshotRef.current = {};
     const socket = createSocket(handleMessage);
 
     const init = async () => {
@@ -464,7 +535,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     stopAudio(fireAlarmAudioRef);
     stopAudio(securityAlarmAudioRef);
     setAlarmSilenced(true);
-    setAlarmActive(false);
   }, [stopAudio]);
 
   useEffect(() => {

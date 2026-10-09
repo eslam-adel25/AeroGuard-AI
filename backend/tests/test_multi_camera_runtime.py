@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from app.ai import processor as processor_module
 from app.api.v1 import cameras as cameras_api
+from app.api.v1 import websocket_api
 
 
 def _processor_state():
@@ -473,3 +474,114 @@ def test_live_camera_validation_failure_releases_startup_for_retry(monkeypatch):
         assert "camera-a" not in processor._starting_cameras
 
     asyncio.run(exercise_retry())
+
+
+def test_cancelled_live_camera_start_releases_only_its_pending_reservation(monkeypatch):
+    processor = _processor_state()
+    assert processor.reserve_camera_start("camera-b") == "reserved"
+    validation_entered = asyncio.Event()
+
+    async def pause_validation(_url):
+        validation_entered.set()
+        await asyncio.Event().wait()
+
+    camera = SimpleNamespace(
+        camera_id="camera-a",
+        camera_type="LIVE",
+        stream_url="rtsp://camera-a/stream",
+        status="Offline",
+    )
+    monkeypatch.setattr(cameras_api, "ai_engine", processor)
+    monkeypatch.setattr(
+        cameras_api,
+        "_get_camera_for_user",
+        lambda _db, _camera_id, _user: camera,
+    )
+    monkeypatch.setattr(cameras_api, "_validate_live_rtsp_url", lambda url: url)
+    monkeypatch.setattr(cameras_api, "_verify_live_rtsp", pause_validation)
+
+    class FakeDB:
+        def commit(self):
+            pass
+
+    async def exercise_cancellation_and_retry():
+        background_tasks = BackgroundTasks()
+        user = {"user_id": "owner", "role": "User"}
+        start_task = asyncio.create_task(
+            cameras_api.start_analysis(
+                "camera-a",
+                background_tasks,
+                FakeDB(),
+                user,
+            )
+        )
+        await validation_entered.wait()
+        assert "camera-a" in processor._starting_cameras
+        assert "camera-a" not in processor._active_cameras
+
+        start_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await start_task
+
+        assert "camera-a" not in processor._starting_cameras
+        assert "camera-a" not in processor._active_cameras
+        assert "camera-a" not in processor._stop_flags
+        assert not background_tasks.tasks
+        assert processor._active_cameras == {"camera-b"}
+        assert processor._stop_flags["camera-b"] is False
+
+        async def pass_validation(_url):
+            return None
+
+        monkeypatch.setattr(cameras_api, "_verify_live_rtsp", pass_validation)
+        retry_tasks = BackgroundTasks()
+        response = await cameras_api.start_analysis(
+            "camera-a",
+            retry_tasks,
+            FakeDB(),
+            user,
+        )
+        assert response == {"status": "started", "camera_id": "camera-a"}
+        assert len(retry_tasks.tasks) == 1
+        assert processor._active_cameras == {"camera-a", "camera-b"}
+        assert "camera-a" not in processor._starting_cameras
+        assert processor._stop_flags["camera-b"] is False
+
+    asyncio.run(exercise_cancellation_and_retry())
+
+
+def test_alarm_snapshot_contains_only_authorized_camera_state(monkeypatch):
+    camera_a = SimpleNamespace(camera_id="camera-a")
+    camera_b = SimpleNamespace(camera_id="camera-b")
+    requested_scope = {}
+
+    class FakeDB:
+        def close(self):
+            pass
+
+    class FakeCameraRepository:
+        def __init__(self, db):
+            assert isinstance(db, FakeDB)
+
+        def get_all_cameras(self, owner_id=None, is_admin=False):
+            requested_scope.update(owner_id=owner_id, is_admin=is_admin)
+            return [camera_a]
+
+    processor = SimpleNamespace(
+        _active_alarm_state={"camera-a": True, "camera-b": True},
+        _active_alarm_sources={"camera-a": ["fire"], "camera-b": ["security"]},
+    )
+    monkeypatch.setattr(websocket_api, "ai_engine", processor)
+    monkeypatch.setattr(websocket_api, "SessionLocal", FakeDB)
+    monkeypatch.setattr(
+        websocket_api,
+        "CameraRepository",
+        FakeCameraRepository,
+    )
+
+    snapshot = websocket_api._build_alarm_state_snapshot("owner-a", "User")
+
+    assert requested_scope == {"owner_id": "owner-a", "is_admin": False}
+    assert snapshot == {
+        "camera-a": {"active": True, "sources": ["fire"]},
+    }

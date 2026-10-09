@@ -26,7 +26,7 @@ class ConnectionManager:
         dead_connections = []
         for connection, user_id, role in self.active_connections:
             if (
-                message.get("event") == "ai_event"
+                message.get("event") in {"ai_event", "alarm_state"}
                 and role != "Administrator"
                 and (
                     audience_user_id is None

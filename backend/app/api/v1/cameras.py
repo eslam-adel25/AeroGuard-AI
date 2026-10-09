@@ -235,17 +235,21 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
             detail="Camera startup is already in progress",
         )
 
+    startup_reservation_owned = True
     startup_activated = False
+    worker_scheduled = False
     try:
         if cam.camera_type == "LIVE":
             live_url = _validate_live_rtsp_url(cam.stream_url)
             await _verify_live_rtsp(live_url)
 
         if ai_engine.activate_camera_startup(cam.camera_id) != "reserved":
+            startup_reservation_owned = False
             raise HTTPException(
                 status_code=409,
                 detail="Camera start was cancelled",
             )
+        startup_reservation_owned = False
         startup_activated = True
 
         cam.status = "Processing"
@@ -265,12 +269,12 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
                 None,
                 True,
             )
-    except Exception:
-        if startup_activated:
-            ai_engine.release_camera_start(cam.camera_id)
-        else:
+        worker_scheduled = True
+    finally:
+        if startup_reservation_owned:
             ai_engine.release_camera_startup(cam.camera_id)
-        raise
+        elif startup_activated and not worker_scheduled:
+            ai_engine.release_camera_start(cam.camera_id)
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 
