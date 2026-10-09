@@ -1,4 +1,5 @@
 import asyncio
+import time as time_module
 import uuid
 from types import SimpleNamespace
 
@@ -23,16 +24,24 @@ class FakeScreenshotService:
         return SimpleNamespace(screenshot_path="stored/path.jpg")
 
 
-def make_processor(monkeypatch, clock):
+def make_processor(monkeypatch, clock, wall_clock=None):
     processor = processor_module.AIProcessor.__new__(processor_module.AIProcessor)
     processor.alert_persistence = {}
     processor.last_alert_time = {}
+    wall_clock = wall_clock or iter([time_module.time()] * 20)
 
     async def fake_broadcast(_message):
         return None
 
     monkeypatch.setattr(processor_module.manager, "broadcast", fake_broadcast)
-    monkeypatch.setattr(processor_module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(
+        processor_module,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: next(clock),
+            time=lambda: next(wall_clock),
+        ),
+    )
     return processor
 
 
@@ -94,19 +103,23 @@ def test_five_seconds_captures_current_frame_once(monkeypatch):
     run_alert(processor, service, active_keys, b"later")
 
     assert service.attachments == [
-        (service.events[0][0].event_id, b"confirmed"),
+        (str(service.events[0][0].event_id), b"confirmed"),
     ]
 
 
 def test_alert_reset_starts_new_persistence_window(monkeypatch):
     patch_encoder(monkeypatch)
-    processor = make_processor(monkeypatch, iter([0, 4]))
+    processor = make_processor(
+        monkeypatch,
+        iter([0, 4]),
+        iter([100, 100, 106, 106]),
+    )
     service = FakeScreenshotService()
     active_keys = set()
 
-    run_alert(processor, service, active_keys, b"first")
+    run_alert(processor, service, active_keys, b"first", "camera_object_alert")
     processor._reset_inactive_alert_persistence("camera", set())
-    run_alert(processor, service, active_keys, b"returned")
+    run_alert(processor, service, active_keys, b"returned", "camera_object_alert")
 
     assert len(service.events) == 2
     assert service.attachments == []

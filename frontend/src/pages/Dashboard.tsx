@@ -108,6 +108,9 @@ const alertBadgeLabel = (alert: AlertData) => {
 const hasCriticalAlerts = (alerts: AlertData[]) =>
   alerts.some((alert) => /critical/i.test(alert.priority || ""));
 
+const isCameraRunning = (status?: string) =>
+  status === "Processing" || status === "Running";
+
 interface DashboardProps {
   onAlertBadgeClick?: () => void;
 }
@@ -174,6 +177,14 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     if (!id) return;
     try {
       await cameraService.stop(id);
+      if (selectedCameraRef.current === id) {
+        setCameraStatus("Offline");
+      }
+      setCameras((current) =>
+        current.map((camera) =>
+          camera.camera_id === id ? { ...camera, status: "Offline" } : camera,
+        ),
+      );
     } catch {
       console.log("AI stopping...");
     }
@@ -181,6 +192,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
 
   const startCameraAI = useCallback(async (id: string) => {
     setCameraStatus("Processing");
+    setCameras((current) =>
+      current.map((camera) =>
+        camera.camera_id === id
+          ? { ...camera, status: "Processing" }
+          : camera,
+      ),
+    );
     try {
       await cameraService.start(id);
     } catch {
@@ -189,22 +207,15 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, []);
 
   const handleCameraSelection = useCallback(
-    async (id: string, shouldStart: boolean = true) => {
-      const previousCamera = selectedCameraRef.current;
+    (id: string, status?: string) => {
       setSelectedCamera(id);
       selectedCameraRef.current = id;
-
-      if (previousCamera && previousCamera !== id) {
-        await stopCameraSession(previousCamera);
-      }
-
-      if (shouldStart) {
-        await startCameraAI(id);
-      } else {
-        setCameraStatus("Offline");
-      }
+      localStorage.setItem("ag_selected_camera", id);
+      const running = isCameraRunning(status);
+      setCameraStatus(running ? (status as "Running" | "Processing") : "Offline");
+      setIsPaused(!running);
     },
-    [startCameraAI, stopCameraSession],
+    [],
   );
 
   useEffect(() => {
@@ -287,20 +298,38 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           setCriticalAlertCount(message.data.critical_alerts);
         }
         setCameraStatus("Running");
+        if (message.data.camera_id) {
+          setCameras((current) =>
+            current.map((camera) =>
+              camera.camera_id === message.data.camera_id
+                ? { ...camera, status: "Running" }
+                : camera,
+            ),
+          );
+          if (message.data.camera_id === selectedCameraRef.current) {
+            setIsPaused(false);
+          }
+        }
       }
 
       if (message.event === "camera_status") {
-        if (
-          message.data.camera_id &&
-          selectedCameraRef.current &&
-          message.data.camera_id !== selectedCameraRef.current
-        ) {
-          return;
-        }
-        setCameraStatus(
+        const cameraId = message.data.camera_id;
+        const status =
           (message.data.status as "Running" | "Offline" | "Processing") ||
-            "Offline",
-        );
+          "Offline";
+        if (cameraId) {
+          setCameras((current) =>
+            current.map((camera) =>
+              camera.camera_id === cameraId
+                ? { ...camera, status }
+                : camera,
+            ),
+          );
+        }
+        if (cameraId === selectedCameraRef.current) {
+          setCameraStatus(status);
+          setIsPaused(!isCameraRunning(status));
+        }
       }
 
       if (message.event === "ai_event") {
@@ -352,17 +381,15 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           console.error("Failed to load alert sound setting");
         }
         if (data.length > 0) {
-          const activeCamera =
-            data.find((camera) =>
-              ["Processing", "Running"].includes(camera.status ?? ""),
-            ) ?? data[0];
-          await handleCameraSelection(activeCamera.camera_id, false);
-          if (
-            activeCamera.status === "Processing" ||
-            activeCamera.status === "Running"
-          ) {
-            setCameraStatus(activeCamera.status);
-          }
+          const storedCameraId = localStorage.getItem("ag_selected_camera");
+          const selectedCamera =
+            data.find((camera) => camera.camera_id === storedCameraId) ??
+            data.find((camera) => isCameraRunning(camera.status)) ??
+            data[0];
+          handleCameraSelection(
+            selectedCamera.camera_id,
+            selectedCamera.status,
+          );
         }
       } catch {
         console.error("Link failed");
@@ -1512,14 +1539,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                   if (cam.camera_id === selectedCamera) {
                     return;
                   }
-
-                  const shouldStart = !isPaused;
-                  setIsPaused(false);
-                  await handleCameraSelection(cam.camera_id, shouldStart);
-
-                  if (!shouldStart) {
-                    setIsPaused(true);
-                  }
+                  handleCameraSelection(cam.camera_id, cam.status);
                 }}
                 className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest cursor-pointer
                     ${

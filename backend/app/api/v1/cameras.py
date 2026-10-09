@@ -75,9 +75,17 @@ async def _verify_live_rtsp(stream_url: str) -> None:
         )
 
 
-async def _run_live_camera(camera_id: str, stream_url: str) -> None:
+async def _run_live_camera(
+    camera_id: str,
+    stream_url: str,
+    reserved: bool = False,
+) -> None:
     try:
-        await ai_engine.process_camera(camera_id, stream_url)
+        await ai_engine.process_camera(
+            camera_id,
+            stream_url,
+            reserved=reserved,
+        )
     finally:
         cleanup_db = SessionLocal()
         try:
@@ -217,16 +225,36 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
         live_url = _validate_live_rtsp_url(cam.stream_url)
         await _verify_live_rtsp(live_url)
 
-    if ai_engine is not None:
-        ai_engine.stop_all_other_cameras(cam.camera_id)
-        await asyncio.sleep(0.05)
+    start_state = ai_engine.reserve_camera_start(cam.camera_id)
+    if start_state == "stopping":
+        raise HTTPException(
+            status_code=409,
+            detail="Camera is stopping; retry the start request",
+        )
+    if start_state == "active":
+        return {"status": "started", "camera_id": str(cam.camera_id)}
 
-    cam.status = "Processing"
-    db.commit()
-    if cam.camera_type == "LIVE":
-        background_tasks.add_task(_run_live_camera, cam.camera_id, cam.stream_url)
-    else:
-        background_tasks.add_task(ai_engine.process_camera, cam.camera_id, cam.stream_url)
+    try:
+        cam.status = "Processing"
+        db.commit()
+        if cam.camera_type == "LIVE":
+            background_tasks.add_task(
+                _run_live_camera,
+                cam.camera_id,
+                cam.stream_url,
+                True,
+            )
+        else:
+            background_tasks.add_task(
+                ai_engine.process_camera,
+                cam.camera_id,
+                cam.stream_url,
+                None,
+                True,
+            )
+    except Exception:
+        ai_engine.release_camera_start(cam.camera_id)
+        raise
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 

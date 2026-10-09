@@ -115,11 +115,10 @@ class AIProcessor:
         self.model_path = self._resolve_model_path(model_path)
         self._patch_ultralytics_weights_only()
         self.model = YOLO(self.model_path)
+        self._model_lock = threading.Lock()
         self.decision_engine = DecisionEngine()
-        # Tracker (stable facade). Default uses IoU fallback; swap later with ByteTrack/DeepSORT adapter.
-        self.tracker = TrackerManager()
-        self.tracker.initialize()
-        
+        self.trackers = {}
+
         # مخازن الذاكرة الحية
         self.last_frames = {}
         self.last_alert_time = {}
@@ -141,9 +140,8 @@ class AIProcessor:
         self._active_camera_lock = threading.Lock()
         self._active_alarm_state = {}  # camera_id -> bool
         self._active_alarm_sources = {}  # camera_id -> list[str]
-        
-        # كائن الإعدادات النشط في الذاكرة لسرعة الوصول
-        self.active_settings = None
+        self._settings_by_owner = {}
+        self._settings_lock = threading.Lock()
 
     def _resolve_model_path(self, model_path: str) -> str:
         """Resolve a backend-relative model path to an absolute filesystem path."""
@@ -330,18 +328,101 @@ class AIProcessor:
 
     def update_config(self, settings_model: UserSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
-        self.active_settings = settings_model
+        owner_id = getattr(settings_model, "owner_id", None)
+        if owner_id is not None:
+            with self._settings_lock:
+                self._settings_by_owner[str(owner_id)] = settings_model
         print(f"⚙️ AI Engine updated with new settings: Conf={settings_model.detection_confidence}")
         # adjust model device if GPU flag changed
         try:
             use_gpu = getattr(settings_model, "gpu_enabled", False)
             dev = "cuda" if use_gpu else "cpu"
             # recreate model on requested device
-            self.model = YOLO(self.model_path, device=dev)
+            with self._model_lock:
+                self.model = YOLO(self.model_path, device=dev)
             print(f"⚙️ AI Engine model reloaded on device={dev}")
-        except Exception:
+        except Exception as exc:
             # ignore if device change not supported in environment
-            pass
+            print(f"⚠️ AI Engine model reload failed: {type(exc).__name__}: {exc}")
+
+    def _get_settings_for_owner(self, owner_id, fallback=None):
+        if owner_id is None:
+            return fallback
+        with self._settings_lock:
+            return self._settings_by_owner.get(str(owner_id), fallback)
+
+    def _predict_frame(self, frame, confidence_threshold):
+        with self._model_lock:
+            model = self.model
+            return (
+                model.predict(
+                    frame,
+                    conf=confidence_threshold,
+                    verbose=False,
+                ),
+                model.names,
+            )
+
+    def reserve_camera_start(self, camera_id):
+        """Atomically reserve one camera's processing slot before scheduling its worker."""
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            if camera_key in self._active_cameras:
+                return "stopping" if self._stop_flags.get(camera_key, False) else "active"
+            self._active_cameras.add(camera_key)
+            self._stop_flags[camera_key] = False
+            return "reserved"
+
+    def release_camera_start(self, camera_id):
+        """Release a reserved start if scheduling or setup fails before worker cleanup."""
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            self._stop_flags.pop(camera_key, None)
+            self._active_cameras.discard(camera_key)
+
+    def _camera_stop_requested(self, camera_id):
+        with self._active_camera_lock:
+            return self._stop_flags.get(str(camera_id), False)
+
+    def _initialize_camera_runtime_state(self, camera_id):
+        camera_key = str(camera_id)
+        camera_tracker = TrackerManager()
+        camera_tracker.initialize()
+        self.trackers[camera_key] = camera_tracker
+        self.object_history[camera_key] = {}
+        self.loitering_tracker[camera_key] = {}
+        self.bag_tracker[camera_key] = {}
+        self.display_id_state[camera_key] = {}
+        self.person_identity_registries[camera_key] = PersonIdentityRegistry()
+        self.bag_owner_state[camera_key] = {}
+        self.bag_owner_person_state[camera_key] = {}
+        self.bag_owner_evidence[camera_key] = {}
+        self.bag_owner_status[camera_key] = {}
+        self.active_critical_alerts[camera_key] = []
+        self._active_alarm_state[camera_key] = False
+        self._active_alarm_sources[camera_key] = []
+
+    def _clear_camera_runtime_state(self, camera_id):
+        camera_key = str(camera_id)
+        self.last_frames.pop(camera_key, None)
+        for state in (
+            self.trackers,
+            self.object_history,
+            self.loitering_tracker,
+            self.bag_tracker,
+            self.display_id_state,
+            self.person_identity_registries,
+            self.bag_owner_state,
+            self.bag_owner_person_state,
+            self.bag_owner_evidence,
+            self.bag_owner_status,
+            self.active_critical_alerts,
+            self.crowd_cooldown,
+            self._active_alarm_state,
+            self._active_alarm_sources,
+        ):
+            state.pop(camera_key, None)
+        self._reset_inactive_alert_persistence(camera_key, set())
 
     def get_latest_frame(self, camera_id):
         return self.last_frames.get(str(camera_id))
@@ -686,25 +767,38 @@ class AIProcessor:
                 cv2.LINE_AA,
             )
 
-    async def process_camera(self, camera_id, rtsp_url, db: Session = None):
+    async def process_camera(
+        self,
+        camera_id,
+        rtsp_url,
+        db: Session = None,
+        reserved: bool = False,
+    ):
         """المحرك الشامل: معالجة البث الحي أو الفيديوهات المرفوعة (Section 5 & 13)"""
-        local_db = db if db is not None else SessionLocal()
+        camera_id_str = str(camera_id)
+        if reserved:
+            with self._active_camera_lock:
+                owns_camera = (
+                    camera_id_str in self._active_cameras
+                    and camera_id_str in self._stop_flags
+                )
+            if not owns_camera:
+                return
+        elif self.reserve_camera_start(camera_id) != "reserved":
+            print(f"⚠️ [{camera_id}] camera already processing, skipping duplicate start")
+            return
+
+        local_db = None
         own_db = db is None
         cap = None
-
-        camera_id_str = str(camera_id)
-        with self._active_camera_lock:
-            if camera_id_str in self._active_cameras:
-                print(f"⚠️ [{camera_id}] camera already processing, skipping duplicate start")
-                return
-            self._active_cameras.add(camera_id_str)
-
-        self.person_identity_registries[camera_id_str] = PersonIdentityRegistry()
-        self._stop_flags[camera_id_str] = False
         consecutive_read_failures = 0
         last_frame_pos = -1
         status_broadcasted = False
         try:
+            local_db = db if db is not None else SessionLocal()
+            if self._camera_stop_requested(camera_id_str):
+                return
+            self._initialize_camera_runtime_state(camera_id_str)
             await manager.broadcast({
                 "event": "camera_status",
                 "data": {
@@ -712,6 +806,8 @@ class AIProcessor:
                     "status": "Processing",
                 }
             })
+            if self._camera_stop_requested(camera_id_str):
+                return
             # 1. تحديد نوع المصدر ومعالجته
             source = 0 if str(rtsp_url) == "0" else rtsp_url
             is_file_source = False
@@ -747,23 +843,36 @@ class AIProcessor:
             cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
             camera_owner_id = getattr(cam, "owner_id", None) if cam else None
             try:
-                self.active_settings = (
+                loaded_settings = (
                     local_db.query(UserSettings)
                     .filter(UserSettings.owner_id == camera_owner_id)
                     .first()
                     if camera_owner_id
                     else None
                 )
+                camera_settings = self._get_settings_for_owner(
+                    camera_owner_id,
+                    loaded_settings,
+                )
+                if (
+                    camera_owner_id is not None
+                    and camera_settings is loaded_settings
+                ):
+                    with self._settings_lock:
+                        self._settings_by_owner.setdefault(
+                            str(camera_owner_id),
+                            loaded_settings,
+                        )
             except Exception as settings_exc:
                 print(f"⚠️ [{camera_id}] failed to load settings: {type(settings_exc).__name__}: {settings_exc}")
-                self.active_settings = None
+                camera_settings = None
                 local_db.rollback()
 
             conf_thr = 0.5
             max_objs = 50
-            if self.active_settings is not None:
-                conf_thr = getattr(self.active_settings, "detection_confidence", 0.5)
-                max_objs = getattr(self.active_settings, "max_objects", 50)
+            if camera_settings is not None:
+                conf_thr = getattr(camera_settings, "detection_confidence", 0.5)
+                max_objs = getattr(camera_settings, "max_objects", 50)
 
             person_conf_thr = self._get_person_confidence_threshold(conf_thr)
 
@@ -792,6 +901,10 @@ class AIProcessor:
             frame_period = _get_source_frame_period(cap, is_file_source)
             next_frame_deadline = time.perf_counter()
             while cap.isOpened():
+                camera_settings = self._get_settings_for_owner(
+                    camera_owner_id,
+                    camera_settings,
+                )
                 iteration += 1
                 ret, frame = cap.read()
                 if self._stop_flags.get(camera_id_str):
@@ -855,14 +968,19 @@ class AIProcessor:
 
                 # respect frame-skip
                 frame_skip = 0
-                if self.active_settings is not None:
-                    frame_skip = getattr(self.active_settings, "frame_skip", 0) or 0
+                if camera_settings is not None:
+                    frame_skip = getattr(camera_settings, "frame_skip", 0) or 0
                 if frame_skip is None:
                     frame_skip = 0
                 do_infer = (frame_skip <= 0) or (iteration % (frame_skip + 1) == 0)
                 results = None
+                model_names = None
                 if do_infer:
-                    results = await asyncio.to_thread(self.model.predict, frame, conf=conf_thr, verbose=False)
+                    results, model_names = await asyncio.to_thread(
+                        self._predict_frame,
+                        frame,
+                        conf_thr,
+                    )
                 else:
                     results = _build_empty_model_result()
                 annotated_frame = frame.copy()
@@ -892,7 +1010,7 @@ class AIProcessor:
 
                 for box, cls_idx, conf in zip(boxes, labels, confs):
                     x1, y1, x2, y2 = box.astype(int)
-                    label_name = self.model.names[int(cls_idx)].lower()
+                    label_name = model_names[int(cls_idx)].lower()
                     if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke", "flame"]:
                         continue
                     detection_confidence = float(conf)
@@ -904,9 +1022,10 @@ class AIProcessor:
                         "confidence": detection_confidence,
                     })
 
+                camera_tracker = self.trackers[camera_id_str]
                 if do_infer:
-                    self.tracker.update(detections_for_tracker)
-                active_tracks = self.tracker.get_active_tracks()
+                    camera_tracker.update(detections_for_tracker)
+                active_tracks = camera_tracker.get_active_tracks()
                 active_objs_count = len(active_tracks)
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
                 bag_count = sum(1 for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"})
@@ -931,7 +1050,7 @@ class AIProcessor:
                     local_db.rollback()
 
                 restricted_area_enabled = bool(
-                    getattr(self.active_settings, "restricted_area_enabled", False)
+                    getattr(camera_settings, "restricted_area_enabled", False)
                 )
                 has_direction_zone = any(
                     "direction" in (zone.zone_type or "").lower()
@@ -1001,6 +1120,7 @@ class AIProcessor:
                     else:
                         object_label = self._format_overlay_label(display_id, label_name)
 
+                    camera_history = self.object_history.setdefault(str(camera_id), {})
                     overlay_label = object_label
                     alert_key = None
                     in_restricted = False
@@ -1025,7 +1145,7 @@ class AIProcessor:
 
                                 # Direction rule (line): detect crossing and check allowed direction
                                 if "direction" in ztype:
-                                    prev_point = self.object_history.get(obj_id)
+                                    prev_point = camera_history.get(obj_id)
                                     line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
                                     a = tuple(line_coords[0])
                                     b = tuple(line_coords[-1])
@@ -1061,7 +1181,7 @@ class AIProcessor:
 
                                 # Tripwire: any crossing of the defined line triggers one alert per crossing
                                 elif "tripwire" in ztype:
-                                    prev_point = self.object_history.get(obj_id)
+                                    prev_point = camera_history.get(obj_id)
                                     line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
                                     a = tuple(line_coords[0])
                                     b = tuple(line_coords[-1])
@@ -1115,15 +1235,15 @@ class AIProcessor:
                     # legacy wrong-direction vertical heuristic (kept for backward compatibility)
                     if (
                         has_direction_zone
-                        and obj_id in self.object_history
+                        and obj_id in camera_history
                         and not in_restricted
                     ):
-                        prev_point = self.object_history[obj_id]
+                        prev_point = camera_history[obj_id]
                         prev_y = prev_point[1]
                         # Wrong direction heuristic (vertical movement upward)
                         wrong_enabled = False
-                        if self.active_settings is not None:
-                            wrong_enabled = getattr(self.active_settings, "wrong_direction_enabled", False) or False
+                        if camera_settings is not None:
+                            wrong_enabled = getattr(camera_settings, "wrong_direction_enabled", False) or False
                         if wrong_enabled and base_point[1] < prev_y - 30:
                             status = "WARNING"
                             box_color = (0, 0, 255)
@@ -1148,15 +1268,15 @@ class AIProcessor:
                                 # stayed roughly in place
                                 loiter_enabled = False
                                 loiter_seconds = 30
-                                if self.active_settings is not None:
-                                    loiter_enabled = getattr(self.active_settings, "loitering_enabled", False) or False
-                                    loiter_seconds = getattr(self.active_settings, "loitering_seconds", 30) or 30
+                                if camera_settings is not None:
+                                    loiter_enabled = getattr(camera_settings, "loitering_enabled", False) or False
+                                    loiter_seconds = getattr(camera_settings, "loitering_seconds", 30) or 30
                                 if loiter_enabled and (now_ts - rec.get("last_move", now_ts) >= loiter_seconds):
                                     status = "WARNING"
                                     box_color = (0, 255, 255)
                                     display_label = "LOITERING"
 
-                    self.object_history[obj_id] = base_point
+                    camera_history[obj_id] = base_point
 
                     # Persist detections so analytics has real data even for non-alert objects
                     self._persist_detection(
@@ -1196,9 +1316,9 @@ class AIProcessor:
                             # evaluate abandoned
                             abandoned_enabled = False
                             abandoned_seconds = 20
-                            if self.active_settings is not None:
-                                abandoned_enabled = getattr(self.active_settings, "abandoned_bag_enabled", False) or False
-                                abandoned_seconds = getattr(self.active_settings, "abandoned_bag_seconds", 20) or 20
+                            if camera_settings is not None:
+                                abandoned_enabled = getattr(camera_settings, "abandoned_bag_enabled", False) or False
+                                abandoned_seconds = getattr(camera_settings, "abandoned_bag_seconds", 20) or 20
                             if abandoned_enabled:
                                 first_seen = bag_rec.get("first_seen", now_ts)
                                 last_near = bag_rec.get("last_near_person", 0)
@@ -1220,15 +1340,15 @@ class AIProcessor:
 
                     # Fire / Smoke immediate critical events
                     # Check if fire/smoke detection is enabled
-                    fire_enabled = getattr(self.active_settings, "fire_detection_enabled", False) or False
-                    smoke_enabled = getattr(self.active_settings, "smoke_detection_enabled", False) or False
+                    fire_enabled = getattr(camera_settings, "fire_detection_enabled", False) or False
+                    smoke_enabled = getattr(camera_settings, "smoke_detection_enabled", False) or False
                     
                     should_trigger_fire_smoke = (
                         (label_name == "fire" and fire_enabled) or
                         (label_name == "smoke" and smoke_enabled)
                     )
                     
-                    flame_enabled = getattr(self.active_settings, "fire_detection_enabled", False) or False
+                    flame_enabled = getattr(camera_settings, "fire_detection_enabled", False) or False
                     should_trigger_fire_smoke = (
                         (label_name == "fire" and fire_enabled) or
                         (label_name == "smoke" and smoke_enabled) or
@@ -1343,27 +1463,30 @@ class AIProcessor:
         except Exception as exc:
             print(f"❌ [{camera_id}] unexpected termination: {type(exc).__name__}: {exc}")
         finally:
-            if cap is not None:
-                cap.release()
-                print(f"📌 [{camera_id}] cap released and processing ended")
-            self._reset_inactive_alert_persistence(camera_id, set())
-            await manager.broadcast({
-                "event": "camera_status",
-                "data": {
-                    "camera_id": str(camera_id),
-                    "status": "Offline",
-                }
-            })
-            self.last_frames.pop(str(camera_id), None)
-            self.person_identity_registries.pop(camera_id_str, None)
-            self._stop_flags.pop(camera_id_str, None)
-            with self._active_camera_lock:
-                self._active_cameras.discard(camera_id_str)
-            if own_db:
-                local_db.close()
+            try:
+                if cap is not None:
+                    cap.release()
+                    print(f"📌 [{camera_id}] cap released and processing ended")
+                await manager.broadcast({
+                    "event": "camera_status",
+                    "data": {
+                        "camera_id": str(camera_id),
+                        "status": "Offline",
+                    }
+                })
+            finally:
+                self._clear_camera_runtime_state(camera_id_str)
+                with self._active_camera_lock:
+                    self._stop_flags.pop(camera_id_str, None)
+                    self._active_cameras.discard(camera_id_str)
+                if own_db and local_db is not None:
+                    local_db.close()
 
     def stop_camera(self, camera_id):
-        self._stop_flags[str(camera_id)] = True
+        camera_key = str(camera_id)
+        with self._active_camera_lock:
+            if camera_key in self._active_cameras:
+                self._stop_flags[camera_key] = True
 
     def stop_all_other_cameras(self, keep_camera_id):
         current_key = str(keep_camera_id)
