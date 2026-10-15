@@ -265,45 +265,46 @@ class AIProcessor:
         if state is None:
             if time.time() - self.last_alert_time.get(alert_key, 0) <= 5:
                 return
-            event = ai_service.register_event(
-                camera_id=camera_id,
-                detection_type=detection_type,
-                severity=severity,
-                confidence=confidence,
-                track_id=track_id,
-                user_id=owner_id,
-                metadata={**metadata, "_pending_screenshot": True},
-                screenshot_bytes=None,
-                broadcast=False,
-            )
             state = {
                 "started_at": now,
-                "event_id": str(event.event_id),
-                "screenshot_captured": False,
+                "finalized": False,
             }
             self.alert_persistence[alert_key] = state
-            self.last_alert_time[alert_key] = time.time()
 
         if (
             not capture_screenshot
-            or state["screenshot_captured"]
+            or state["finalized"]
             or now - state["started_at"] < 5
         ):
             return
 
+        screenshot_bytes = None
         try:
             encoded, jpg = cv2.imencode(".jpg", annotated_frame)
-            if not encoded:
-                return
-            updated_event = await ai_service.attach_screenshot(
-                state["event_id"],
-                jpg.tobytes(),
+            if encoded:
+                screenshot_bytes = jpg.tobytes()
+            else:
+                print(f"⚠️ [{camera_id}] alert screenshot encoding returned no image")
+        except Exception as exc:
+            print(
+                f"⚠️ [{camera_id}] alert screenshot encoding failed: "
+                f"{type(exc).__name__}: {exc}"
             )
-        except Exception:
-            return
 
-        if updated_event is not None and updated_event.screenshot_path:
-            state["screenshot_captured"] = True
+        event = ai_service.register_event(
+            camera_id=camera_id,
+            detection_type=detection_type,
+            severity=severity,
+            confidence=confidence,
+            track_id=track_id,
+            user_id=owner_id,
+            metadata=metadata,
+            screenshot_bytes=screenshot_bytes,
+        )
+        state["event_id"] = str(event.event_id)
+        state["finalized"] = True
+        state["screenshot_persisted"] = bool(event.screenshot_path)
+        self.last_alert_time[alert_key] = time.time()
 
     def _reset_inactive_alert_persistence(self, camera_id, active_alert_keys):
         prefix = f"{camera_id}_"

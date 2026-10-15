@@ -37,6 +37,7 @@ def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[st
             )
         if camera_id:
             event_query = event_query.filter(AIEvent.camera_id == camera_id)
+        event_query = repo.exclude_pending_events(event_query)
         items = (
             event_query.filter(cast(AIEvent.event_id, String).ilike(f"{prefix}%"))
             .order_by(AIEvent.created_at.desc())
@@ -77,7 +78,7 @@ def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[st
 @router.patch("/ai/events/{event_id}/read")
 def mark_ai_event_read(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = AIRepository(db)
-    event = repo.get_event(event_id)
+    event = repo.get_finalized_event(event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     if current_user.get("role") != "Administrator":
@@ -90,11 +91,13 @@ def mark_ai_event_read(event_id: str, db: Session = Depends(get_db), current_use
 
 @router.post("/ai/events/read-all")
 def mark_all_ai_events_read(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    repo = AIRepository(db)
     owner_id = current_user.get("user_id")
     query = db.query(AIEvent)
     if current_user.get("role") != "Administrator":
         camera_ids = select(Camera.camera_id).where(Camera.owner_id == owner_id)
         query = query.filter(AIEvent.camera_id.in_(camera_ids))
+    query = repo.exclude_pending_events(query)
     updated = query.filter(AIEvent.is_read.is_(False)).update(
         {AIEvent.is_read: True}, synchronize_session=False
     )
@@ -104,7 +107,7 @@ def mark_all_ai_events_read(db: Session = Depends(get_db), current_user: dict = 
 @router.get("/ai/events/{event_id}")
 def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = AIRepository(db)
-    ev = repo.get_event(event_id)
+    ev = repo.get_finalized_event(event_id)
     if not ev:
         raise HTTPException(status_code=404, detail="Event not found")
     if current_user.get("role") != "Administrator" and ev.camera_id and ev.detected_by != current_user.get("user_id"):
@@ -153,7 +156,7 @@ async def create_ai_event_manual(camera_id: str, detection_type: str, severity: 
 @router.get("/ai/events/{event_id}/screenshot")
 def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     repo = AIRepository(db)
-    ev = repo.get_event(event_id)
+    ev = repo.get_finalized_event(event_id)
     if not ev or not ev.screenshot_path:
         raise HTTPException(status_code=404, detail="Screenshot not found")
     if current_user.get("role") != "Administrator" and ev.camera_id:

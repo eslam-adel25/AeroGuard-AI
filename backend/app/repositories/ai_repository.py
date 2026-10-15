@@ -19,6 +19,11 @@ class AIRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    @staticmethod
+    def exclude_pending_events(query):
+        pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
+        return query.filter(or_(pending.is_(None), pending.is_(False)))
+
     # -----------------
     # Tracking methods
     # -----------------
@@ -98,6 +103,10 @@ class AIRepository:
     def get_event(self, event_id: str) -> Optional[AIEvent]:
         return self.db.query(AIEvent).filter(AIEvent.event_id == event_id).first()
 
+    def get_finalized_event(self, event_id: str) -> Optional[AIEvent]:
+        query = self.db.query(AIEvent).filter(AIEvent.event_id == event_id)
+        return self.exclude_pending_events(query).first()
+
     def update_event(self, event_id: str, **kwargs: Any) -> Optional[AIEvent]:
         ev = self.get_event(event_id)
         if not ev:
@@ -144,8 +153,7 @@ class AIRepository:
             q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
             filters.append(Camera.owner_id == owner_id)
         if exclude_pending_screenshots:
-            pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
-            filters.append(or_(pending.is_(None), pending.is_(False)))
+            q = self.exclude_pending_events(q)
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
         if severity:
@@ -175,8 +183,7 @@ class AIRepository:
                 Camera.owner_id == owner_id
             )
         if exclude_pending_screenshots:
-            pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
-            q = q.filter(or_(pending.is_(None), pending.is_(False)))
+            q = self.exclude_pending_events(q)
         return int(q.scalar() or 0)
 
     # For reports: returns (total, items)
@@ -211,6 +218,7 @@ class AIRepository:
             filters.append(func.date(AIEvent.created_at) <= end_date)
         if filters:
             q = q.filter(and_(*filters))
+        q = self.exclude_pending_events(q)
 
         total = q.count()
         rows = q.order_by(AIEvent.created_at.desc()).limit(limit).offset(offset).all()
@@ -249,6 +257,8 @@ class AIRepository:
             filters.append(func.date(AIEvent.created_at) >= start_date)
         if end_date:
             filters.append(func.date(AIEvent.created_at) <= end_date)
+        pending = AIEvent.event_metadata["_pending_screenshot"].as_boolean()
+        filters.append(or_(pending.is_(None), pending.is_(False)))
         if filters:
             q = q.filter(and_(*filters))
         q = q.group_by(AIEvent.detection_type)
@@ -257,7 +267,7 @@ class AIRepository:
 
     def recent_events(self, limit: int = 20) -> List[Dict[str, Any]]:
         rows = (
-            self.db.query(AIEvent)
+            self.exclude_pending_events(self.db.query(AIEvent))
             .order_by(AIEvent.created_at.desc())
             .limit(limit)
             .all()

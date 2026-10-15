@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
@@ -17,8 +18,8 @@ class FakeRepo:
             detection_type=payload.get("detection_type"),
             severity=payload.get("severity"),
             confidence=payload.get("confidence"),
-            created_at=None,
-            screenshot_path=None,
+            created_at=datetime.now(),
+            screenshot_path=payload.get("screenshot_path"),
         )
 
 
@@ -32,16 +33,20 @@ def test_register_event_uses_none_for_invalid_track_id(monkeypatch):
 
     monkeypatch.setattr(ai_service.manager, "broadcast", fake_broadcast)
 
-    service.register_event(
-        camera_id="cam-1",
-        detection_type="LOITERING",
-        severity="High",
-        confidence=0.8,
-        track_id="not-a-uuid",
-        user_id=None,
-        metadata={"bbox": [1, 2, 3, 4]},
-        screenshot_bytes=None,
-    )
+    async def create_event():
+        service.register_event(
+            camera_id="cam-1",
+            detection_type="LOITERING",
+            severity="High",
+            confidence=0.8,
+            track_id="not-a-uuid",
+            user_id=None,
+            metadata={"bbox": [1, 2, 3, 4]},
+            screenshot_bytes=None,
+        )
+        await asyncio.sleep(0)
+
+    asyncio.run(create_event())
 
     assert fake_repo.payloads[0]["track_id"] is None
 
@@ -54,3 +59,35 @@ def test_build_screenshot_filename_returns_human_readable_name():
     )
 
     assert filename == "Main_Entrance_LOITERING_2025-01-02_15-04-05.jpg"
+
+
+def test_event_broadcast_does_not_depend_on_screenshot_persistence(monkeypatch):
+    service = ai_service.AIService(db_session=object())
+    fake_repo = FakeRepo()
+    service.repo = fake_repo
+    messages = []
+
+    async def fake_broadcast(message, **_kwargs):
+        messages.append(message)
+
+    monkeypatch.setattr(ai_service.manager, "broadcast", fake_broadcast)
+
+    async def create_eligible_event():
+        event = service.register_event(
+            camera_id="cam-1",
+            detection_type="LOITERING",
+            severity="High",
+            confidence=0.8,
+            user_id=None,
+            metadata={},
+            screenshot_bytes=None,
+        )
+        await asyncio.sleep(0)
+        return event
+
+    event = asyncio.run(create_eligible_event())
+
+    assert event.screenshot_path is None
+    assert len(messages) == 1
+    assert messages[0]["event"] == "ai_event"
+    assert messages[0]["data"]["event_id"] == str(event.event_id)

@@ -5,6 +5,7 @@ from datetime import date
 
 from ..models.models import Detection, Camera, Report
 from ..models.models import AIEvent
+from .ai_repository import AIRepository
 
 
 class ReportRepository:
@@ -191,8 +192,8 @@ class ReportRepository:
                 func.count(AIEvent.event_id).label("count"),
             )
             .group_by(AIEvent.detection_type)
-            .all()
         )
+        ai_distribution = AIRepository.exclude_pending_events(ai_distribution).all()
 
         return {
             "summary": {

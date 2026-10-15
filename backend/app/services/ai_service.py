@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import uuid
@@ -9,6 +10,7 @@ from ..models.models import Camera
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "ai_events")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
 
 def _safe_filename_component(value: Optional[str]) -> str:
@@ -103,6 +105,7 @@ class AIService:
                 )
                 payload["screenshot_path"] = path
             except Exception:
+                logger.exception("Failed to persist AI event screenshot")
                 payload["screenshot_path"] = None
         ev = self.repo.create_event(payload)
         if broadcast:
