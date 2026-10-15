@@ -205,7 +205,8 @@ const en = {
       rightClickHint: "Right click to undo",
       escHint: "ESC to cancel",
       snapshot: "Capture Snapshot",
-      stopAlarm: "Stop Alarm",
+      muteCamera: "Mute audio for {{camera}}",
+      unmuteCamera: "Unmute audio for {{camera}}",
     },
     cameraButton: "Camera",
     status: {
@@ -892,7 +893,7 @@ const en = {
         title: "Alarm Sounds",
         summary:
           "Sound mapping depends on the alarm source and the global sound setting.",
-        body: "When sounds are enabled, fire, flame, and smoke sources use the fire alarm audio. Other alarm sources use the security alarm audio. The processor broadcasts alarm_state messages and the dashboard loops the appropriate audio while active.\nThe dashboard Stop control pauses both alarm sounds until the alarm becomes inactive. Warning-only conditions such as loitering, and the inspected wrong-direction path, should not be documented as guaranteed sound sources. Browser audio permission and the user sound setting can also prevent playback.",
+        body: "When sounds are enabled, fire, flame, and smoke sources use the fire alarm audio. Other alarm sources use the security alarm audio. The authenticated application keeps one loop per required sound category while any unmuted camera alarm remains active; both categories may play together.\nUse the camera-strip mute control to silence only that camera. Its mute clears when its alarm resolves. Warning-only conditions such as loitering, and the inspected wrong-direction path, should not be documented as guaranteed sound sources. Browser audio permission and the user sound setting can also prevent playback.",
       },
       settings: {
         title: "User Settings",
@@ -922,7 +923,7 @@ const en = {
         title: "No Sound",
         summary:
           "Sound requires an active alarm source, enabled sound, and browser playback permission.",
-        body: "Check the sound setting, browser audio permissions, the alarm source, and whether the event is warning-only. Fire, flame, and smoke map to the fire alarm; other active sources map to the security alarm. Loitering is WARNING/High and should not be treated as a guaranteed alarm.\nThe Dashboard Stop control silences active audio until the alarm becomes inactive, so wait for the state to clear before retesting.",
+        body: "Check the sound setting, browser audio permissions, the alarm source, and whether the event is warning-only. Fire, flame, and smoke map to the fire alarm; other active sources map to the security alarm. Loitering is WARNING/High and should not be treated as a guaranteed alarm.\nUse the camera-strip mute control to silence only that camera; it clears when the alarm resolves. Audio for other active, unmuted cameras continues.",
       },
       annotationProblems: {
         title: "Annotation Problems",
@@ -1094,7 +1095,7 @@ const en = {
         title: "No Alarm Sound",
         summary:
           "Sound requires the setting, browser playback, and an alarm source that actually maps to audio.",
-        body: "What you see: no sound or a sound different from what you expected.\nCheck the alert sound setting, browser audio permissions, site/tab mute state, camera processing, and event type. Fire, flame, and smoke map to the fire alarm; other active alarm sources map to the security alarm. Warning-only conditions such as loitering do not guarantee sound, and the inspected explicit Wrong Direction path does not add a dedicated sound source. The Dashboard Stop control silences active audio until the alarm becomes inactive.\nExpected result: an active mapped alarm plays when sound is enabled and the browser permits it. Contact support with event type, source, setting state, browser, and time.",
+        body: "What you see: no sound or a sound different from what you expected.\nCheck the alert sound setting, browser audio permissions, site/tab mute state, camera processing, and event type. Fire, flame, and smoke map to the fire alarm; other active alarm sources map to the security alarm. Warning-only conditions such as loitering do not guarantee sound, and the inspected explicit Wrong Direction path does not add a dedicated sound source. Check whether that camera is muted in the Dashboard camera strip; its mute clears when the alarm resolves.\nExpected result: an active mapped alarm plays when sound is enabled and the browser permits it. Contact support with event type, source, setting state, browser, and time.",
       },
       fireSmoke: {
         title: "Fire / Flame / Smoke Alerts",

@@ -21,6 +21,7 @@ import Contact from "./pages/public/Contact";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
+import { AlertAudioProvider } from "./components/AlertAudioProvider";
 import {
   aiService,
   cameraService,
@@ -438,7 +439,7 @@ function App() {
     };
   };
 
-  const authenticatedShell = (
+  const authenticatedShellContent = (
     <div className="flex min-h-screen bg-ag-dark text-ag-primary">
       <Sidebar
         activePage={activePage}
@@ -732,6 +733,9 @@ function App() {
         )}
       </div>
     </div>
+  );
+  const authenticatedShell = (
+    <AlertAudioProvider>{authenticatedShellContent}</AlertAudioProvider>
   );
 
   return (

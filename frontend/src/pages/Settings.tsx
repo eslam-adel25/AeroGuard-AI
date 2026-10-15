@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { settingsService } from "../services/api";
 import type { ISystemSettings } from "../services/api";
+import { useAlertAudio } from "../components/useAlertAudio";
 
 const DEFAULT_SETTINGS: ISystemSettings = {
   organization_name: "AeroGuard AI",
@@ -84,6 +85,7 @@ const Toggle = ({
 const Settings = () => {
   const { t } = useTranslation();
   const { confirm, toast } = useNotification();
+  const { setAlertSoundsEnabled: updateAlertSoundsEnabled } = useAlertAudio();
   const [config, setConfig] = useState<ISystemSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -108,6 +110,7 @@ const Settings = () => {
     try {
       toastId = toast.loading("Processing", "Please wait...");
       await settingsService.update(config);
+      updateAlertSoundsEnabled(config.enable_alert_sounds);
       if (toastId) {
         toast.update(toastId, {
           type: "success",

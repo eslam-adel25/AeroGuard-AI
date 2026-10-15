@@ -60,7 +60,8 @@ export type WSMessage =
   | { event: "ai_event"; data: AIEventWSData }
   | { event: "alarm_state"; data: AlarmStateWSData }
   | { event: "alarm_state_snapshot"; data: AlarmStateSnapshotWSData }
-  | { event: "camera_status"; data: CameraStatusWSData };
+  | { event: "camera_status"; data: CameraStatusWSData }
+  | { event: "socket_disconnected"; data: Record<string, never> };
 
 export type SocketHandle = {
   socket: WebSocket | null;
@@ -69,19 +70,65 @@ export type SocketHandle = {
 
 let activeSocket: WebSocket | null = null;
 let activeToken: string | null = null;
-const subscribers = new Set<(message: WSMessage) => void>();
+const subscribers = new Map<(message: WSMessage) => void, number>();
+let reconnectTimer: number | null = null;
+let reconnectAttempts = 0;
+let alarmStates: AlarmStateSnapshotWSData["states"] = {};
+let liveAlarmOverrides: AlarmStateSnapshotWSData["states"] = {};
+let hasAlarmSnapshot = false;
 
 const broadcastMessage = (message: WSMessage) => {
-  subscribers.forEach((subscriber) => subscriber(message));
+  subscribers.forEach((_count, subscriber) => subscriber(message));
+};
+
+const alarmSnapshotMessage = (): WSMessage => ({
+  event: "alarm_state_snapshot",
+  data: { states: { ...alarmStates } },
+});
+
+const clearAlarmStates = () => {
+  alarmStates = {};
+  liveAlarmOverrides = {};
+  hasAlarmSnapshot = false;
+};
+
+const cancelReconnect = () => {
+  if (reconnectTimer !== null) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 };
 
 const disconnectSocket = () => {
-  if (activeSocket && activeSocket.readyState !== WebSocket.CLOSED) {
-    activeSocket.close();
-  }
-
+  cancelReconnect();
+  const socket = activeSocket;
   activeSocket = null;
   activeToken = null;
+  reconnectAttempts = 0;
+  clearAlarmStates();
+  if (
+    socket &&
+    socket.readyState !== WebSocket.CLOSED &&
+    socket.readyState !== WebSocket.CLOSING
+  ) {
+    socket.close();
+  }
+};
+
+const scheduleReconnect = () => {
+  if (reconnectTimer !== null || subscribers.size === 0) {
+    return;
+  }
+  if (!getStoredAuthToken()) {
+    return;
+  }
+
+  const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000);
+  reconnectAttempts += 1;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    connectSocket();
+  }, delay);
 };
 
 const connectSocket = () => {
@@ -90,6 +137,7 @@ const connectSocket = () => {
     activeToken = null;
     return null;
   }
+  cancelReconnect();
 
   if (
     activeSocket &&
@@ -101,7 +149,9 @@ const connectSocket = () => {
   }
 
   if (activeSocket && activeSocket.readyState !== WebSocket.CLOSED) {
-    activeSocket.close();
+    const previousSocket = activeSocket;
+    activeSocket = null;
+    previousSocket.close();
   }
 
   activeToken = token;
@@ -109,35 +159,84 @@ const connectSocket = () => {
   const wsBaseUrl =
     import.meta.env.VITE_WS_BASE_URL || `${protocol}//${window.location.host}`;
   const WS_URL = `${wsBaseUrl}/ws/dashboard?token=${encodeURIComponent(token)}`;
-  const socket = new WebSocket(WS_URL);
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(WS_URL);
+  } catch (error) {
+    activeToken = null;
+    console.error("Failed to create dashboard WebSocket:", error);
+    scheduleReconnect();
+    return null;
+  }
 
   socket.onopen = () => {
+    if (activeSocket !== socket) {
+      socket.close();
+      return;
+    }
+    liveAlarmOverrides = {};
+    hasAlarmSnapshot = false;
     console.log("🚀 [AeroGuard] Secure Socket Link Established");
   };
 
   socket.onmessage = (event) => {
+    if (activeSocket !== socket) {
+      return;
+    }
     try {
       const parsed = JSON.parse(event.data) as WSMessage;
-      broadcastMessage(parsed);
+      if (parsed.event === "alarm_state") {
+        const state = {
+          active: parsed.data.active,
+          sources: parsed.data.sources ?? [],
+        };
+        alarmStates[parsed.data.camera_id] = state;
+        liveAlarmOverrides[parsed.data.camera_id] = state;
+        broadcastMessage(parsed);
+      } else if (parsed.event === "camera_status") {
+        if (parsed.data.status === "Offline") {
+          const inactiveState = { active: false, sources: [] };
+          alarmStates[parsed.data.camera_id] = inactiveState;
+          liveAlarmOverrides[parsed.data.camera_id] = inactiveState;
+        }
+        broadcastMessage(parsed);
+      } else if (parsed.event === "alarm_state_snapshot") {
+        alarmStates = { ...parsed.data.states };
+        Object.entries(liveAlarmOverrides).forEach(([cameraId, state]) => {
+          if (cameraId in alarmStates) {
+            alarmStates[cameraId] = state;
+          }
+        });
+        hasAlarmSnapshot = true;
+        reconnectAttempts = 0;
+        broadcastMessage(alarmSnapshotMessage());
+      } else {
+        broadcastMessage(parsed);
+      }
     } catch (error) {
       console.error("❌ Failed to parse system event:", error);
     }
   };
 
   socket.onclose = () => {
-    if (activeSocket === socket) {
-      activeSocket = null;
+    if (activeSocket !== socket) {
+      return;
     }
+    activeSocket = null;
+    activeToken = null;
 
     if (subscribers.size === 0) {
-      activeToken = null;
       return;
     }
 
-    const latestToken = getStoredAuthToken();
-    if (!latestToken) {
-      activeToken = null;
-      return;
+    clearAlarmStates();
+    broadcastMessage({ event: "socket_disconnected", data: {} });
+    scheduleReconnect();
+  };
+
+  socket.onerror = () => {
+    if (activeSocket === socket) {
+      socket.close();
     }
   };
 
@@ -148,13 +247,31 @@ const connectSocket = () => {
 export const createSocket = (
   onMessage: (message: WSMessage) => void,
 ): SocketHandle => {
-  subscribers.add(onMessage);
+  const isNewSubscriber = !subscribers.has(onMessage);
+  subscribers.set(onMessage, (subscribers.get(onMessage) ?? 0) + 1);
   const socket = connectSocket();
+  if (
+    isNewSubscriber &&
+    hasAlarmSnapshot &&
+    socket?.readyState === WebSocket.OPEN
+  ) {
+    onMessage(alarmSnapshotMessage());
+  }
+  let closed = false;
 
   return {
     socket,
     close: () => {
-      subscribers.delete(onMessage);
+      if (closed) {
+        return;
+      }
+      closed = true;
+      const subscriberCount = subscribers.get(onMessage);
+      if (subscriberCount !== undefined && subscriberCount > 1) {
+        subscribers.set(onMessage, subscriberCount - 1);
+      } else {
+        subscribers.delete(onMessage);
+      }
       if (subscribers.size === 0) {
         disconnectSocket();
       }
@@ -163,6 +280,7 @@ export const createSocket = (
 };
 
 export const closeActiveSocket = () => {
+  broadcastMessage({ event: "socket_disconnected", data: {} });
   subscribers.clear();
   disconnectSocket();
 };

@@ -8,12 +8,12 @@ import {
 } from "react";
 import {
   cameraService,
-  settingsService,
   getStoredAuthToken,
   type ZoneData,
 } from "../services/api";
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
+import { useAlertAudio } from "../components/useAlertAudio";
 import { useTranslation } from "react-i18next";
 import {
   Maximize,
@@ -26,6 +26,8 @@ import {
   Loader2,
   ChevronRight,
   ChevronLeft,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -58,8 +60,6 @@ interface CameraData {
   status?: string;
 }
 
-const FIRE_ALARM_AUDIO = "/sounds/fire_alarm.mp3";
-const SECURITY_ALARM_AUDIO = "/sounds/security_alarm.mp3";
 const EMPTY_ALARM_SOURCES: string[] = [];
 
 type DrawingMode = "restricted" | "direction" | "tripwire";
@@ -130,16 +130,11 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
-  const [alarmStateByCamera, setAlarmStateByCamera] = useState<
-    Record<string, { active: boolean; sources: string[] }>
-  >({});
-  const [alertSoundsEnabled, setAlertSoundsEnabled] = useState(true);
-  const [alarmSilenced, setAlarmSilenced] = useState(false);
-  const fireAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
-  const securityAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
-  const alarmEventsSinceSnapshotRef = useRef<
-    Record<string, { active: boolean; sources: string[] }>
-  >({});
+  const {
+    alarmStateByCamera,
+    mutedCameraIds,
+    toggleCameraMute,
+  } = useAlertAudio();
   const [localDateTime, setLocalDateTime] = useState(() =>
     formatLocalDateTime(new Date()),
   );
@@ -374,16 +369,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                 : camera,
             ),
           );
-          if (status === "Offline") {
-            alarmEventsSinceSnapshotRef.current[cameraId] = {
-              active: false,
-              sources: [],
-            };
-            setAlarmStateByCamera((current) => ({
-              ...current,
-              [cameraId]: { active: false, sources: [] },
-            }));
-          }
         }
         if (cameraId === selectedCameraRef.current) {
           setCameraStatus(status);
@@ -408,34 +393,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         );
       }
 
-      if (message.event === "alarm_state") {
-        const alarmState = {
-          active: message.data.active,
-          sources: message.data.sources ?? [],
-        };
-        alarmEventsSinceSnapshotRef.current[message.data.camera_id] =
-          alarmState;
-        setAlarmStateByCamera((current) => ({
-          ...current,
-          [message.data.camera_id]: alarmState,
-        }));
-        if (
-          !message.data.active &&
-          message.data.camera_id === selectedCameraRef.current
-        ) {
-          setAlarmSilenced(false);
-        }
-      }
-
-      if (message.event === "alarm_state_snapshot") {
-        setAlarmStateByCamera({
-          ...message.data.states,
-          ...alarmEventsSinceSnapshotRef.current,
-        });
-      }
     };
 
-    alarmEventsSinceSnapshotRef.current = {};
     const socket = createSocket(handleMessage);
 
     const init = async () => {
@@ -443,14 +402,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         const res = await cameraService.getAll();
         const data = res.data as CameraData[];
         setCameras(data);
-        try {
-          const settingsResponse = await settingsService.get();
-          setAlertSoundsEnabled(
-            settingsResponse.data?.enable_alert_sounds ?? true,
-          );
-        } catch {
-          console.error("Failed to load alert sound setting");
-        }
         if (data.length > 0) {
           const storedCameraId = localStorage.getItem("ag_selected_camera");
           const selectedCamera =
@@ -472,123 +423,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       socket.close();
     };
   }, [handleCameraSelection]);
-
-  const stopAudio = useCallback(
-    (audioRef: React.MutableRefObject<HTMLAudioElement | null>) => {
-      const audio = audioRef.current;
-      if (!audio) {
-        return;
-      }
-      if (!audio.paused) {
-        audio.pause();
-      }
-      audio.currentTime = 0;
-    },
-    [],
-  );
-
-  const createLoopingAudio = useCallback((src: string) => {
-    const audio = new Audio(src);
-    audio.loop = true;
-    audio.preload = "auto";
-    audio.volume = 0.75;
-    audio.crossOrigin = "anonymous";
-    return audio;
-  }, []);
-
-  const playAlarmAudio = useCallback(
-    (
-      audioRef: React.MutableRefObject<HTMLAudioElement | null>,
-      src: string,
-    ) => {
-      if (alarmSilenced) {
-        return;
-      }
-      if (!audioRef.current) {
-        audioRef.current = createLoopingAudio(src);
-      }
-      const audio = audioRef.current;
-      if (audio.paused) {
-        audio.currentTime = 0;
-        void audio.play().catch(() => null);
-      }
-    },
-    [alarmSilenced, createLoopingAudio],
-  );
-
-  const isFireAlarmSource = useCallback(
-    (sources: string[]) =>
-      sources.some((source) => /^(fire|flame|smoke)$/i.test(source.trim())),
-    [],
-  );
-
-  const isSecurityAlarmSource = useCallback(
-    (sources: string[]) =>
-      sources.some(
-        (source) =>
-          source.trim() !== "" && !/^(fire|flame|smoke)$/i.test(source.trim()),
-      ),
-    [],
-  );
-
-  const stopAlarm = useCallback(() => {
-    stopAudio(fireAlarmAudioRef);
-    stopAudio(securityAlarmAudioRef);
-    setAlarmSilenced(true);
-  }, [stopAudio]);
-
-  useEffect(() => {
-    if (!alarmActive || alarmSilenced || !alertSoundsEnabled) {
-      stopAudio(fireAlarmAudioRef);
-      stopAudio(securityAlarmAudioRef);
-      return;
-    }
-
-    const hasFire = isFireAlarmSource(alarmSources);
-    const hasSecurity = isSecurityAlarmSource(alarmSources);
-
-    if (hasFire) {
-      playAlarmAudio(fireAlarmAudioRef, FIRE_ALARM_AUDIO);
-    } else {
-      stopAudio(fireAlarmAudioRef);
-    }
-
-    if (hasSecurity) {
-      playAlarmAudio(securityAlarmAudioRef, SECURITY_ALARM_AUDIO);
-    } else {
-      stopAudio(securityAlarmAudioRef);
-    }
-  }, [
-    alarmActive,
-    alarmSilenced,
-    alertSoundsEnabled,
-    alarmSources,
-    isFireAlarmSource,
-    isSecurityAlarmSource,
-    playAlarmAudio,
-    stopAudio,
-  ]);
-
-  useEffect(() => {
-    const fireAudio = fireAlarmAudioRef.current;
-    const securityAudio = securityAlarmAudioRef.current;
-    return () => {
-      if (fireAudio) {
-        if (!fireAudio.paused) {
-          fireAudio.pause();
-        }
-        fireAudio.currentTime = 0;
-        fireAudio.src = "";
-      }
-      if (securityAudio) {
-        if (!securityAudio.paused) {
-          securityAudio.pause();
-        }
-        securityAudio.currentTime = 0;
-        securityAudio.src = "";
-      }
-    };
-  }, []);
 
   // --- Control Functions ---
   const toggleFullscreen = () => {
@@ -1316,23 +1150,11 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
               ) : null}
 
               {alarmActive ? (
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={stopAlarm}
-                    className="inline-flex items-center gap-2 rounded-[18px] border border-red-500 bg-red-600/15 px-3 py-1.5 shadow-[0_10px_30px_rgba(255,0,0,0.15)] backdrop-blur-md text-[13px] font-semibold text-red-200 whitespace-nowrap pointer-events-auto transition hover:bg-red-600/25"
-                  >
-                    <span className="h-6 w-6 flex items-center justify-center rounded-full bg-red-500 text-white">
-                      ■
-                    </span>
-                    <span>Stop Alarm</span>
-                  </button>
-                  {alarmSources.length > 0 ? (
-                    <span className="text-[12px] text-red-200/80">
-                      {`Sources: ${alarmSources.join(", ")}`}
-                    </span>
-                  ) : null}
-                </div>
+                alarmSources.length > 0 ? (
+                  <span className="text-[12px] text-red-200/80">
+                    {`Sources: ${alarmSources.join(", ")}`}
+                  </span>
+                ) : null
               ) : null}
 
               <div className="inline-flex items-center gap-3 rounded-[18px] border border-white/15 bg-black/25 px-3 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md text-[14px] font-semibold text-white whitespace-nowrap">
@@ -1603,35 +1425,65 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         <div className="rounded-xl border border-white/6 bg-ag-card/30 px-3 py-2 backdrop-blur-sm shadow-md">
           <div className="flex gap-3 overflow-x-auto pb-1 custom-scrollbar">
             {cameras.map((cam) => (
-              <button
+              <div
                 key={cam.camera_id}
-                onClick={async () => {
-                  if (cam.camera_id === selectedCamera) {
-                    return;
-                  }
-                  handleCameraSelection(cam.camera_id, cam.status);
-                }}
-                className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest cursor-pointer
+                className="flex shrink-0 items-center gap-1"
+              >
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (cam.camera_id === selectedCamera) {
+                      return;
+                    }
+                    handleCameraSelection(cam.camera_id, cam.status);
+                  }}
+                  className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all border flex items-center gap-3 whitespace-nowrap tracking-widest cursor-pointer
                     ${
                       selectedCamera === cam.camera_id
                         ? "bg-ag-danger border-ag-danger text-white shadow-lg shadow-red-900/25 scale-[0.98]"
                         : "bg-black/20 border-white/5 text-gray-500 hover:text-white hover:border-white/10"
                     }`}
-              >
-                <div
-                  className={`w-2 h-2 rounded-full ${selectedCamera === cam.camera_id ? "bg-white" : "bg-gray-700"}`}
-                ></div>
-                {cam.camera_name.toUpperCase()}
-                {alarmStateByCamera[cam.camera_id]?.active ? (
-                  <span
-                    aria-label="Active alarm"
-                    title="Active alarm"
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold leading-none text-white animate-pulse"
-                  >
-                    !
-                  </span>
-                ) : null}
-              </button>
+                >
+                  <div
+                    className={`w-2 h-2 rounded-full ${selectedCamera === cam.camera_id ? "bg-white" : "bg-gray-700"}`}
+                  ></div>
+                  {cam.camera_name.toUpperCase()}
+                  {alarmStateByCamera[cam.camera_id]?.active ? (
+                    <span
+                      aria-label="Active alarm"
+                      title="Active alarm"
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold leading-none text-white animate-pulse"
+                    >
+                      !
+                    </span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleCameraMute(cam.camera_id)}
+                  disabled={!alarmStateByCamera[cam.camera_id]?.active}
+                  aria-pressed={!!mutedCameraIds[cam.camera_id]}
+                  aria-label={t(
+                    mutedCameraIds[cam.camera_id]
+                      ? "dashboard.controls.unmuteCamera"
+                      : "dashboard.controls.muteCamera",
+                    { camera: cam.camera_name },
+                  )}
+                  title={t(
+                    mutedCameraIds[cam.camera_id]
+                      ? "dashboard.controls.unmuteCamera"
+                      : "dashboard.controls.muteCamera",
+                    { camera: cam.camera_name },
+                  )}
+                  className="rounded-xl border border-white/10 bg-black/20 p-2 text-gray-300 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  {mutedCameraIds[cam.camera_id] ? (
+                    <VolumeX size={16} />
+                  ) : (
+                    <Volume2 size={16} />
+                  )}
+                </button>
+              </div>
             ))}
           </div>
         </div>
