@@ -1622,6 +1622,15 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                   className={`w-2 h-2 rounded-full ${selectedCamera === cam.camera_id ? "bg-white" : "bg-gray-700"}`}
                 ></div>
                 {cam.camera_name.toUpperCase()}
+                {alarmStateByCamera[cam.camera_id]?.active ? (
+                  <span
+                    aria-label="Active alarm"
+                    title="Active alarm"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold leading-none text-white animate-pulse"
+                  >
+                    !
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
