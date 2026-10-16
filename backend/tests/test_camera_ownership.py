@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import time
 import uuid
 
 from sqlalchemy import create_engine
@@ -163,6 +164,19 @@ def test_camera_list_status_uses_active_processor_state(monkeypatch):
         class ProcessorState:
             _active_camera_lock = threading.Lock()
             _active_cameras = {str(active_camera.camera_id)}
+            _camera_started_at = {str(active_camera.camera_id): time.monotonic()}
+            _last_frame_received_at = {str(active_camera.camera_id): time.monotonic()}
+
+            @classmethod
+            def get_camera_runtime_statuses(cls, camera_ids):
+                return {
+                    camera_id: {
+                        "started_at": cls._camera_started_at[camera_id],
+                        "last_frame_at": cls._last_frame_received_at[camera_id],
+                    }
+                    for camera_id in map(str, camera_ids)
+                    if camera_id in cls._active_cameras
+                }
 
         monkeypatch.setattr(cameras_api, "ai_engine", ProcessorState())
 
@@ -172,7 +186,7 @@ def test_camera_list_status_uses_active_processor_state(monkeypatch):
         )
         statuses = {str(camera.camera_id): camera.status for camera in responses}
 
-        assert statuses[str(active_camera.camera_id)] == "Processing"
+        assert statuses[str(active_camera.camera_id)] == "Running"
         assert statuses[str(stale_camera.camera_id)] == "Offline"
     finally:
         db.close()

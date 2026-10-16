@@ -3,9 +3,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from .database.session import engine, Base, _ensure_schema_compatibility
+from .database.session import engine, Base, SessionLocal, _ensure_schema_compatibility
 from .api.v1 import auth, cameras, users, reports, settings, websocket_api, ai
 from .ai.processor import ai_engine
+from .services.camera_status import reconcile_orphaned_processing_statuses
 import logging
 import os
 
@@ -24,6 +25,9 @@ def create_app() -> FastAPI:
     def startup_event() -> None:
         Base.metadata.create_all(bind=engine)
         _ensure_schema_compatibility()
+        # Camera processors are not restored across process restarts.
+        with SessionLocal() as db:
+            reconcile_orphaned_processing_statuses(db)
         # Register AI processor with settings API so it receives config updates
         settings.set_ai_processor(ai_engine)
 

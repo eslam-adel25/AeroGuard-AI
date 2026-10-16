@@ -10,12 +10,13 @@ import asyncio
 from urllib.parse import urlparse
 
 from ...database.session import get_db
-from ...database.session import SessionLocal
 from ...models.models import Camera, RestrictedZone, AIEvent, Detection, Tracking
 from ...schemas.schemas import CameraResponse, ZoneCreate, ZoneResponse
 from ...core.auth_middleware import get_current_user
 from ...repositories.camera_repository import CameraRepository
+from ...services.camera_status import apply_camera_runtime_statuses
 from ...ai.processor import ai_engine 
+from ...websocket.manager import manager
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -80,21 +81,11 @@ async def _run_live_camera(
     stream_url: str,
     reserved: bool = False,
 ) -> None:
-    try:
-        await ai_engine.process_camera(
-            camera_id,
-            stream_url,
-            reserved=reserved,
-        )
-    finally:
-        cleanup_db = SessionLocal()
-        try:
-            camera = cleanup_db.query(Camera).filter(Camera.camera_id == camera_id).first()
-            if camera:
-                camera.status = "Offline"
-                cleanup_db.commit()
-        finally:
-            cleanup_db.close()
+    await ai_engine.process_camera(
+        camera_id,
+        stream_url,
+        reserved=reserved,
+    )
 
 # 1. تسجيل كاميرا (بث مباشر أو رفع فيديو)
 @router.post("/", response_model=CameraResponse)
@@ -275,6 +266,16 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
             ai_engine.release_camera_startup(cam.camera_id)
         elif startup_activated and not worker_scheduled:
             ai_engine.release_camera_start(cam.camera_id)
+        if not worker_scheduled and cam.status == "Processing":
+            cam.status = "Offline"
+            db.commit()
+            await manager.broadcast({
+                "event": "camera_status",
+                "data": {
+                    "camera_id": str(cam.camera_id),
+                    "status": "Offline",
+                },
+            })
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 
@@ -285,8 +286,19 @@ async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_u
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
 
     ai_engine.stop_camera(cam.camera_id)
-    cam.status = "Offline"
-    db.commit()
+    camera_key = str(cam.camera_id)
+    with ai_engine._active_camera_lock:
+        worker_active = camera_key in ai_engine._active_cameras
+    if not worker_active:
+        cam.status = "Offline"
+        db.commit()
+        await manager.broadcast({
+            "event": "camera_status",
+            "data": {
+                "camera_id": camera_key,
+                "status": "Offline",
+            },
+        })
     return {"status": "stopped", "camera_id": str(cam.camera_id)}
 
 # 4. جلب الكاميرات
@@ -297,18 +309,8 @@ def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_
     cameras = repo.get_all_cameras(
         owner_id=current_user.get("user_id"), is_admin=is_admin
     )
-    active_camera_ids = set()
-    if ai_engine is not None:
-        with ai_engine._active_camera_lock:
-            active_camera_ids = set(ai_engine._active_cameras)
-
     responses = [CameraResponse.model_validate(camera) for camera in cameras]
-    for camera, response in zip(cameras, responses):
-        camera_id = str(camera.camera_id)
-        if camera_id in active_camera_ids:
-            response.status = "Processing"
-        elif response.status == "Processing":
-            response.status = "Offline"
+    apply_camera_runtime_statuses(responses, ai_engine)
     return responses
 
 # 5. حذف كاميرا

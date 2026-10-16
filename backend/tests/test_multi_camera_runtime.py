@@ -19,6 +19,8 @@ def _processor_state():
     processor._active_camera_lock = Lock()
     processor._active_cameras = set()
     processor._starting_cameras = set()
+    processor._camera_started_at = {}
+    processor._last_frame_received_at = {}
     processor._stop_flags = {}
     processor._model_lock = Lock()
     processor._settings_lock = Lock()
@@ -318,6 +320,51 @@ def test_camera_start_endpoint_keeps_other_camera_active(monkeypatch):
     assert len(background_tasks.tasks) == 2
 
 
+def test_camera_start_scheduling_failure_persists_offline(monkeypatch):
+    processor = _processor_state()
+    camera = SimpleNamespace(
+        camera_id="camera-a",
+        camera_type="UPLOAD",
+        stream_url="camera-a.mp4",
+        status="Offline",
+    )
+    monkeypatch.setattr(cameras_api, "ai_engine", processor)
+    monkeypatch.setattr(
+        cameras_api,
+        "_get_camera_for_user",
+        lambda _db, _camera_id, _user: camera,
+    )
+
+    class FakeDB:
+        def __init__(self):
+            self.commits = 0
+
+        def commit(self):
+            self.commits += 1
+
+    class FailedBackgroundTasks(BackgroundTasks):
+        def add_task(self, *_args, **_kwargs):
+            raise RuntimeError("task scheduling failed")
+
+    db = FakeDB()
+
+    async def start():
+        with pytest.raises(RuntimeError, match="task scheduling failed"):
+            await cameras_api.start_analysis(
+                camera.camera_id,
+                FailedBackgroundTasks(),
+                db,
+                {"user_id": "owner", "role": "User"},
+            )
+
+    asyncio.run(start())
+
+    assert camera.status == "Offline"
+    assert db.commits == 2
+    assert camera.camera_id not in processor._active_cameras
+    assert camera.camera_id not in processor._stop_flags
+
+
 def test_live_camera_stop_during_validation_cancels_start_without_affecting_other_camera(monkeypatch):
     processor = _processor_state()
     processor.reserve_camera_start("camera-b")
@@ -357,7 +404,10 @@ def test_live_camera_stop_during_validation_cancels_start_without_affecting_othe
     class FakeCameraResponse:
         @classmethod
         def model_validate(cls, camera_record):
-            return SimpleNamespace(status=camera_record.status)
+            return SimpleNamespace(
+                camera_id=camera_record.camera_id,
+                status=camera_record.status,
+            )
 
     monkeypatch.setattr(cameras_api, "CameraRepository", FakeCameraRepository)
     monkeypatch.setattr(cameras_api, "CameraResponse", FakeCameraResponse)

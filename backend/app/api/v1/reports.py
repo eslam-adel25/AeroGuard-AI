@@ -10,6 +10,8 @@ from ...core.auth_middleware import get_current_user
 from ...repositories.report_repository import ReportRepository
 from ...repositories.ai_repository import AIRepository
 from ...models.models import Camera
+from ...ai.processor import ai_engine
+from ...services.camera_status import apply_camera_runtime_statuses
 import json
 from ...utils.report_generator import ReportGenerator
 
@@ -63,7 +65,7 @@ async def get_dashboard(
     يرجع جميع بيانات صفحة Analytics في Request واحد.
     """
 
-    return ReportService.get_report_stats(
+    response = ReportService.get_report_stats(
         db=db,
         start_date=start_date,
         end_date=end_date,
@@ -75,6 +77,16 @@ async def get_dashboard(
         confidence_min=confidence_min,
         confidence_max=confidence_max,
     )
+    cameras = response.get("cameras", [])
+    top_cameras = response.get("charts", {}).get("top_cameras", [])
+    apply_camera_runtime_statuses(cameras + top_cameras, ai_engine)
+    response.get("summary", {})["active_cameras"] = sum(
+        1
+        for camera in cameras
+        if (camera.get("status") or "").strip().lower()
+        in {"processing", "streaming", "running", "connected"}
+    )
+    return response
 
 
 @router.post("/generate")

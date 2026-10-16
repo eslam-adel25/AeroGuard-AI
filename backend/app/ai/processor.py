@@ -5,6 +5,7 @@ import os
 import threading
 import math
 from pathlib import Path
+from types import SimpleNamespace
 import numpy as np
 import torch
 from ultralytics import YOLO
@@ -14,6 +15,7 @@ from ..database.session import SessionLocal
 from ..models.models import Detection, Camera, RestrictedZone, UserSettings
 from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
+from ..services.camera_status import CAMERA_NO_FRAME_GRACE_SECONDS
 from ..websocket.manager import manager
 from .identity import PersonIdentityRegistry
 from .tracker import TrackerManager
@@ -138,6 +140,8 @@ class AIProcessor:
         self._stop_flags = {}
         self._active_cameras = set()
         self._starting_cameras = set()
+        self._camera_started_at = {}
+        self._last_frame_received_at = {}
         self._active_camera_lock = threading.Lock()
         self._active_alarm_state = {}  # camera_id -> bool
         self._active_alarm_sources = {}  # camera_id -> list[str]
@@ -335,14 +339,15 @@ class AIProcessor:
 
     def update_config(self, settings_model: UserSettings):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
-        owner_id = getattr(settings_model, "owner_id", None)
+        settings_snapshot = self._snapshot_camera_settings(settings_model)
+        owner_id = settings_snapshot.owner_id
         if owner_id is not None:
             with self._settings_lock:
-                self._settings_by_owner[str(owner_id)] = settings_model
-        print(f"⚙️ AI Engine updated with new settings: Conf={settings_model.detection_confidence}")
+                self._settings_by_owner[str(owner_id)] = settings_snapshot
+        print(f"⚙️ AI Engine updated with new settings: Conf={settings_snapshot.detection_confidence}")
         # adjust model device if GPU flag changed
         try:
-            use_gpu = getattr(settings_model, "gpu_enabled", False)
+            use_gpu = settings_snapshot.gpu_enabled
             dev = "cuda" if use_gpu else "cpu"
             # recreate model on requested device
             with self._model_lock:
@@ -351,6 +356,30 @@ class AIProcessor:
         except Exception as exc:
             # ignore if device change not supported in environment
             print(f"⚠️ AI Engine model reload failed: {type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def _snapshot_camera_settings(settings_model):
+        field_names = (
+            "owner_id",
+            "detection_confidence",
+            "max_objects",
+            "gpu_enabled",
+            "frame_skip",
+            "restricted_area_enabled",
+            "wrong_direction_enabled",
+            "loitering_enabled",
+            "loitering_seconds",
+            "abandoned_bag_enabled",
+            "abandoned_bag_seconds",
+            "fire_detection_enabled",
+            "smoke_detection_enabled",
+        )
+        return SimpleNamespace(
+            **{
+                field_name: getattr(settings_model, field_name, None)
+                for field_name in field_names
+            }
+        )
 
     def _get_settings_for_owner(self, owner_id, fallback=None):
         if owner_id is None:
@@ -380,6 +409,8 @@ class AIProcessor:
                 return "stopping" if self._stop_flags.get(camera_key, False) else "starting"
             self._active_cameras.add(camera_key)
             self._stop_flags[camera_key] = False
+            self._camera_started_at[camera_key] = time.monotonic()
+            self._last_frame_received_at.pop(camera_key, None)
             return "reserved"
 
     def reserve_camera_startup(self, camera_id):
@@ -406,6 +437,8 @@ class AIProcessor:
                 return "cancelled"
             self._starting_cameras.remove(camera_key)
             self._active_cameras.add(camera_key)
+            self._camera_started_at[camera_key] = time.monotonic()
+            self._last_frame_received_at.pop(camera_key, None)
             return "reserved"
 
     def release_camera_startup(self, camera_id):
@@ -423,10 +456,118 @@ class AIProcessor:
             self._stop_flags.pop(camera_key, None)
             self._active_cameras.discard(camera_key)
             self._starting_cameras.discard(camera_key)
+            self._camera_started_at.pop(camera_key, None)
+            self._last_frame_received_at.pop(camera_key, None)
 
     def _camera_stop_requested(self, camera_id):
         with self._active_camera_lock:
             return self._stop_flags.get(str(camera_id), False)
+
+    def get_camera_runtime_statuses(self, camera_ids):
+        with self._active_camera_lock:
+            return {
+                camera_key: {
+                    "started_at": self._camera_started_at[camera_key],
+                    "last_frame_at": self._last_frame_received_at.get(camera_key),
+                    "stop_requested": self._stop_flags.get(camera_key, False),
+                }
+                for camera_key in map(str, camera_ids)
+                if camera_key in self._active_cameras
+                and camera_key in self._camera_started_at
+            }
+
+    def _record_frame_received(self, camera_id):
+        with self._active_camera_lock:
+            self._last_frame_received_at[str(camera_id)] = time.monotonic()
+
+    @staticmethod
+    def _consume_task_exception(task):
+        if not task.cancelled():
+            task.exception()
+
+    @staticmethod
+    def _release_capture_after_open(capture, camera_id, task):
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            print(f"⚠️ [{camera_id}] delayed capture open failed: {type(error).__name__}: {error}")
+        try:
+            capture.release()
+        except Exception as exc:
+            print(f"⚠️ [{camera_id}] delayed capture release failed: {type(exc).__name__}: {exc}")
+
+    async def _open_live_capture(self, capture, source, camera_id, deadline):
+        open_task = asyncio.create_task(
+            asyncio.to_thread(
+                capture.open,
+                source,
+                cv2.CAP_DSHOW,
+            )
+            if source == 0
+            else asyncio.to_thread(capture.open, source)
+        )
+        while True:
+            remaining = deadline - time.monotonic()
+            if self._camera_stop_requested(camera_id) or remaining <= 0:
+                open_task.add_done_callback(
+                    lambda task: self._release_capture_after_open(
+                        capture,
+                        camera_id,
+                        task,
+                    )
+                )
+                capture.release()
+                return None
+
+            try:
+                done, _ = await asyncio.wait(
+                    {open_task},
+                    timeout=min(0.25, remaining),
+                )
+            except asyncio.CancelledError:
+                open_task.add_done_callback(
+                    lambda task: self._release_capture_after_open(
+                        capture,
+                        camera_id,
+                        task,
+                    )
+                )
+                raise
+            if done:
+                return bool(open_task.result() and capture.isOpened())
+
+    async def _read_live_frame(self, capture, camera_id, deadline):
+        while True:
+            remaining = deadline - time.monotonic()
+            if self._camera_stop_requested(camera_id) or remaining <= 0:
+                capture.release()
+                return None
+
+            read_task = asyncio.create_task(asyncio.to_thread(capture.read))
+            try:
+                while not read_task.done():
+                    remaining = deadline - time.monotonic()
+                    if self._camera_stop_requested(camera_id) or remaining <= 0:
+                        read_task.add_done_callback(self._consume_task_exception)
+                        capture.release()
+                        return None
+                    await asyncio.wait(
+                        {read_task},
+                        timeout=min(0.05, remaining),
+                    )
+            except asyncio.CancelledError:
+                read_task.add_done_callback(self._consume_task_exception)
+                raise
+
+            result = read_task.result()
+            ret, frame = result
+            if ret and frame is not None and getattr(frame, "size", 0) > 0:
+                return result
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(0.25, remaining))
 
     def _initialize_camera_runtime_state(self, camera_id):
         camera_key = str(camera_id)
@@ -835,10 +976,12 @@ class AIProcessor:
         local_db = None
         own_db = db is None
         cap = None
+        capture_released = False
         consecutive_read_failures = 0
         last_frame_pos = -1
         status_broadcasted = False
         camera_owner_id = None
+        last_frame_received_at = None
         try:
             local_db = db if db is not None else SessionLocal()
             if self._camera_stop_requested(camera_id_str):
@@ -865,10 +1008,31 @@ class AIProcessor:
                     source = os.path.abspath(os.path.join(backend_root, source))
                     print(f"📌 [{camera_id}] resolved source path={source}")
 
+            with self._active_camera_lock:
+                startup_time = self._camera_started_at.get(
+                    camera_id_str,
+                    time.monotonic(),
+                )
+
             print(
                 f"📌 [{camera_id}] source={source!r} type={type(source).__name__} file_source={is_file_source}"
             )
-            cap = cv2.VideoCapture(source, cv2.CAP_DSHOW) if source == 0 else cv2.VideoCapture(source)
+            if is_file_source:
+                cap = cv2.VideoCapture(source)
+            else:
+                cap = cv2.VideoCapture()
+                capture_opened = await self._open_live_capture(
+                    cap,
+                    source,
+                    camera_id_str,
+                    startup_time + CAMERA_NO_FRAME_GRACE_SECONDS,
+                )
+                if capture_opened is None:
+                    capture_released = True
+                    return
+                if not capture_opened:
+                    print(f"❌ Critical: Could not open camera/video {camera_id}")
+                    return
             print(f"📌 [{camera_id}] cap created, isOpened={cap.isOpened()}")
 
             # 2. تحميل إعدادات المناطق المحظورة (نُحمّلها أولياً ونقوم بتحديثها دورياً داخل الحلقة)
@@ -888,30 +1052,28 @@ class AIProcessor:
             cam = local_db.query(Camera).filter(Camera.camera_id == camera_id).first()
             camera_owner_id = getattr(cam, "owner_id", None) if cam else None
             try:
-                loaded_settings = (
+                settings_row = (
                     local_db.query(UserSettings)
                     .filter(UserSettings.owner_id == camera_owner_id)
                     .first()
                     if camera_owner_id
                     else None
                 )
-                camera_settings = self._get_settings_for_owner(
-                    camera_owner_id,
-                    loaded_settings,
-                )
-                if (
-                    camera_owner_id is not None
-                    and camera_settings is loaded_settings
-                ):
+                camera_settings = self._get_settings_for_owner(camera_owner_id)
+                if camera_settings is None and settings_row is not None:
+                    settings_snapshot = self._snapshot_camera_settings(settings_row)
                     with self._settings_lock:
-                        self._settings_by_owner.setdefault(
+                        camera_settings = self._settings_by_owner.setdefault(
                             str(camera_owner_id),
-                            loaded_settings,
+                            settings_snapshot,
                         )
             except Exception as settings_exc:
                 print(f"⚠️ [{camera_id}] failed to load settings: {type(settings_exc).__name__}: {settings_exc}")
                 camera_settings = None
                 local_db.rollback()
+                raise RuntimeError(
+                    f"Failed to load AI settings for camera {camera_id}"
+                ) from settings_exc
 
             conf_thr = 0.5
             max_objs = 50
@@ -928,13 +1090,6 @@ class AIProcessor:
 
             if not cap.isOpened():
                 print(f"❌ Critical: Could not open camera/video {camera_id}")
-                await manager.broadcast({
-                    "event": "camera_status",
-                    "data": {
-                        "camera_id": str(camera_id),
-                        "status": "Offline",
-                    }
-                })
                 return
 
             repo = DetectionRepository(local_db)
@@ -951,12 +1106,41 @@ class AIProcessor:
                     camera_settings,
                 )
                 iteration += 1
-                ret, frame = cap.read()
-                if self._stop_flags.get(camera_id_str):
+                if self._camera_stop_requested(camera_id_str):
                     print(f"📌 [{camera_id}] stop signal received")
                     break
 
-                if not ret:
+                if is_file_source:
+                    ret, frame = cap.read()
+                else:
+                    frame_deadline = (
+                        last_frame_received_at
+                        if last_frame_received_at is not None
+                        else startup_time
+                    ) + CAMERA_NO_FRAME_GRACE_SECONDS
+                    frame_result = await self._read_live_frame(
+                        cap,
+                        camera_id_str,
+                        frame_deadline,
+                    )
+                    if frame_result is None:
+                        capture_released = True
+                        if self._camera_stop_requested(camera_id_str):
+                            print(f"📌 [{camera_id}] stop signal received during capture read")
+                        else:
+                            print(
+                                f"⚠️ [{camera_id}] no valid frame received for "
+                                f"{CAMERA_NO_FRAME_GRACE_SECONDS:g} seconds"
+                            )
+                        break
+                    ret, frame = frame_result
+
+                frame_is_valid = bool(
+                    ret
+                    and frame is not None
+                    and getattr(frame, "size", 0) > 0
+                )
+                if not frame_is_valid:
                     if isinstance(source, str) and not source.isdigit():
                         
                         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -988,10 +1172,26 @@ class AIProcessor:
                         await asyncio.sleep(0.1)
                         continue
                     print(f"⚠️ [{camera_id}] camera stream read failed, retrying after sleep")
-                    await asyncio.sleep(1)
+                    with self._active_camera_lock:
+                        latest_frame_at = self._last_frame_received_at.get(camera_id_str)
+                    no_frame_since = latest_frame_at if latest_frame_at is not None else startup_time
+                    remaining = (
+                        no_frame_since
+                        + CAMERA_NO_FRAME_GRACE_SECONDS
+                        - time.monotonic()
+                    )
+                    if remaining <= 0:
+                        print(
+                            f"⚠️ [{camera_id}] no valid frame received for "
+                            f"{CAMERA_NO_FRAME_GRACE_SECONDS:g} seconds"
+                        )
+                        break
+                    await asyncio.sleep(min(1.0, remaining))
                     continue
 
                 consecutive_read_failures = 0
+                last_frame_received_at = time.monotonic()
+                self._record_frame_received(camera_id_str)
                 frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
                 last_frame_pos = frame_pos
 
@@ -1509,17 +1709,63 @@ class AIProcessor:
         except Exception as exc:
             print(f"❌ [{camera_id}] unexpected termination: {type(exc).__name__}: {exc}")
         finally:
-            try:
-                if cap is not None:
+            if cap is not None and not capture_released:
+                try:
                     cap.release()
                     print(f"📌 [{camera_id}] cap released and processing ended")
-                if self._active_alarm_state.get(camera_id_str, False):
+                except Exception as exc:
+                    print(f"⚠️ [{camera_id}] capture release failed: {type(exc).__name__}: {exc}")
+            if self._active_alarm_state.get(camera_id_str, False):
+                try:
                     await self._broadcast_alarm_state(
                         camera_id,
                         False,
                         [],
                         camera_owner_id,
                     )
+                except Exception as exc:
+                    print(f"⚠️ [{camera_id}] alarm cleanup broadcast failed: {type(exc).__name__}: {exc}")
+
+            try:
+                self._clear_camera_runtime_state(camera_id_str)
+            except Exception as exc:
+                print(f"⚠️ [{camera_id}] runtime state cleanup failed: {type(exc).__name__}: {exc}")
+            with self._active_camera_lock:
+                self._stop_flags.pop(camera_id_str, None)
+                self._active_cameras.discard(camera_id_str)
+                self._starting_cameras.discard(camera_id_str)
+                self._camera_started_at.pop(camera_id_str, None)
+                self._last_frame_received_at.pop(camera_id_str, None)
+
+            cleanup_db = local_db
+            if cleanup_db is None and own_db:
+                try:
+                    cleanup_db = SessionLocal()
+                except Exception as exc:
+                    print(f"⚠️ [{camera_id}] cleanup database session unavailable: {type(exc).__name__}: {exc}")
+            try:
+                if cleanup_db is not None:
+                    camera = cleanup_db.query(Camera).filter(
+                        Camera.camera_id == camera_id
+                    ).first()
+                    if camera is not None and camera.status != "Offline":
+                        camera.status = "Offline"
+                        cleanup_db.commit()
+            except Exception as exc:
+                print(f"⚠️ [{camera_id}] failed to persist Offline status: {type(exc).__name__}: {exc}")
+                if cleanup_db is not None:
+                    try:
+                        cleanup_db.rollback()
+                    except Exception as rollback_exc:
+                        print(f"⚠️ [{camera_id}] database rollback failed: {type(rollback_exc).__name__}: {rollback_exc}")
+            finally:
+                if own_db and cleanup_db is not None:
+                    try:
+                        cleanup_db.close()
+                    except Exception as close_exc:
+                        print(f"⚠️ [{camera_id}] database close failed: {type(close_exc).__name__}: {close_exc}")
+
+            try:
                 await manager.broadcast({
                     "event": "camera_status",
                     "data": {
@@ -1527,14 +1773,8 @@ class AIProcessor:
                         "status": "Offline",
                     }
                 })
-            finally:
-                self._clear_camera_runtime_state(camera_id_str)
-                with self._active_camera_lock:
-                    self._stop_flags.pop(camera_id_str, None)
-                    self._active_cameras.discard(camera_id_str)
-                    self._starting_cameras.discard(camera_id_str)
-                if own_db and local_db is not None:
-                    local_db.close()
+            except Exception as exc:
+                print(f"⚠️ [{camera_id}] terminal status broadcast failed: {type(exc).__name__}: {exc}")
 
     def stop_camera(self, camera_id):
         camera_key = str(camera_id)
