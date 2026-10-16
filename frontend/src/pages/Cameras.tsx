@@ -134,7 +134,7 @@ const Cameras = () => {
 
     if (uploadType === "UPLOAD" && !selectedFile) {
       toast.error(
-        "Operation Failed",
+        t("common.operationFailed"),
         t("cameras.uploadFileRequired") || "Please select a video file.",
       );
       setLoading(false);
@@ -158,7 +158,10 @@ const Cameras = () => {
     let created = false;
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(
+        t("common.processing"),
+        t("common.pleaseWait"),
+      );
       const res = await cameraService.create(data);
       created = true;
       await cameraService.start(res.data.camera_id);
@@ -167,7 +170,7 @@ const Cameras = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
+          title: t("common.success"),
           description: t("cameras.provisionSuccess"),
         });
       }
@@ -185,13 +188,13 @@ const Cameras = () => {
         if (!created) {
           toast.update(toastId, {
             type: "error",
-            title: "Operation Failed",
+            title: t("common.operationFailed"),
             description: t("cameras.provisionFailed"),
           });
         } else {
           toast.update(toastId, {
             type: "error",
-            title: "Operation Failed",
+            title: t("common.operationFailed"),
             description:
               t("cameras.provisionPartial") ||
               "Camera created, but AI initialization failed.",
@@ -240,7 +243,12 @@ const Cameras = () => {
               {/* Count Pill matching screenshot */}
               <span className="flex items-center gap-1 px-2.5 py-1 bg-white/5 border border-white/10 text-ag-success text-[10px] font-semibold font-mono rounded uppercase tracking-wider">
                 <span className="w-1.5 h-1.5 rounded-full bg-ag-success animate-pulse"></span>
-                {cameras.length} {cameras.length === 1 ? "Camera" : "Cameras"}
+                {cameras.length}{" "}
+                {t(
+                  cameras.length === 1
+                    ? "cameras.cameraSingular"
+                    : "cameras.cameraPlural",
+                )}
               </span>
             </div>
             <p className="text-gray-400 text-xs mt-1.5 font-sans font-medium flex items-center gap-1.5">
@@ -274,10 +282,29 @@ const Cameras = () => {
                 : cam.status === "ACTIVE";
             const statusLabel =
               cam.camera_type === "LIVE"
-                ? liveStatus.toUpperCase()
+                ? (() => {
+                    switch (liveStatus.toUpperCase()) {
+                      case "ACTIVE":
+                        return t("common.active");
+                      case "ONLINE":
+                        return t("common.online");
+                      case "PROCESSING":
+                        return t("dashboard.status.processing");
+                      case "RUNNING":
+                        return t("dashboard.status.running");
+                      case "OFFLINE":
+                        return t("common.offline");
+                      case "DISCONNECTED":
+                        return t("cameras.status.disconnected");
+                      case "PENDING":
+                        return t("cameras.status.pending");
+                      default:
+                        return liveStatus.toUpperCase();
+                    }
+                  })()
                 : cam.status === "ACTIVE"
-                  ? "ACTIVE"
-                  : "PENDING";
+                  ? t("common.active")
+                  : t("cameras.status.pending");
             return (
               <div
                 key={cam.camera_id}
@@ -307,7 +334,9 @@ const Cameras = () => {
                     <span
                       className={isLive ? "text-ag-success" : "text-amber-300"}
                     >
-                      {isLive ? "LIVE FEED" : "DISCONNECTED"}
+                      {isLive
+                        ? t("cameras.status.liveFeed")
+                        : t("cameras.status.disconnected")}
                     </span>
                   </div>
 
@@ -351,15 +380,15 @@ const Cameras = () => {
                         let toastId: string | null = null;
                         try {
                           toastId = toast.loading(
-                            "Processing",
-                            "Please wait...",
+                            t("common.processing"),
+                            t("common.pleaseWait"),
                           );
                           await cameraService.start(cam.camera_id);
                           if (toastId) {
                             toast.update(toastId, {
                               type: "success",
-                              title: "Success",
-                              description: "AI Active",
+                              title: t("common.success"),
+                              description: t("cameras.aiActive"),
                             });
                           }
                         } catch (err) {
@@ -367,10 +396,8 @@ const Cameras = () => {
                           if (toastId) {
                             toast.update(toastId, {
                               type: "error",
-                              title: "Operation Failed",
-                              description:
-                                t("cameras.aiInitFailed") ||
-                                "Failed to initialize AI node.",
+                              title: t("common.operationFailed"),
+                              description: t("cameras.aiInitFailed"),
                             });
                           }
                         } finally {
@@ -383,12 +410,12 @@ const Cameras = () => {
                       {startingId === cam.camera_id ? (
                         <span className="flex items-center gap-2">
                           <Loader2 size={12} className="animate-spin" />
-                          Starting...
+                          {t("cameras.starting")}
                         </span>
                       ) : (
                         <>
                           <Play size={13} fill="currentColor" stroke="none" />{" "}
-                          Initialize AI Node
+                          {t("cameras.initializeAi")}
                         </>
                       )}
                     </button>
@@ -397,21 +424,19 @@ const Cameras = () => {
                       onClick={() => {
                         confirm({
                           title:
-                            t("cameras.confirmDeleteCameraTitle") ||
-                            "Delete Camera",
+                            t("cameras.deleteCamera"),
                           description:
-                            t("cameras.confirmDeleteCamera") ||
-                            "Delete this camera and all related data?",
+                            t("cameras.confirmDeleteCamera"),
                           type: "danger",
-                          confirmLabel: "Delete",
-                          cancelLabel: "Cancel",
+                          confirmLabel: t("common.delete"),
+                          cancelLabel: t("common.cancel"),
                           onConfirm: async () => {
                             setDeletingId(cam.camera_id);
                             let toastId: string | null = null;
                             try {
                               toastId = toast.loading(
-                                "Processing",
-                                "Please wait...",
+                                t("common.processing"),
+                                t("common.pleaseWait"),
                               );
                               await cameraService.delete(cam.camera_id);
                               setCameras((current) =>
@@ -423,7 +448,7 @@ const Cameras = () => {
                               if (toastId) {
                                 toast.update(toastId, {
                                   type: "success",
-                                  title: "Success",
+                                  title: t("common.success"),
                                   description: t("cameras.deleteSuccess"),
                                 });
                               }
@@ -432,7 +457,7 @@ const Cameras = () => {
                               if (toastId) {
                                 toast.update(toastId, {
                                   type: "error",
-                                  title: "Operation Failed",
+                                  title: t("common.operationFailed"),
                                   description: t("cameras.deleteFailed"),
                                 });
                               }
@@ -448,10 +473,10 @@ const Cameras = () => {
                       {deletingId === cam.camera_id ? (
                         <span className="flex items-center justify-center gap-1">
                           <Loader2 size={12} className="animate-spin" />
-                          Deleting Node...
+                          {t("cameras.deletingNode")}
                         </span>
                       ) : (
-                        <span>Delete Camera</span>
+                        <span>{t("cameras.deleteCamera")}</span>
                       )}
                     </button>
                   </div>
@@ -480,8 +505,7 @@ const Cameras = () => {
                     {t("cameras.modalTitle")}
                   </h3>
                   <p className="text-xs text-gray-400 mt-0.5 font-medium leading-normal">
-                    Select the type of node you want to add and provide the
-                    required details.
+                    {t("cameras.modalDescription")}
                   </p>
                 </div>
               </div>
@@ -537,7 +561,7 @@ const Cameras = () => {
                   }`}
                 >
                   <Laptop size={13} />
-                  Laptop Camera
+                  {t("cameras.types.usb")}
                 </button>
               </div>
 
@@ -546,7 +570,7 @@ const Cameras = () => {
                 {/* Node Alias Input */}
                 <div>
                   <label className="text-[10px] font-mono font-bold text-ag-success uppercase tracking-wider block mb-1.5">
-                    Node Alias (e.g. Gate 04)
+                    {t("cameras.cameraAliasPlaceholder")}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-gray-500">
@@ -573,7 +597,7 @@ const Cameras = () => {
                 {/* Physical Location Input */}
                 <div>
                   <label className="text-[10px] font-mono font-bold text-ag-success uppercase tracking-wider block mb-1.5">
-                    Physical Location
+                    {t("cameras.locationPlaceholder")}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-gray-500">
@@ -640,15 +664,14 @@ const Cameras = () => {
                     <div className="flex items-start gap-3 bg-white/5 border border-white/10 rounded-lg p-3.5 text-xs text-sky-300 mt-4">
                       <span className="text-lg mt-0.5 leading-none">ⓘ</span>
                       <span className="font-sans font-medium text-[11px] leading-relaxed">
-                        Make sure your RTSP stream is accessible and the URL is
-                        correct.
+                        {t("cameras.rtspAccessibilityHint")}
                       </span>
                     </div>
                   </div>
                 ) : uploadType === "UPLOAD" ? (
                   <div>
                     <label className="text-[10px] font-mono font-bold text-ag-success uppercase tracking-wider block mb-1.5">
-                      Video File
+                      {t("cameras.videoFile")}
                     </label>
                     <div className="relative group">
                       <input
@@ -677,13 +700,13 @@ const Cameras = () => {
                           size={28}
                         />
                         <span className="text-gray-300 font-sans font-bold text-xs text-center mb-1">
-                          Drag & Drop your video file here
+                          {t("cameras.uploadDropPrompt")}
                         </span>
                         <span className="text-gray-500 text-[10px] font-medium text-center">
-                          or click to browse
+                          {t("cameras.uploadBrowsePrompt")}
                         </span>
                         <span className="text-gray-600 text-[9px] font-mono text-center mt-3">
-                          Supported formats: MP4, MOV, AVI, MKV • Max size: 2GB
+                          {t("cameras.uploadFormats")}
                         </span>
                       </label>
                     </div>
@@ -727,7 +750,7 @@ const Cameras = () => {
                 ) : (
                   <div>
                     <label className="text-[10px] font-mono font-bold text-ag-success uppercase tracking-wider block mb-1.5">
-                      Laptop Camera Information Panel
+                      {t("cameras.laptopCameraInfoTitle")}
                     </label>
                     <div className="bg-ag-dark border border-white/10 rounded-lg p-5 flex items-start gap-4">
                       {/* Interactive miniature camera preview frame */}
@@ -747,15 +770,15 @@ const Cameras = () => {
                         <div className="mt-1.5 space-y-1">
                           <p className="text-ag-success text-[11px] font-mono flex items-center gap-1.5">
                             <span className="w-1 h-1 rounded-full bg-ag-success"></span>
-                            Default Camera (0)
+                            {t("cameras.defaultCamera")}
                           </p>
                           <p className="text-ag-success text-[11px] font-mono flex items-center gap-1.5">
                             <span className="w-1 h-1 rounded-full bg-ag-success"></span>
-                            Camera is ready and connected
+                            {t("cameras.cameraReady")}
                           </p>
                         </div>
                         <p className="text-gray-400 text-[10px] font-mono mt-2 leading-relaxed">
-                          OpenCV will connect to Camera 0 automatically.
+                          {t("cameras.cameraAutoConnect")}
                         </p>
                       </div>
                     </div>
@@ -774,7 +797,7 @@ const Cameras = () => {
                 {loading ? (
                   <span className="flex items-center gap-2">
                     <Loader2 size={16} className="animate-spin" />
-                    Provisioning Node...
+                    {t("cameras.provisioning")}
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">

@@ -59,7 +59,7 @@ const getStoredActivePage = (): ActivePage | null => {
 };
 
 function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [activePage, setActivePage] = useState<ActivePage>(() => {
     if (!getStoredAuthToken()) {
       return "dashboard";
@@ -418,6 +418,29 @@ function App() {
     }
   };
 
+  const getSeverityLabel = (severity: NotificationSeverity) => {
+    switch (severity) {
+      case "Critical":
+        return t("analytics.severity.critical");
+      case "High":
+        return t("analytics.severity.high");
+      case "Medium":
+        return t("analytics.severity.medium");
+      case "Low":
+        return t("analytics.severity.low");
+      case "Normal":
+        return t("analytics.severity.normal");
+      default:
+        return severity;
+    }
+  };
+
+  const getNotificationStatusLabel = (status: string) => {
+    if (status === "Read") return t("common.read");
+    if (status === "Unread") return t("common.unread");
+    return status;
+  };
+
   const formatNotificationDateTime = (isoTime: string) => {
     const date = new Date(isoTime);
     if (Number.isNaN(date.getTime())) {
@@ -425,12 +448,12 @@ function App() {
     }
 
     return {
-      dateLabel: date.toLocaleDateString(undefined, {
+      dateLabel: date.toLocaleDateString(i18n.language, {
         day: "2-digit",
         month: "short",
         year: "numeric",
       }),
-      timeLabel: date.toLocaleTimeString(undefined, {
+      timeLabel: date.toLocaleTimeString(i18n.language, {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
@@ -577,7 +600,7 @@ function App() {
                                     notification.severity,
                                   )}`}
                                 >
-                                  {notification.severity}
+                                  {getSeverityLabel(notification.severity)}
                                 </span>
                               </div>
 
@@ -589,7 +612,9 @@ function App() {
                                       : "bg-white/5 text-gray-400"
                                   }`}
                                 >
-                                  {notification.status}
+                                  {getNotificationStatusLabel(
+                                    notification.status,
+                                  )}
                                 </span>
                                 <div className="flex flex-wrap items-center justify-end gap-2">
                                   <button
@@ -694,12 +719,12 @@ function App() {
                                       }
                                       className="flex h-20 w-full items-center justify-center rounded-md bg-white/5 text-xs text-gray-400"
                                     >
-                                      Preview
+                                      {t("app.notifications.preview")}
                                     </div>
                                   )
                                 ) : (
                                   <div className="flex h-20 w-full items-center justify-center rounded-md bg-white/5 text-xs text-gray-400">
-                                    Preview
+                                    {t("app.notifications.preview")}
                                   </div>
                                 )}
                               </div>

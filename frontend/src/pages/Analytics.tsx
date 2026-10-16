@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { aiService, cameraService, reportService } from "../services/api";
 import { createSocket, type WSMessage } from "../services/socket";
 import { useNotification } from "../components/NotificationSystem/useNotification";
@@ -50,17 +51,19 @@ type CameraOption = {
 };
 
 const alertTypeDescriptions: Record<string, string> = {
-  ABANDONED_BAG: "Abandoned bag detected",
-  LOITERING: "Loitering detected",
-  "RESTRICTED AREA": "Restricted area detected",
+  ABANDONED_BAG: "analytics.alertDescriptions.abandonedBag",
+  LOITERING: "analytics.alertDescriptions.loitering",
+  "RESTRICTED AREA": "analytics.alertDescriptions.restrictedArea",
 };
 
-const getAlertDescription = (value: unknown) => {
+const getAlertDescription = (value: unknown, t: TFunction) => {
   const eventType = typeof value === "string" ? value.trim() : "";
-  if (!eventType) return "Unknown event type";
+  if (!eventType) return t("analytics.alertDescriptions.unknown");
 
   return (
-    alertTypeDescriptions[eventType.toUpperCase()] ??
+    (alertTypeDescriptions[eventType.toUpperCase()]
+      ? t(alertTypeDescriptions[eventType.toUpperCase()])
+      : null) ??
     eventType
       .replace(/[_-]+/g, " ")
       .toLowerCase()
@@ -68,12 +71,26 @@ const getAlertDescription = (value: unknown) => {
   );
 };
 
-const formatEventTimestamp = (value: unknown) => {
+const getAlertEventErrorMessage = (error: string, t: TFunction) => {
+  const errorKeys: Record<string, string> = {
+    "Please enter an Event ID.": "analytics.alertInvestigation.enterEventId",
+    "Please enter a valid Event ID.":
+      "analytics.alertInvestigation.invalidEventId",
+    "Please sign in to continue.":
+      "analytics.alertInvestigation.signInRequired",
+    "You are not authorized to view this alert.":
+      "analytics.alertInvestigation.unauthorized",
+  };
+  const key = errorKeys[error];
+  return key ? t(key) : error;
+};
+
+const formatEventTimestamp = (value: unknown, language: string) => {
   if (typeof value !== "string") return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(language, {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -254,7 +271,7 @@ const ErrorCard = memo(({ onRetry }: { onRetry: () => void }) => {
 });
 
 const Analytics = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [filters, setFilters] = useState<FiltersState>({
     start_date: "",
     end_date: "",
@@ -605,7 +622,9 @@ const Analytics = () => {
         value: total.toLocaleString(),
         icon: Radar,
         tone: "text-[#10b981]",
-        trend: `${total.toLocaleString()} detections in the selected window`,
+        trend: t("analytics.kpiTrends.totalWindow", {
+          count: total.toLocaleString(),
+        }),
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
@@ -615,7 +634,9 @@ const Analytics = () => {
         value: critical.toLocaleString(),
         icon: Siren,
         tone: "text-[#ef4444]",
-        trend: `${critical.toLocaleString()} critical alerts from the database`,
+        trend: t("analytics.kpiTrends.criticalDatabase", {
+          count: critical.toLocaleString(),
+        }),
         trendColor: "text-[#ef4444]/90",
         iconColor: "text-[#ef4444]",
         valueColor: "text-[#ef4444]",
@@ -626,7 +647,9 @@ const Analytics = () => {
         value: high.toLocaleString(),
         icon: ShieldAlert,
         tone: "text-[#f97316]",
-        trend: `${high.toLocaleString()} high-severity detections`,
+        trend: t("analytics.kpiTrends.highSeverity", {
+          count: high.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#f97316]",
       },
@@ -636,7 +659,9 @@ const Analytics = () => {
         value: medium.toLocaleString(),
         icon: AlertTriangle,
         tone: "text-[#f59e0b]",
-        trend: `${medium.toLocaleString()} medium-severity detections`,
+        trend: t("analytics.kpiTrends.mediumSeverity", {
+          count: medium.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#f59e0b]",
       },
@@ -646,17 +671,21 @@ const Analytics = () => {
         value: low.toLocaleString(),
         icon: ShieldCheck,
         tone: "text-[#3b82f6]",
-        trend: `${low.toLocaleString()} low-severity detections`,
+        trend: t("analytics.kpiTrends.lowSeverity", {
+          count: low.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#3b82f6]",
       },
       {
         key: "suspicious",
-        title: "Suspicious Objects",
+        title: t("analytics.kpis.suspiciousObjects"),
         value: suspiciousObjects.toLocaleString(),
         icon: Shield,
         tone: "text-[#ef4444]",
-        trend: `${suspiciousObjects.toLocaleString()} unknown or suspicious objects`,
+        trend: t("analytics.kpiTrends.suspiciousObjects", {
+          count: suspiciousObjects.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#ef4444]",
       },
@@ -666,7 +695,9 @@ const Analytics = () => {
         value: fire.toLocaleString(),
         icon: Flame,
         tone: "text-[#ef4444]",
-        trend: `${fire.toLocaleString()} fire or smoke detections`,
+        trend: t("analytics.kpiTrends.fireDetections", {
+          count: fire.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#ef4444]",
       },
@@ -676,7 +707,9 @@ const Analytics = () => {
         value: persons.toLocaleString(),
         icon: Users,
         tone: "text-[#10b981]",
-        trend: `${persons.toLocaleString()} person detections`,
+        trend: t("analytics.kpiTrends.personDetections", {
+          count: persons.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#10b981]",
       },
@@ -686,7 +719,9 @@ const Analytics = () => {
         value: vehicles.toLocaleString(),
         icon: Car,
         tone: "text-[#10b981]",
-        trend: `${vehicles.toLocaleString()} vehicle detections`,
+        trend: t("analytics.kpiTrends.vehicleDetections", {
+          count: vehicles.toLocaleString(),
+        }),
         trendColor: "text-slate-400",
         iconColor: "text-[#10b981]",
       },
@@ -696,7 +731,9 @@ const Analytics = () => {
         value: `${avgConf.toFixed(1)}%`,
         icon: Crosshair,
         tone: "text-[#10b981]",
-        trend: `${avgConf.toFixed(1)}% average confidence from detections`,
+        trend: t("analytics.kpiTrends.averageConfidence", {
+          value: avgConf.toFixed(1),
+        }),
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
@@ -706,7 +743,10 @@ const Analytics = () => {
         value: active.toLocaleString(),
         icon: Video,
         tone: "text-[#10b981]",
-        trend: `${active.toLocaleString()} connected cameras for ${selectedCameraName}`,
+        trend: t("analytics.kpiTrends.activeCameras", {
+          count: active.toLocaleString(),
+          cameraName: selectedCameraName,
+        }),
         trendColor: "text-[#10b981]",
         iconColor: "text-[#10b981]",
       },
@@ -899,12 +939,12 @@ const Analytics = () => {
           </div>
         ))}
         <div className="border-t border-white/10 mt-2 pt-2 flex items-center justify-between text-slate-300">
-          <span>Total</span>
+          <span>{t("common.total")}</span>
           <span className="font-semibold text-white">{total}</span>
         </div>
       </div>
     );
-  }, []);
+  }, [t]);
 
   const heatmapMaxCount = useMemo(() => {
     const counts = heatmap.map((item) => item.count);
@@ -1348,7 +1388,7 @@ const Analytics = () => {
               <div className="space-y-3.5 flex-1 overflow-y-auto max-h-[224px] pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 <div className="space-y-3">
                   <label className="block text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
-                    Search by Alert ID
+                    {t("analytics.alertInvestigation.searchByAlertId")}
                   </label>
 
                   <div className="flex items-start gap-2">
@@ -1428,7 +1468,9 @@ const Analytics = () => {
                             }
                           }
                         }}
-                        placeholder="Enter the Event ID from the Alert PDF."
+                        placeholder={t(
+                          "analytics.alertInvestigation.eventIdPlaceholder",
+                        )}
                         className="h-14 w-full min-w-0 rounded-xl border border-[#1f2e45] bg-[#0b1220] px-4 py-3 text-sm font-mono text-slate-100 shadow-inner placeholder:text-slate-500 focus:border-[#3b82f6] focus:outline-none"
                       />
 
@@ -1437,7 +1479,9 @@ const Analytics = () => {
                           {suggestionsLoading ? (
                             <div className="flex items-center gap-2 px-3 py-2 text-[10px] text-slate-300">
                               <Loader2 size={10} className="animate-spin" />
-                              Loading matches...
+                              {t(
+                                "analytics.alertInvestigation.loadingMatches",
+                              )}
                             </div>
                           ) : eventSuggestions.length > 0 ? (
                             <div className="max-h-44 overflow-y-auto">
@@ -1483,7 +1527,9 @@ const Analytics = () => {
                             </div>
                           ) : (
                             <div className="px-3 py-2 text-[10px] text-slate-400">
-                              No matching Alert IDs found.
+                              {t(
+                                "analytics.alertInvestigation.noMatchingAlertIds",
+                              )}
                             </div>
                           )}
                         </div>
@@ -1505,20 +1551,22 @@ const Analytics = () => {
                   </div>
 
                   <p className="text-[10px] text-slate-400">
-                    Enter the Event ID from the Alert PDF.
+                    {t("analytics.alertInvestigation.eventIdPlaceholder")}
                   </p>
 
                   {alertEventError && (
                     <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-2 py-2 text-[11px] text-red-200">
                       {alertEventError === "Alert not found" ? (
                         <>
-                          <div className="font-bold">Alert not found</div>
+                          <div className="font-bold">
+                            {t("analytics.alertInvestigation.alertNotFound")}
+                          </div>
                           <div className="text-red-200/80">
-                            No alert matches this Event ID.
+                            {t("analytics.alertInvestigation.noAlertMatches")}
                           </div>
                         </>
                       ) : (
-                        alertEventError
+                        getAlertEventErrorMessage(alertEventError, t)
                       )}
                     </div>
                   )}
@@ -1526,7 +1574,7 @@ const Analytics = () => {
 
                 {!alertEvent && !alertEventError && !isSearchingAlert && (
                   <div className="rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220]/60 p-3 text-[11px] text-slate-400">
-                    No alert selected.
+                    {t("analytics.alertInvestigation.noAlertSelected")}
                   </div>
                 )}
 
@@ -1536,7 +1584,7 @@ const Analytics = () => {
                       size={12}
                       className="animate-spin text-[#60a5fa]"
                     />
-                    Loading alert details...
+                    {t("analytics.alertInvestigation.loadingAlertDetails")}
                   </div>
                 )}
 
@@ -1544,26 +1592,30 @@ const Analytics = () => {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 text-sm font-bold text-white">
-                        {getAlertDescription(alertEvent.detection_type)}
+                        {getAlertDescription(alertEvent.detection_type, t)}
                       </div>
                       <button
                         type="button"
                         onClick={clearAlertInvestigation}
                         className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#1f2e45] bg-[#0b1220] px-2 py-1 text-[10px] text-slate-200"
                       >
-                        <X size={10} /> Clear
+                        <X size={10} /> {t("common.clear")}
                       </button>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-300">
                       <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
-                        <div className="text-slate-500">Severity</div>
+                        <div className="text-slate-500">
+                          {t("analytics.alertInvestigation.severity")}
+                        </div>
                         <div className="mt-1 text-slate-100">
                           {String(alertEvent.severity ?? "-")}
                         </div>
                       </div>
                       <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
-                        <div className="text-slate-500">Confidence</div>
+                        <div className="text-slate-500">
+                          {t("analytics.alertInvestigation.confidence")}
+                        </div>
                         <div className="mt-1 text-slate-100">
                           {typeof alertEvent.confidence === "number"
                             ? `${(alertEvent.confidence * 100).toFixed(1)}%`
@@ -1571,53 +1623,65 @@ const Analytics = () => {
                         </div>
                       </div>
                       <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
-                        <div className="text-slate-500">Camera</div>
+                        <div className="text-slate-500">
+                          {t("analytics.alertInvestigation.camera")}
+                        </div>
                         <div className="mt-1 text-slate-100">
                           {alertCamera?.camera_name ?? "-"}
                         </div>
                       </div>
                       <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
-                        <div className="text-slate-500">Location</div>
+                        <div className="text-slate-500">
+                          {t("analytics.alertInvestigation.location")}
+                        </div>
                         <div className="mt-1 text-slate-100">
                           {alertCamera?.location ?? "-"}
                         </div>
                       </div>
                       <div className="col-span-2 rounded-lg border border-[#1f2e45] bg-[#0b1220] p-2">
-                        <div className="text-slate-500">Detected At</div>
+                        <div className="text-slate-500">
+                          {t("analytics.alertInvestigation.detectedAt")}
+                        </div>
                         <div className="mt-1 text-slate-100">
-                          {formatEventTimestamp(alertEvent.created_at)}
+                          {formatEventTimestamp(
+                            alertEvent.created_at,
+                            i18n.language,
+                          )}
                         </div>
                       </div>
                     </div>
 
                     <div className="rounded-lg border border-[#1f2e45] bg-[#0b1220] p-3">
                       <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
-                        <span>Evidence</span>
+                        <span>
+                          {t("analytics.alertInvestigation.evidence")}
+                        </span>
                         {screenshotUrl && (
                           <button
                             type="button"
                             onClick={() => setShowScreenshotModal(true)}
                             className="inline-flex items-center gap-1 text-slate-200"
                           >
-                            <Eye size={10} /> View
+                            <Eye size={10} /> {t("common.view")}
                           </button>
                         )}
                       </div>
 
                       {screenshotLoading ? (
                         <div className="flex min-h-[120px] items-center justify-center gap-2 rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220] text-[11px] text-slate-300">
-                          <Loader2 size={12} className="animate-spin" /> Loading
-                          evidence...
+                          <Loader2 size={12} className="animate-spin" />{" "}
+                          {t("analytics.alertInvestigation.loadingEvidence")}
                         </div>
                       ) : screenshotUrl ? (
                         <img
                           src={screenshotUrl}
-                          alt="Alert evidence"
+                          alt={t("analytics.alertInvestigation.alertEvidenceAlt")}
                           className="max-h-[160px] w-full rounded-lg object-contain"
                         />
                       ) : (
                         <div className="flex min-h-[120px] items-center justify-center gap-2 rounded-lg border border-dashed border-[#1f2e45] bg-[#0b1220] text-[11px] text-slate-400">
-                          <ImageOff size={12} /> Evidence image unavailable.
+                          <ImageOff size={12} />{" "}
+                          {t("analytics.alertInvestigation.evidenceUnavailable")}
                         </div>
                       )}
                     </div>
@@ -1626,9 +1690,11 @@ const Analytics = () => {
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
-                            Technical Reference
+                            {t("analytics.alertInvestigation.technicalReference")}
                           </div>
-                          <div className="mt-1 text-slate-500">Event ID</div>
+                          <div className="mt-1 text-slate-500">
+                            {t("analytics.alertInvestigation.eventId")}
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -1650,7 +1716,8 @@ const Analytics = () => {
                           }}
                           className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#1f2e45] bg-[#0d1527] px-2 py-1 text-[10px] text-slate-200"
                         >
-                          <Copy size={10} /> Copy ID
+                          <Copy size={10} />{" "}
+                          {t("analytics.alertInvestigation.copyId")}
                         </button>
                       </div>
                       <div className="mt-1 break-all font-mono text-[10px] text-slate-100">

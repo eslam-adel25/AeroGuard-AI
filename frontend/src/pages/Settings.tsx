@@ -108,13 +108,16 @@ const Settings = () => {
     setIsSaving(true);
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(
+        t("common.processing"),
+        t("common.pleaseWait"),
+      );
       await settingsService.update(config);
       updateAlertSoundsEnabled(config.enable_alert_sounds);
       if (toastId) {
         toast.update(toastId, {
           type: "success",
-          title: "Success",
+          title: t("common.success"),
           description: t("settings.saveSuccess"),
         });
       }
@@ -122,7 +125,7 @@ const Settings = () => {
       if (toastId) {
         toast.update(toastId, {
           type: "error",
-          title: "Operation Failed",
+          title: t("common.operationFailed"),
           description: t("settings.saveFailed"),
         });
       }
@@ -215,7 +218,7 @@ const Settings = () => {
                     setConfig({ ...config, airport_name: e.target.value })
                   }
                   className="w-full bg-[#0d0e14] border border-[#1e212b] p-3 rounded-lg text-sm font-semibold outline-none focus:border-blue-500/50"
-                  placeholder="e.g. Dubai International (DXB)"
+                  placeholder={t("settings.airportNamePlaceholder")}
                 />
               </div>
               <div className="space-y-2">

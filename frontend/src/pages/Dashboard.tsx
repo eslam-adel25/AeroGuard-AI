@@ -31,17 +31,16 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-function formatLocalDateTime(date: Date) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const year = date.getFullYear();
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  const hourString = String(hours).padStart(2, "0");
-  return `${month}/${day}/${year} ${hourString}:${minutes}:${seconds} ${ampm}`;
+function formatLocalDateTime(date: Date, language: string) {
+  return new Intl.DateTimeFormat(language, {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(date);
 }
 
 interface AlertData {
@@ -99,10 +98,10 @@ const emptyDrawingPoints = (): DrawingPointsByType => ({
   tripwire: [],
 });
 
-const alertBadgeLabel = (alert: AlertData) => {
+const alertBadgeLabel = (alert: AlertData, t: (key: string) => string) => {
   const typeLabel = alert.type?.trim();
-  if (!typeLabel) return "Alert";
-  if (/restricted/i.test(typeLabel)) return "Restricted Area";
+  if (!typeLabel) return t("dashboard.alertBadgeDefault");
+  if (/restricted/i.test(typeLabel)) return t("dashboard.alertBadgeRestricted");
   return typeLabel;
 };
 
@@ -117,7 +116,7 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // --- States ---
   const [alerts, setAlerts] = useState<AlertData[]>([]);
   const [cameras, setCameras] = useState<CameraData[]>([]);
@@ -136,7 +135,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     toggleCameraMute,
   } = useAlertAudio();
   const [localDateTime, setLocalDateTime] = useState(() =>
-    formatLocalDateTime(new Date()),
+    formatLocalDateTime(new Date(), i18n.language),
   );
   const [cameraStatus, setCameraStatus] = useState<
     "Running" | "Offline" | "Processing"
@@ -297,11 +296,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, []);
 
   useEffect(() => {
+    setLocalDateTime(formatLocalDateTime(new Date(), i18n.language));
     const interval = window.setInterval(() => {
-      setLocalDateTime(formatLocalDateTime(new Date()));
+      setLocalDateTime(formatLocalDateTime(new Date(), i18n.language));
     }, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [i18n.language]);
 
   useEffect(() => {
     const token = getStoredAuthToken();
@@ -960,7 +960,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       ) {
         setDrawingInstructions(
           drawingMode === "restricted"
-            ? "Restricted Area requires at least 3 points."
+            ? t("dashboard.drawingInstructions.restrictedMinPoints")
             : `${zoneType} requires exactly 2 points.`,
         );
         return;
@@ -1093,12 +1093,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                 <span className="text-white/50">|</span>
                 <span className="flex items-center gap-2 text-[14px] text-white">
                   <span className="h-2 w-2 rounded-full bg-ag-success" />
-                  {cameraStatus}
+                  {t(`dashboard.status.${cameraStatus.toLowerCase()}`)}
                 </span>
 
                 <span className="text-white/50">|</span>
                 <span className="flex items-center gap-1 text-white/90">
-                  FPS: <span className="font-black text-ag-success">{fps}</span>
+                  {t("common.fps")}:{" "}
+                  <span className="font-black text-ag-success">{fps}</span>
                 </span>
 
                 <span className="text-white/50">|</span>
@@ -1143,8 +1144,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                   </div>
                   <span>
                     {alerts.length === 1
-                      ? alertBadgeLabel(alerts[0])
-                      : `${alerts.length} ${hasCriticalAlerts(alerts) ? "Critical Alerts" : "Alerts"}`}
+                      ? alertBadgeLabel(alerts[0], t)
+                      : `${alerts.length} ${t(
+                          hasCriticalAlerts(alerts)
+                            ? "dashboard.alerts.critical"
+                            : "dashboard.alerts.generic",
+                        )}`}
                   </span>
                 </button>
               ) : null}
@@ -1152,7 +1157,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
               {alarmActive ? (
                 alarmSources.length > 0 ? (
                   <span className="text-[12px] text-red-200/80">
-                    {`Sources: ${alarmSources.join(", ")}`}
+                    {`${t("dashboard.alerts.sources")}: ${alarmSources.join(", ")}`}
                   </span>
                 ) : null
               ) : null}

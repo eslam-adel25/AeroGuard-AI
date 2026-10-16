@@ -33,7 +33,7 @@ interface UserSession {
   device_model?: string | null;
 }
 
-const getSessionDeviceLabel = (session: UserSession) => {
+const getSessionDeviceLabel = (session: UserSession, unknownLabel: string) => {
   const deviceType = session.device_type?.trim();
   if (deviceType && deviceType !== "Unknown") {
     return deviceType;
@@ -54,11 +54,11 @@ const getSessionDeviceLabel = (session: UserSession) => {
     return session.device_model.trim();
   }
 
-  return "Unknown";
+  return unknownLabel;
 };
 
 const Profile: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { confirm, toast } = useNotification();
 
   // --- States ---
@@ -351,7 +351,7 @@ const Profile: React.FC = () => {
 
               <div className="flex gap-2 mb-8">
                 <span className="px-3 py-0.5 bg-indigo-500/10 text-indigo-400 text-[10px] font-bold rounded-md uppercase tracking-wider">
-                  Global
+                  {t("profile.global")}
                 </span>
                 <span className="px-3 py-0.5 bg-gray-800 text-gray-400 text-[10px] font-bold rounded-md uppercase tracking-wider">
                   {profile?.role?.role_name?.toLowerCase() || "admin"}
@@ -402,10 +402,13 @@ const Profile: React.FC = () => {
                   <p className="text-[10px] text-gray-500">
                     {profile?.created_at
                       ? new Date(profile.created_at).toLocaleDateString(
-                          "en-US",
+                          i18n.language,
                           { month: "long", day: "numeric", year: "numeric" },
                         )
-                      : "July 07, 2026"}
+                      : new Date(2026, 6, 7).toLocaleDateString(
+                          i18n.language,
+                          { month: "long", day: "numeric", year: "numeric" },
+                        )}
                   </p>
                   <p className="text-[11px] text-gray-400 leading-relaxed">
                     {t("profile.initialInstantiation")}
@@ -727,11 +730,16 @@ const Profile: React.FC = () => {
                         </td>
                         <td className="py-6 px-4 text-gray-400">
                           {s.created_at
-                            ? new Date(s.created_at).toLocaleString()
+                            ? new Date(s.created_at).toLocaleString(
+                                i18n.language,
+                              )
                             : "—"}
                         </td>
                         <td className="py-6 px-4 text-gray-400">
-                          {getSessionDeviceLabel(s)}
+                          {getSessionDeviceLabel(
+                            s,
+                            t("profile.unknownDevice"),
+                          )}
                         </td>
                         <td className="py-6 px-4 text-right">
                           <span

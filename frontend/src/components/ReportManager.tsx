@@ -177,7 +177,10 @@ const ReportManager: React.FC = () => {
     setLoading(true);
     let toastId: string | null = null;
     try {
-      toastId = toast.loading("Processing", "Please wait...");
+      toastId = toast.loading(
+        t("common.processing"),
+        t("common.pleaseWait"),
+      );
       const payload = {
         start_date: filters.start_date,
         end_date: filters.end_date,
