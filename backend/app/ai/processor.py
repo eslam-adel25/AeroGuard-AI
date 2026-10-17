@@ -1684,6 +1684,19 @@ class AIProcessor:
 
                     camera_history[obj_id] = base_point
 
+                    # Fire / Smoke detections must be classified before persistence
+                    # so analytics receives the same label and severity as alerts.
+                    should_trigger_fire_smoke = self._is_fire_smoke_enabled(
+                        label_name,
+                        camera_settings,
+                    )
+                    if should_trigger_fire_smoke:
+                        status = "DANGER"
+                        box_color = (0, 0, 255)
+                        display_label = label_name.upper()
+                        overlay_label = f"{object_label}\n{display_label}"
+                        alarm_sources.add(display_label)
+
                     # Persist detections so analytics has real data even for non-alert objects
                     self._persist_detection(
                         local_db,
@@ -1743,20 +1756,6 @@ class AIProcessor:
                                         annotated_frame,
                                         active_alert_keys,
                                     )
-
-                    # Fire / Smoke immediate critical events
-                    # Check if fire/smoke detection is enabled
-                    should_trigger_fire_smoke = self._is_fire_smoke_enabled(
-                        label_name,
-                        camera_settings,
-                    )
-
-                    if should_trigger_fire_smoke:
-                        status = "DANGER"
-                        box_color = (0, 0, 255)
-                        display_label = label_name.upper()
-                        overlay_label = f"{object_label}\n{display_label}"
-                        alarm_sources.add(display_label)
 
                     if status in ["DANGER", "WARNING"]:
                         if overlay_label == object_label:

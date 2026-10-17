@@ -70,6 +70,51 @@ def test_get_report_stats_returns_dashboard_payload():
         assert payload["charts"]["timeline"][0]["count"] == 2
 
 
+def test_get_report_stats_counts_fire_and_smoke_detections():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        camera = Camera(
+            camera_id=uuid.UUID("00000000-0000-0000-0000-000000000021"),
+            camera_name="Fire Camera",
+            location="Warehouse",
+            stream_url="rtsp://example.com/fire",
+            status="running",
+            owner_id=uuid.UUID("00000000-0000-0000-0000-000000000022"),
+        )
+        db.add(camera)
+        for index, detection_type in enumerate(("FIRE", "SMOKE"), start=1):
+            db.add(
+                Detection(
+                    detection_id=uuid.UUID(
+                        f"00000000-0000-0000-0000-0000000001{20 + index:02d}"
+                    ),
+                    camera_id=camera.camera_id,
+                    owner_id=camera.owner_id,
+                    detection_type=detection_type,
+                    priority="Critical",
+                    confidence=0.9,
+                    detected_at=datetime(2024, 1, 10, 12, index, 0),
+                    is_violation=True,
+                    violation_type="DANGER",
+                )
+            )
+        db.commit()
+
+        payload = ReportService.get_report_stats(
+            db,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 31),
+            is_admin=True,
+        )
+
+        assert payload["summary"]["fire"] == 2
+        assert payload["summary"]["fire_detections"] == 1
+        assert payload["summary"]["smoke_detections"] == 1
+        assert payload["summary"]["critical_alerts"] == 2
+
+
 def test_unknown_priority_is_excluded_from_severity_distribution():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

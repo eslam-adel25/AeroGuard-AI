@@ -22,8 +22,10 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
 
     if any(token in value for token in ["weapon", "gun", "knife"]):
         return "weapons"
-    if any(token in value for token in ["fire", "smoke", "flame"]):
+    if any(token in value for token in ["fire", "flame"]):
         return "fire"
+    if "smoke" in value:
+        return "smoke"
     if any(token in value for token in ["person", "human", "intruder"]):
         return "persons"
     if any(token in value for token in ["vehicle", "car", "truck", "bus"]):
@@ -133,8 +135,6 @@ class ReportService:
                 categorized_counts[bucket] += c
 
             lower_type = (detection_type or "").lower()
-            if "smoke" in lower_type:
-                categorized_counts["smoke"] += c
             if "abandoned" in lower_type or "bag" in lower_type:
                 categorized_counts["abandoned_bag"] += c
             if "loiter" in lower_type:
