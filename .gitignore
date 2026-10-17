@@ -85,7 +85,7 @@ tmp_*.py
 # Models 
 # 
 # ==========================
-# backend/models/*.pt
+backend/models/fire-smoke-yolov8n.pt
 # backend/models/*.pth
 # backend/models/*.onnx
 

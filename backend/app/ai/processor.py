@@ -4,6 +4,7 @@ import time
 import os
 import threading
 import math
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
@@ -26,6 +27,22 @@ from .ownership_config import (
     OWNERSHIP_MAX_DISTANCE_PX,
     UNATTENDED_TIMEOUT_SECONDS,
 )
+
+logger = logging.getLogger(__name__)
+FIRE_SMOKE_MODEL_REPO = "rabahdev/fire-smoke-yolov8n"
+FIRE_SMOKE_MODEL_FILENAME = "best.pt"
+FIRE_SMOKE_MODEL_DEFAULT_PATH = "models/fire-smoke-yolov8n.pt"
+GENERAL_DETECTION_LABELS = {
+    "person",
+    "bag",
+    "suitcase",
+    "backpack",
+    "car",
+    "truck",
+    "bus",
+    "vehicle",
+}
+SPECIALIST_DETECTION_LABELS = {"fire", "smoke"}
 
 
 def build_detection_record(camera_id, owner_id, detection_type, confidence, status=None):
@@ -112,12 +129,19 @@ def _line_coords_in_frame(coords, frame_shape):
 
 
 class AIProcessor:
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, fire_smoke_model_path: str | None = None):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
         self.model_path = self._resolve_model_path(model_path)
         self._patch_ultralytics_weights_only()
         self.model = YOLO(self.model_path)
+        self.fire_smoke_model_path = fire_smoke_model_path or os.getenv(
+            "AEROGUARD_FIRE_SMOKE_MODEL_PATH",
+            FIRE_SMOKE_MODEL_DEFAULT_PATH,
+        )
+        self.fire_smoke_model = None
+        self.fire_smoke_class_map = {}
         self._model_lock = threading.Lock()
+        self._load_fire_smoke_model()
         self.decision_engine = DecisionEngine()
         self.trackers = {}
 
@@ -147,6 +171,65 @@ class AIProcessor:
         self._active_alarm_sources = {}  # camera_id -> list[str]
         self._settings_by_owner = {}
         self._settings_lock = threading.Lock()
+
+    def _load_fire_smoke_model(self):
+        """Load the optional specialist model without blocking general detection."""
+        try:
+            model_path = self._ensure_fire_smoke_model(self.fire_smoke_model_path)
+            model = YOLO(model_path)
+            class_map = self._build_fire_smoke_class_map(model.names)
+            if not SPECIALIST_DETECTION_LABELS.issubset(class_map.values()):
+                raise ValueError(
+                    "Fire/smoke model must expose both fire and smoke classes"
+                )
+            self.fire_smoke_model = model
+            self.fire_smoke_model_path = model_path
+            self.fire_smoke_class_map = class_map
+            logger.info(
+                "Loaded fire/smoke model from %s with classes %s",
+                model_path,
+                class_map,
+            )
+        except Exception as exc:
+            self.fire_smoke_model = None
+            self.fire_smoke_class_map = {}
+            logger.error(
+                "Fire/smoke specialist model unavailable; general detection remains active: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+    @staticmethod
+    def _build_fire_smoke_class_map(model_names):
+        names = model_names.values() if isinstance(model_names, dict) else model_names
+        class_map = {}
+        for class_id, name in enumerate(names):
+            canonical_name = str(name).strip().lower()
+            if canonical_name in SPECIALIST_DETECTION_LABELS:
+                class_map[class_id] = canonical_name
+        return class_map
+
+    def _ensure_fire_smoke_model(self, model_path: str) -> str:
+        path = Path(model_path)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[2] / path
+        if path.exists() and path.stat().st_size > 0:
+            return str(path)
+
+        from huggingface_hub import hf_hub_download
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        downloaded = hf_hub_download(
+            repo_id=FIRE_SMOKE_MODEL_REPO,
+            filename=FIRE_SMOKE_MODEL_FILENAME,
+            local_dir=str(path.parent),
+        )
+        downloaded_path = Path(downloaded)
+        if downloaded_path != path:
+            downloaded_path.replace(path)
+        if not path.exists() or path.stat().st_size == 0:
+            raise ValueError(f"Downloaded fire/smoke model is empty: {path}")
+        return str(path)
 
     def _resolve_model_path(self, model_path: str) -> str:
         """Resolve a backend-relative model path to an absolute filesystem path."""
@@ -352,6 +435,8 @@ class AIProcessor:
             # recreate model on requested device
             with self._model_lock:
                 self.model = YOLO(self.model_path, device=dev)
+                if self.fire_smoke_model is not None:
+                    self.fire_smoke_model = YOLO(self.fire_smoke_model_path, device=dev)
             print(f"⚙️ AI Engine model reloaded on device={dev}")
         except Exception as exc:
             # ignore if device change not supported in environment
@@ -387,6 +472,20 @@ class AIProcessor:
         with self._settings_lock:
             return self._settings_by_owner.get(str(owner_id), fallback)
 
+    @staticmethod
+    def _is_fire_smoke_enabled(label_name, camera_settings):
+        fire_enabled = bool(
+            getattr(camera_settings, "fire_detection_enabled", False)
+        )
+        smoke_enabled = bool(
+            getattr(camera_settings, "smoke_detection_enabled", False)
+        )
+        return (
+            (label_name == "fire" and fire_enabled)
+            or (label_name == "flame" and fire_enabled)
+            or (label_name == "smoke" and smoke_enabled)
+        )
+
     def _predict_frame(self, frame, confidence_threshold):
         with self._model_lock:
             model = self.model
@@ -398,6 +497,84 @@ class AIProcessor:
                 ),
                 model.names,
             )
+
+    def _predict_fire_smoke_frame(self, frame, confidence_threshold):
+        with self._model_lock:
+            if self.fire_smoke_model is None:
+                return _build_empty_model_result(), {}
+            model = self.fire_smoke_model
+            return (
+                model.predict(
+                    frame,
+                    conf=confidence_threshold,
+                    verbose=False,
+                ),
+                model.names,
+            )
+
+    @staticmethod
+    def _extract_model_detections(results, model_names, allowed_labels, class_map=None):
+        detections = []
+        result = results[0] if results else None
+        boxes_obj = getattr(result, "boxes", None) if result is not None else None
+        if boxes_obj is None:
+            return detections
+        if not all(
+            hasattr(boxes_obj, attribute)
+            for attribute in ("xyxy", "cls", "conf")
+        ):
+            return detections
+
+        boxes = boxes_obj.xyxy.cpu().numpy() if len(boxes_obj) else []
+        labels = boxes_obj.cls.cpu().numpy().astype(int) if len(boxes_obj) else []
+        confs = boxes_obj.conf.cpu().numpy() if len(boxes_obj) else []
+        for box, class_id, confidence in zip(boxes, labels, confs):
+            if class_map is not None:
+                label_name = class_map.get(int(class_id))
+            else:
+                label_name = str(model_names[int(class_id)]).lower()
+            if label_name not in allowed_labels:
+                continue
+            x1, y1, x2, y2 = box.astype(int)
+            detections.append(
+                {
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                    "class_name": label_name,
+                    "confidence": float(confidence),
+                }
+            )
+        return detections
+
+    @staticmethod
+    def _bbox_iou(first_bbox, second_bbox):
+        ax1, ay1, ax2, ay2 = first_bbox
+        bx1, by1, bx2, by2 = second_bbox
+        intersection_width = max(0, min(ax2, bx2) - max(ax1, bx1))
+        intersection_height = max(0, min(ay2, by2) - max(ay1, by1))
+        intersection = intersection_width * intersection_height
+        if intersection == 0:
+            return 0.0
+        first_area = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        second_area = max(0, bx2 - bx1) * max(0, by2 - by1)
+        union = first_area + second_area - intersection
+        return intersection / union if union else 0.0
+
+    @classmethod
+    def _merge_detections(cls, detections):
+        merged = []
+        for detection in sorted(
+            detections,
+            key=lambda item: item["confidence"],
+            reverse=True,
+        ):
+            duplicate = any(
+                detection["class_name"] == existing["class_name"]
+                and cls._bbox_iou(detection["bbox"], existing["bbox"]) >= 0.5
+                for existing in merged
+            )
+            if not duplicate:
+                merged.append(detection)
+        return merged
 
     def reserve_camera_start(self, camera_id):
         """Atomically reserve one camera's processing slot before scheduling its worker."""
@@ -1220,52 +1397,60 @@ class AIProcessor:
                 do_infer = (frame_skip <= 0) or (iteration % (frame_skip + 1) == 0)
                 results = None
                 model_names = None
+                specialist_results = _build_empty_model_result()
+                specialist_model_names = {}
                 if do_infer:
                     results, model_names = await asyncio.to_thread(
                         self._predict_frame,
                         frame,
                         conf_thr,
                     )
+                    try:
+                        specialist_results, specialist_model_names = (
+                            await asyncio.to_thread(
+                                self._predict_fire_smoke_frame,
+                                frame,
+                                conf_thr,
+                            )
+                        )
+                    except Exception as specialist_exc:
+                        logger.error(
+                            "[%s] fire/smoke inference failed; continuing with general detections: %s: %s",
+                            camera_id,
+                            type(specialist_exc).__name__,
+                            specialist_exc,
+                        )
                 else:
                     results = _build_empty_model_result()
                 annotated_frame = frame.copy()
 
-                detections_for_tracker = []
                 try:
-                    result = results[0] if results else None
-                    boxes_obj = getattr(result, "boxes", None) if result is not None else None
-                    if boxes_obj is not None and hasattr(boxes_obj, "xyxy") and hasattr(boxes_obj, "cls") and hasattr(boxes_obj, "conf"):
-                        if len(boxes_obj) > 0:
-                            boxes = boxes_obj.xyxy.cpu().numpy()
-                            labels = boxes_obj.cls.cpu().numpy().astype(int)
-                            confs = boxes_obj.conf.cpu().numpy()
-                        else:
-                            boxes = []
-                            labels = []
-                            confs = []
-                    else:
-                        boxes = []
-                        labels = []
-                        confs = []
+                    detections_for_tracker = self._merge_detections(
+                        self._extract_model_detections(
+                            results,
+                            model_names,
+                            GENERAL_DETECTION_LABELS
+                            | SPECIALIST_DETECTION_LABELS,
+                        )
+                        + self._extract_model_detections(
+                            specialist_results,
+                            specialist_model_names,
+                            SPECIALIST_DETECTION_LABELS,
+                            self.fire_smoke_class_map,
+                        )
+                    )
                 except Exception as box_exc:
                     print(f"⚠️ [{camera_id}] failed to parse model boxes: {type(box_exc).__name__}: {box_exc}")
-                    boxes = []
-                    labels = []
-                    confs = []
+                    detections_for_tracker = []
 
-                for box, cls_idx, conf in zip(boxes, labels, confs):
-                    x1, y1, x2, y2 = box.astype(int)
-                    label_name = model_names[int(cls_idx)].lower()
-                    if label_name not in ["person", "bag", "suitcase", "backpack", "car", "truck", "bus", "vehicle", "fire", "smoke", "flame"]:
-                        continue
-                    detection_confidence = float(conf)
+                filtered_detections = []
+                for detection in detections_for_tracker:
+                    label_name = detection["class_name"]
+                    detection_confidence = detection["confidence"]
                     if label_name == "person" and detection_confidence < person_conf_thr:
                         continue
-                    detections_for_tracker.append({
-                        "bbox": [int(x1), int(y1), int(x2), int(y2)],
-                        "class_name": label_name,
-                        "confidence": detection_confidence,
-                    })
+                    filtered_detections.append(detection)
+                detections_for_tracker = filtered_detections
 
                 camera_tracker = self.trackers[camera_id_str]
                 if do_infer:
@@ -1585,19 +1770,9 @@ class AIProcessor:
 
                     # Fire / Smoke immediate critical events
                     # Check if fire/smoke detection is enabled
-                    fire_enabled = getattr(camera_settings, "fire_detection_enabled", False) or False
-                    smoke_enabled = getattr(camera_settings, "smoke_detection_enabled", False) or False
-                    
-                    should_trigger_fire_smoke = (
-                        (label_name == "fire" and fire_enabled) or
-                        (label_name == "smoke" and smoke_enabled)
-                    )
-                    
-                    flame_enabled = getattr(camera_settings, "fire_detection_enabled", False) or False
-                    should_trigger_fire_smoke = (
-                        (label_name == "fire" and fire_enabled) or
-                        (label_name == "smoke" and smoke_enabled) or
-                        (label_name == "flame" and flame_enabled)
+                    should_trigger_fire_smoke = self._is_fire_smoke_enabled(
+                        label_name,
+                        camera_settings,
                     )
 
                     if should_trigger_fire_smoke:
