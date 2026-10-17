@@ -12,7 +12,7 @@ Core components
 What the current implementation does
 
 - Loads the general model from backend/models/yolov8n.pt via the runtime path models/yolov8n.pt and the fire/smoke specialist from backend/models/fire-smoke-yolov8n.pt.
-- The specialist model is downloaded from [Hugging Face repository rabahdev/fire-smoke-yolov8n](https://huggingface.co/rabahdev/fire-smoke-yolov8n) when the local weight is absent. It exposes smoke and fire classes and is licensed under AGPL-3.0 according to its model card.
+- The specialist model is local-only. Provision backend/models/fire-smoke-yolov8n.pt before starting the application; a missing, empty, unreadable, or invalid file disables specialist detection while general detection remains active.
 - Runs both models on each inference frame, maps the specialist's verified class names to canonical fire and smoke detections, and merges overlapping same-class detections before tracking.
 - Filters detections for classes relevant to campus/security use cases such as person, bag/backpack/suitcase, car/truck/bus/vehicle, fire, and smoke.
 - Maintains track state across frames and uses heuristics to create alerts when rules are triggered.

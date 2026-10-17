@@ -101,10 +101,10 @@ def test_specialist_failure_does_not_replace_general_model(monkeypatch):
     processor.fire_smoke_class_map = {0: "fire"}
     processor.model = object()
 
-    def fail_to_prepare_model(_path):
+    def fail_to_resolve_model(_path):
         raise FileNotFoundError("specialist weights unavailable")
 
-    monkeypatch.setattr(processor, "_ensure_fire_smoke_model", fail_to_prepare_model)
+    monkeypatch.setattr(processor, "_resolve_model_path", fail_to_resolve_model)
     general_model = processor.model
     processor._load_fire_smoke_model()
 

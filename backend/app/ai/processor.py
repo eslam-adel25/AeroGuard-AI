@@ -29,8 +29,6 @@ from .ownership_config import (
 )
 
 logger = logging.getLogger(__name__)
-FIRE_SMOKE_MODEL_REPO = "rabahdev/fire-smoke-yolov8n"
-FIRE_SMOKE_MODEL_FILENAME = "best.pt"
 FIRE_SMOKE_MODEL_DEFAULT_PATH = "models/fire-smoke-yolov8n.pt"
 GENERAL_DETECTION_LABELS = {
     "person",
@@ -175,7 +173,7 @@ class AIProcessor:
     def _load_fire_smoke_model(self):
         """Load the optional specialist model without blocking general detection."""
         try:
-            model_path = self._ensure_fire_smoke_model(self.fire_smoke_model_path)
+            model_path = self._resolve_model_path(self.fire_smoke_model_path)
             model = YOLO(model_path)
             class_map = self._build_fire_smoke_class_map(model.names)
             if not SPECIALIST_DETECTION_LABELS.issubset(class_map.values()):
@@ -208,28 +206,6 @@ class AIProcessor:
             if canonical_name in SPECIALIST_DETECTION_LABELS:
                 class_map[class_id] = canonical_name
         return class_map
-
-    def _ensure_fire_smoke_model(self, model_path: str) -> str:
-        path = Path(model_path)
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
-        if path.exists() and path.stat().st_size > 0:
-            return str(path)
-
-        from huggingface_hub import hf_hub_download
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        downloaded = hf_hub_download(
-            repo_id=FIRE_SMOKE_MODEL_REPO,
-            filename=FIRE_SMOKE_MODEL_FILENAME,
-            local_dir=str(path.parent),
-        )
-        downloaded_path = Path(downloaded)
-        if downloaded_path != path:
-            downloaded_path.replace(path)
-        if not path.exists() or path.stat().st_size == 0:
-            raise ValueError(f"Downloaded fire/smoke model is empty: {path}")
-        return str(path)
 
     def _resolve_model_path(self, model_path: str) -> str:
         """Resolve a backend-relative model path to an absolute filesystem path."""
