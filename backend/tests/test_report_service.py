@@ -115,6 +115,76 @@ def test_get_report_stats_counts_fire_and_smoke_detections():
         assert payload["summary"]["critical_alerts"] == 2
 
 
+def test_get_report_stats_counts_all_supported_vehicle_labels_with_filters():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    owner_id = uuid.UUID("00000000-0000-0000-0000-000000000032")
+    selected_camera_id = uuid.UUID("00000000-0000-0000-0000-000000000031")
+    other_camera_id = uuid.UUID("00000000-0000-0000-0000-000000000033")
+
+    with Session(engine) as db:
+        db.add_all(
+            [
+                Camera(
+                    camera_id=selected_camera_id,
+                    camera_name="Vehicle Camera",
+                    location="Gate",
+                    stream_url="rtsp://example.com/vehicles",
+                    status="Offline",
+                    owner_id=owner_id,
+                ),
+                Camera(
+                    camera_id=other_camera_id,
+                    camera_name="Other Camera",
+                    location="Ramp",
+                    stream_url="rtsp://example.com/other",
+                    status="Offline",
+                    owner_id=owner_id,
+                ),
+            ]
+        )
+        for index, detection_type in enumerate(
+            ("car", "truck", "bus", "motorcycle", "bicycle", "vehicle")
+        ):
+            db.add(
+                Detection(
+                    detection_id=uuid.UUID(
+                        f"00000000-0000-0000-0000-0000000000{41 + index:02d}"
+                    ),
+                    camera_id=selected_camera_id,
+                    owner_id=owner_id,
+                    detection_type=detection_type,
+                    priority="Medium",
+                    confidence=0.8,
+                    detected_at=datetime(2024, 1, 10, 12, index, 0),
+                )
+            )
+        db.add(
+            Detection(
+                detection_id=uuid.UUID("00000000-0000-0000-0000-000000000047"),
+                camera_id=other_camera_id,
+                owner_id=owner_id,
+                detection_type="car",
+                priority="Medium",
+                confidence=0.8,
+                detected_at=datetime(2024, 1, 10, 12, 0, 0),
+            )
+        )
+        db.commit()
+
+        payload = ReportService.get_report_stats(
+            db,
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 1, 31),
+            camera_id=str(selected_camera_id),
+            owner_id=str(owner_id),
+        )
+
+        assert payload["summary"]["vehicles"] == 6
+        assert payload["summary"]["total_detections"] == 6
+
+
 def test_unknown_priority_is_excluded_from_severity_distribution():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -38,9 +38,27 @@ GENERAL_DETECTION_LABELS = {
     "car",
     "truck",
     "bus",
+    "motorcycle",
+    "bicycle",
     "vehicle",
 }
 SPECIALIST_DETECTION_LABELS = {"fire", "smoke"}
+VEHICLE_DETECTION_LABELS = {
+    "car",
+    "truck",
+    "bus",
+    "motorcycle",
+    "bicycle",
+    "vehicle",
+}
+
+
+def _get_detection_persistence_label(label_name):
+    if label_name == "person":
+        return "Person"
+    if label_name in VEHICLE_DETECTION_LABELS:
+        return label_name
+    return "Baggage"
 
 
 def build_detection_record(camera_id, owner_id, detection_type, confidence, status=None):
@@ -1435,7 +1453,11 @@ class AIProcessor:
                 active_objs_count = len(active_tracks)
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
                 bag_count = sum(1 for t in active_tracks if t.class_name in {"bag", "backpack", "suitcase"})
-                vehicle_count = sum(1 for t in active_tracks if t.class_name in {"car", "truck", "bus", "vehicle"})
+                vehicle_count = sum(
+                    1
+                    for t in active_tracks
+                    if t.class_name in VEHICLE_DETECTION_LABELS
+                )
                 alarm_sources = set()
 
                 person_ids = self._assign_person_ids(camera_id, active_tracks, frame)
@@ -1476,7 +1498,7 @@ class AIProcessor:
 
                     status = "NORMAL"
                     box_color = self._get_detection_box_color(label_name)
-                    display_label = "Person" if label_name == "person" else "Baggage"
+                    display_label = _get_detection_persistence_label(label_name)
                     display_id = person_ids.get(obj_id, 0)
                     bag_state = None
                     if label_name in {"bag", "backpack", "suitcase"}:

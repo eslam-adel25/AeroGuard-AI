@@ -3,6 +3,15 @@ from sqlalchemy import func, and_
 from datetime import date, datetime, timedelta
 from ..models.models import Detection, Camera
 
+VEHICLE_DETECTION_LABELS = {
+    "vehicle",
+    "car",
+    "truck",
+    "bus",
+    "motorcycle",
+    "bicycle",
+}
+
 
 def _normalize_severity(priority: str | None) -> str | None:
     value = (priority or "").strip().lower()
@@ -28,7 +37,7 @@ def _category_from_detection_type(detection_type: str | None) -> str | None:
         return "smoke"
     if any(token in value for token in ["person", "human", "intruder"]):
         return "persons"
-    if any(token in value for token in ["vehicle", "car", "truck", "bus"]):
+    if value in VEHICLE_DETECTION_LABELS:
         return "vehicles"
     if any(token in value for token in ["unknown", "suspicious", "unidentified", "object"]):
         return "suspicious_objects"

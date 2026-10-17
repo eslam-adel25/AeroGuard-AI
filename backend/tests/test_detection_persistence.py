@@ -2,7 +2,11 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost/db")
 
-from app.ai.processor import AIProcessor, build_detection_record
+from app.ai.processor import (
+    AIProcessor,
+    _get_detection_persistence_label,
+    build_detection_record,
+)
 
 
 def test_build_detection_record_for_standard_detection() -> None:
@@ -62,6 +66,17 @@ def test_build_detection_record_preserves_non_fire_labels() -> None:
     assert detection.detection_type == "Baggage"
     assert detection.priority == "Medium"
     assert detection.is_violation is False
+
+
+def test_detection_persistence_label_preserves_supported_vehicle_classes() -> None:
+    for label in ("car", "truck", "bus", "motorcycle", "bicycle", "vehicle"):
+        assert _get_detection_persistence_label(label) == label
+
+
+def test_detection_persistence_label_preserves_existing_non_vehicle_categories() -> None:
+    assert _get_detection_persistence_label("person") == "Person"
+    assert _get_detection_persistence_label("bag") == "Baggage"
+    assert _get_detection_persistence_label("animal") == "Baggage"
 
 
 def test_persist_detection_uses_camera_owner_uuid_when_present() -> None:
