@@ -144,6 +144,61 @@ def _line_coords_in_frame(coords, frame_shape):
     return line_coords
 
 
+def _point_side(a, b, p):
+    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def _segments_intersect(a, b, c, d):
+    def orientation(p, q, r):
+        value = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+        if abs(value) < 1e-6:
+            return 0
+        return 1 if value > 0 else -1
+
+    def on_segment(p, q, r):
+        return (
+            min(p[0], r[0]) - 1e-6 <= q[0] <= max(p[0], r[0]) + 1e-6
+            and min(p[1], r[1]) - 1e-6 <= q[1] <= max(p[1], r[1]) + 1e-6
+        )
+
+    first = orientation(a, b, c)
+    second = orientation(a, b, d)
+    third = orientation(c, d, a)
+    fourth = orientation(c, d, b)
+    if first == 0 and on_segment(a, c, b):
+        return True
+    if second == 0 and on_segment(a, d, b):
+        return True
+    if third == 0 and on_segment(c, a, d):
+        return True
+    if fourth == 0 and on_segment(c, b, d):
+        return True
+    return first != second and third != fourth
+
+
+def _tripwire_crossing(a, b, previous, current, entry_direction):
+    if a == b or previous == current:
+        return None
+    previous_side = _point_side(a, b, previous)
+    current_side = _point_side(a, b, current)
+    if previous_side * current_side >= 0:
+        return None
+    if not _segments_intersect(previous, current, a, b):
+        return None
+
+    ordered_start, ordered_end = a, b
+    if (ordered_start[0], ordered_start[1]) > (ordered_end[0], ordered_end[1]):
+        ordered_start, ordered_end = ordered_end, ordered_start
+    movement = (current[0] - previous[0], current[1] - previous[1])
+    line_vector = (
+        ordered_end[0] - ordered_start[0],
+        ordered_end[1] - ordered_start[1],
+    )
+    dot = movement[0] * line_vector[0] + movement[1] * line_vector[1]
+    enters = dot > 0 if entry_direction == "right" else dot < 0
+    return "entry" if enters else "exit"
+
+
 class AIProcessor:
     def __init__(self, model_path: str, fire_smoke_model_path: str | None = None):
         # تحميل الموديل لمرة واحدة عند التشغيل (صفحة 163)
@@ -165,6 +220,7 @@ class AIProcessor:
         self.last_frames = {}
         self.last_alert_time = {}
         self.alert_persistence = {}
+        self.tripwire_runtime = {}
         self.object_history = {}
         self.loitering_tracker = {}  # camera_id -> {track_id: {first_seen, last_pos, last_move_time}}
         self.bag_tracker = {}  # camera_id -> {track_id: {first_seen, last_near_person_time}}
@@ -386,6 +442,46 @@ class AIProcessor:
         state["finalized"] = True
         state["screenshot_persisted"] = bool(event.screenshot_path)
         self.last_alert_time[alert_key] = time.time()
+
+    async def _register_immediate_tripwire_alert(
+        self,
+        ai_service,
+        camera_id,
+        zone_id,
+        confidence,
+        track_id,
+        owner_id,
+        occupancy,
+        allowed_group_size,
+        over_limit_count,
+        annotated_frame,
+    ):
+        screenshot_bytes = None
+        try:
+            encoded, jpg = cv2.imencode(".jpg", annotated_frame)
+            if encoded:
+                screenshot_bytes = jpg.tobytes()
+            else:
+                logger.warning("TRIPWIRE screenshot encoding returned no image")
+        except Exception:
+            logger.exception("TRIPWIRE screenshot encoding failed")
+        event = ai_service.register_event(
+            camera_id=camera_id,
+            detection_type="TRIPWIRE_OVER_LIMIT",
+            severity="Critical",
+            confidence=confidence,
+            track_id=track_id,
+            user_id=owner_id,
+            metadata={
+                "zone_id": str(zone_id),
+                "event_kind": "tripwire_over_limit",
+                "occupancy": occupancy,
+                "allowed_group_size": allowed_group_size,
+                "over_limit_count": over_limit_count,
+            },
+            screenshot_bytes=screenshot_bytes,
+        )
+        return event
 
     def _reset_inactive_alert_persistence(self, camera_id, active_alert_keys):
         prefix = f"{camera_id}_"
@@ -776,8 +872,12 @@ class AIProcessor:
             self.crowd_cooldown,
             self._active_alarm_state,
             self._active_alarm_sources,
+            getattr(self, "tripwire_runtime", {}),
         ):
             state.pop(camera_key, None)
+        for runtime_key in list(getattr(self, "tripwire_runtime", {})):
+            if runtime_key.startswith(f"{camera_key}:"):
+                self.tripwire_runtime.pop(runtime_key, None)
         self._reset_inactive_alert_persistence(camera_key, set())
 
     def get_latest_frame(self, camera_id):
@@ -1214,6 +1314,27 @@ class AIProcessor:
                 print(f"⚠️ [{camera_id}] failed to load restricted zones: {type(zone_exc).__name__}: {zone_exc}")
                 zones = []
                 local_db.rollback()
+            self.tripwire_runtime = {
+                key: value
+                for key, value in getattr(self, "tripwire_runtime", {}).items()
+                if not key.startswith(f"{camera_id_str}:")
+            }
+            self.tripwire_runtime.update({
+                f"{camera_id_str}:{zone.zone_id}": {
+                    "occupancy": int(zone.tripwire_current_occupancy or 0),
+                    "allowed_group_size": int(zone.tripwire_allowed_group_size or 0),
+                    "entry_direction": zone.tripwire_entry_direction,
+                    "requires_confirmation": bool(zone.tripwire_requires_confirmation),
+                    "over_limit": bool(
+                        zone.tripwire_current_occupancy is not None
+                        and zone.tripwire_allowed_group_size is not None
+                        and zone.tripwire_current_occupancy
+                        > zone.tripwire_allowed_group_size
+                    ),
+                }
+                for zone in zones
+                if "tripwire" in (zone.zone_type or "").lower()
+            })
             # helper to compute side of point relative to a line
             def _point_side(a, b, p):
                 # cross product (b-a) x (p-a)
@@ -1473,6 +1594,26 @@ class AIProcessor:
                 try:
                     if iteration % 30 == 0:
                         zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+                        for refreshed_zone in zones:
+                            if "tripwire" not in (refreshed_zone.zone_type or "").lower():
+                                continue
+                            runtime_key = f"{camera_id_str}:{refreshed_zone.zone_id}"
+                            state = self.tripwire_runtime.setdefault(runtime_key, {})
+                            state.update(
+                                {
+                                    "allowed_group_size": int(
+                                        refreshed_zone.tripwire_allowed_group_size or 0
+                                    ),
+                                    "entry_direction": refreshed_zone.tripwire_entry_direction,
+                                    "requires_confirmation": bool(
+                                        refreshed_zone.tripwire_requires_confirmation
+                                    ),
+                                }
+                            )
+                            if not state.get("requires_confirmation"):
+                                state["occupancy"] = int(
+                                    refreshed_zone.tripwire_current_occupancy or 0
+                                )
                 except Exception as zone_reload_exc:
                     print(f"⚠️ [{camera_id}] failed to reload restricted zones: {type(zone_reload_exc).__name__}: {zone_reload_exc}")
                     local_db.rollback()
@@ -1551,6 +1692,7 @@ class AIProcessor:
                     camera_history = self.object_history.setdefault(str(camera_id), {})
                     overlay_label = object_label
                     alert_key = None
+                    tripwire_alert_handled = False
                     in_restricted = False
                     should_skip_rule_engine = (
                         label_name in {"bag", "backpack", "suitcase"}
@@ -1609,33 +1751,108 @@ class AIProcessor:
 
                                 # Tripwire: any crossing of the defined line triggers one alert per crossing
                                 elif "tripwire" in ztype:
+                                    tripwire_id = str(getattr(zone, "zone_id", ""))
+                                    tripwire_key = f"{camera_id_str}:{tripwire_id}"
+                                    tripwire_state = self.tripwire_runtime.setdefault(
+                                        tripwire_key,
+                                        {
+                                            "occupancy": int(
+                                                getattr(zone, "tripwire_current_occupancy", 0)
+                                                or 0
+                                            ),
+                                            "allowed_group_size": int(
+                                                getattr(zone, "tripwire_allowed_group_size", 0)
+                                                or 0
+                                            ),
+                                            "entry_direction": getattr(
+                                                zone, "tripwire_entry_direction", None
+                                            ),
+                                            "requires_confirmation": bool(
+                                                getattr(
+                                                    zone,
+                                                    "tripwire_requires_confirmation",
+                                                    False,
+                                                )
+                                            ),
+                                            "over_limit": False,
+                                        },
+                                    )
                                     prev_point = camera_history.get(obj_id)
                                     line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
                                     a = tuple(line_coords[0])
                                     b = tuple(line_coords[-1])
                                     cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
-                                    if prev_point is not None:
-                                        side_prev = _point_side(a, b, prev_point)
-                                        side_curr = _point_side(a, b, base_point)
-                                        if side_prev * side_curr < 0:
-                                            status = "DANGER"
-                                            box_color = (0, 0, 255)
+                                    if (
+                                        prev_point is not None
+                                        and not tripwire_state["requires_confirmation"]
+                                        and tripwire_state["entry_direction"] in {"left", "right"}
+                                    ):
+                                        crossing = _tripwire_crossing(
+                                            a,
+                                            b,
+                                            prev_point,
+                                            base_point,
+                                            tripwire_state["entry_direction"],
+                                        )
+                                        if crossing is not None:
+                                            previous_occupancy = tripwire_state["occupancy"]
+                                            if crossing == "entry":
+                                                tripwire_state["occupancy"] += 1
+                                            else:
+                                                tripwire_state["occupancy"] = max(
+                                                    0, tripwire_state["occupancy"] - 1
+                                                )
+                                            current_occupancy = tripwire_state["occupancy"]
+                                            allowed_group_size = tripwire_state["allowed_group_size"]
+                                            over_limit_count = max(
+                                                0,
+                                                current_occupancy - allowed_group_size,
+                                            )
+                                            became_over_limit = (
+                                                crossing == "entry"
+                                                and previous_occupancy <= allowed_group_size
+                                                and current_occupancy > allowed_group_size
+                                            )
+                                            tripwire_state["over_limit"] = current_occupancy > allowed_group_size
+                                            zone.tripwire_current_occupancy = current_occupancy
+                                            local_db.commit()
+                                            await manager.broadcast(
+                                                {
+                                                    "event": "tripwire_state",
+                                                    "data": {
+                                                        "camera_id": str(camera_id),
+                                                        "zone_id": tripwire_id,
+                                                        "current_occupancy": current_occupancy,
+                                                        "remaining_group_count": max(
+                                                            0,
+                                                            allowed_group_size - current_occupancy,
+                                                        ),
+                                                        "over_limit_count": over_limit_count,
+                                                        "occupancy_confirmation_required": False,
+                                                    },
+                                                }
+                                            )
+                                            if became_over_limit:
+                                                self._register_critical_alert(camera_id)
+                                                await self._register_immediate_tripwire_alert(
+                                                    ai_service,
+                                                    camera_id,
+                                                    tripwire_id,
+                                                    float(conf),
+                                                    str(obj_id),
+                                                    camera_owner_id,
+                                                    current_occupancy,
+                                                    allowed_group_size,
+                                                    over_limit_count,
+                                                    annotated_frame,
+                                                )
+                                                tripwire_alert_handled = True
+                                            status = "DANGER" if became_over_limit else "NORMAL"
+                                            box_color = (0, 0, 255) if became_over_limit else (0, 255, 255)
                                             display_label = "TRIPWIRE"
                                             overlay_label = f"{object_label}\nTRIPWIRE CROSSED"
-                                            alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{getattr(zone, 'zone_id', '')}"
-                                            await self._register_persistent_alert(
-                                                ai_service,
-                                                camera_id,
-                                                alert_key,
-                                                display_label,
-                                                "Critical",
-                                                float(conf),
-                                                str(obj_id),
-                                                camera_owner_id,
-                                                {"bbox": [x1, y1, x2, y2]},
-                                                annotated_frame,
-                                                active_alert_keys,
-                                            )
+                                            if became_over_limit:
+                                                alert_key = f"{camera_id}_{obj_id}_TRIPWIRE_{tripwire_id}"
 
                                 # Default: restricted polygon area
                                 else:
@@ -1779,7 +1996,7 @@ class AIProcessor:
                                         active_alert_keys,
                                     )
 
-                    if status in ["DANGER", "WARNING"]:
+                    if status in ["DANGER", "WARNING"] and not tripwire_alert_handled:
                         if overlay_label == object_label:
                             overlay_label = f"{object_label}\n{display_label}"
                         alert_key = alert_key or f"{camera_id}_{obj_id}_{display_label}"
@@ -1811,7 +2028,7 @@ class AIProcessor:
                         draw_settings,
                     )
 
-                    if alert_key is not None:
+                    if alert_key is not None and not tripwire_alert_handled:
                         await self._register_persistent_alert(
                             ai_service,
                             camera_id,

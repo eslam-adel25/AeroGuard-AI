@@ -128,6 +128,11 @@ class RestrictedZone(Base):
     zone_type = Column(String(50), default="Restricted Area")
     polygon_coords = Column(JSONB, nullable=False)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    tripwire_allowed_group_size = Column(Integer, nullable=True)
+    tripwire_initial_occupancy = Column(Integer, nullable=True)
+    tripwire_current_occupancy = Column(Integer, nullable=True)
+    tripwire_entry_direction = Column(String(20), nullable=True)
+    tripwire_requires_confirmation = Column(Boolean, nullable=False, default=False, server_default="false")
     camera = relationship("Camera", back_populates="zones")
 
 class Detection(Base):
@@ -318,4 +323,3 @@ class AIEvent(Base):
 
     camera = relationship("Camera", back_populates="ai_events", foreign_keys="AIEvent.camera_id")
     owner = relationship("User", back_populates="ai_events", foreign_keys="AIEvent.detected_by")
-

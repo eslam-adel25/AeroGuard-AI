@@ -11,10 +11,15 @@ export interface ZoneCreateData {
   polygon_coords: [number, number][]; // مصفوفة من الإحداثيات [x, y]
   video_width?: number;
   video_height?: number;
+  tripwire_allowed_group_size?: number;
+  tripwire_initial_occupancy?: number;
+  tripwire_entry_direction?: "left" | "right";
 }
 
 export interface ZoneData extends ZoneCreateData {
   zone_id: string;
+  tripwire_current_occupancy?: number;
+  tripwire_requires_confirmation?: boolean;
 }
 
 const api = axios.create({
@@ -225,6 +230,17 @@ export const cameraService = {
   // تم استبدال any بـ ZoneCreateData لحل الخطأ الثاني
   addZone: (id: string, data: ZoneCreateData) =>
     api.post<ZoneData>(`/cameras/${id}/zones`, data),
+  confirmTripwireOccupancy: (
+    cameraId: string,
+    zoneId: string,
+    current_occupancy: number,
+    allowed_group_size?: number,
+    zone_name?: string,
+  ) =>
+    api.post<ZoneData>(
+      `/cameras/${cameraId}/zones/${zoneId}/tripwire/confirm`,
+      { current_occupancy, allowed_group_size, zone_name },
+    ),
 };
 
 export const settingsService = {

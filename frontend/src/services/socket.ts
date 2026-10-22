@@ -54,6 +54,15 @@ export type CameraStatusWSData = {
   status: string;
 };
 
+export type TripwireStateWSData = {
+  camera_id: string;
+  zone_id: string;
+  current_occupancy: number;
+  remaining_group_count: number;
+  over_limit_count: number;
+  occupancy_confirmation_required: boolean;
+};
+
 export type WSMessage =
   | { event: "new_alert"; data: AlertWSData }
   | { event: "ai_status"; data: DashboardStats }
@@ -61,6 +70,7 @@ export type WSMessage =
   | { event: "alarm_state"; data: AlarmStateWSData }
   | { event: "alarm_state_snapshot"; data: AlarmStateSnapshotWSData }
   | { event: "camera_status"; data: CameraStatusWSData }
+  | { event: "tripwire_state"; data: TripwireStateWSData }
   | { event: "socket_disconnected"; data: Record<string, never> };
 
 export type SocketHandle = {

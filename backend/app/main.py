@@ -1,5 +1,6 @@
 from pathlib import Path
 from fastapi import FastAPI
+from sqlalchemy import func
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,6 +29,15 @@ def create_app() -> FastAPI:
         # Camera processors are not restored across process restarts.
         with SessionLocal() as db:
             reconcile_orphaned_processing_statuses(db)
+            from .models.models import RestrictedZone
+
+            db.query(RestrictedZone).filter(
+                func.lower(RestrictedZone.zone_type) == "tripwire"
+            ).update(
+                {RestrictedZone.tripwire_requires_confirmation: True},
+                synchronize_session=False,
+            )
+            db.commit()
         # Register AI processor with settings API so it receives config updates
         settings.set_ai_processor(ai_engine)
 

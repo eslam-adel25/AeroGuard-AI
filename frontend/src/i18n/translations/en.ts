@@ -197,6 +197,27 @@ const en = {
       saveFailed: "Failed to save zone.",
       restrictedMinPoints: "Restricted Area requires at least 3 points.",
     },
+    tripwire: {
+      configureTitle: "Configure Tripwire",
+      confirmTitle: "Confirm Current Occupancy",
+      confirmDescription:
+        "This tripwire needs a fresh occupancy confirmation after system restart.",
+      name: "TRIPWIRE name",
+      namePlaceholder: "e.g. Main Entrance",
+      allowedGroupSize: "Maximum allowed group size",
+      currentOccupancy: "Current people inside",
+      entryDirection: "Entry direction (toward D)",
+      directionLeft: "Entry moves toward D on the left",
+      directionRight: "Entry moves toward D on the right",
+      remaining: "Remaining",
+      inside: "Inside",
+      overLimit: "Over limit",
+      confirm: "Confirm occupancy",
+      invalidConfiguration:
+        "Enter a name, positive group size, non-negative occupancy, and select a direction.",
+      confirmationFailed: "Unable to confirm tripwire occupancy.",
+      confirmationPending: "Occupancy confirmation pending",
+    },
     controls: {
       pause: "Pause",
       play: "Play",

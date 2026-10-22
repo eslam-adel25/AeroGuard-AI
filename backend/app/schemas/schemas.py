@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
@@ -156,11 +156,14 @@ class SettingsResponse(SettingsUpdate):
     model_config = {"from_attributes": True}
 
 class ZoneCreate(BaseModel):
-    zone_name: str
+    zone_name: str = Field(min_length=1, max_length=100)
     zone_type: str
     polygon_coords: List[List[float]]
     video_width: Optional[int] = None
     video_height: Optional[int] = None
+    tripwire_allowed_group_size: Optional[int] = Field(default=None, gt=0)
+    tripwire_initial_occupancy: Optional[int] = Field(default=None, ge=0)
+    tripwire_entry_direction: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -171,8 +174,19 @@ class ZoneResponse(BaseModel):
     polygon_coords: List[List[float]]
     video_width: Optional[int] = None
     video_height: Optional[int] = None
+    tripwire_allowed_group_size: Optional[int] = None
+    tripwire_initial_occupancy: Optional[int] = None
+    tripwire_current_occupancy: Optional[int] = None
+    tripwire_entry_direction: Optional[str] = None
+    tripwire_requires_confirmation: bool = False
 
     model_config = {"from_attributes": True}
+
+
+class TripwireOccupancyConfirmation(BaseModel):
+    zone_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    allowed_group_size: Optional[int] = Field(default=None, gt=0)
+    current_occupancy: int = Field(ge=0)
 
 # قالب لبيانات الـ FPS القادمة من الـ AI
 class AIStatusUpdate(BaseModel):

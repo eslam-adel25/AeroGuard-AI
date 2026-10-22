@@ -13,6 +13,8 @@ import {
 } from "../services/api";
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
+import directionLeftImage from "../assets/images/tripwire/direction-left.png";
+import directionRightImage from "../assets/images/tripwire/direction-right.png";
 import { useAlertAudio } from "../components/useAlertAudio";
 import { useTranslation } from "react-i18next";
 import {
@@ -28,6 +30,7 @@ import {
   ChevronLeft,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -63,6 +66,13 @@ const EMPTY_ALARM_SOURCES: string[] = [];
 
 type DrawingMode = "restricted" | "direction" | "tripwire";
 type DrawingPointsByType = Record<DrawingMode, Array<[number, number]>>;
+type TripwireDirection = "left" | "right";
+type TripwireState = {
+  current_occupancy: number;
+  remaining_group_count: number;
+  over_limit_count: number;
+  occupancy_confirmation_required: boolean;
+};
 
 type AnnotationAction =
   | { type: "point-added"; mode: DrawingMode }
@@ -83,6 +93,9 @@ const toZoneCreatePayload = (zone: ZoneData) => ({
   polygon_coords: zone.polygon_coords,
   video_width: zone.video_width,
   video_height: zone.video_height,
+  tripwire_allowed_group_size: zone.tripwire_allowed_group_size,
+  tripwire_initial_occupancy: zone.tripwire_initial_occupancy,
+  tripwire_entry_direction: zone.tripwire_entry_direction,
 });
 
 const zoneTypeForDrawingMode = (mode: DrawingMode) =>
@@ -167,6 +180,22 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     AnnotationAction[]
   >([]);
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
+  const [tripwireStates, setTripwireStates] = useState<
+    Record<string, TripwireState>
+  >({});
+  const [tripwireDraftPoints, setTripwireDraftPoints] = useState<
+    [number, number][] | null
+  >(null);
+  const [tripwireModalOpen, setTripwireModalOpen] = useState(false);
+  const [tripwireForm, setTripwireForm] = useState({
+    name: "",
+    allowedGroupSize: "",
+    currentOccupancy: "",
+    direction: "" as TripwireDirection | "",
+  });
+  const [confirmationZone, setConfirmationZone] = useState<ZoneData | null>(
+    null,
+  );
   const zoneRequestVersionRef = useRef(0);
   const editorCameraRef = useRef<string | null>(null);
   const editorActive = isDrawing;
@@ -277,6 +306,39 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       }
       const zones = response.data as ZoneData[];
       setSavedZones(zones);
+      setTripwireStates((current) => {
+        const next = { ...current };
+        zones
+          .filter((zone) => zone.zone_type.toLowerCase().includes("tripwire"))
+          .forEach((zone) => {
+            const occupancy = zone.tripwire_current_occupancy ?? 0;
+            const allowed = zone.tripwire_allowed_group_size ?? 0;
+            next[zone.zone_id] = {
+              current_occupancy: occupancy,
+              remaining_group_count: Math.max(0, allowed - occupancy),
+              over_limit_count: Math.max(0, occupancy - allowed),
+              occupancy_confirmation_required:
+                zone.tripwire_requires_confirmation ?? false,
+            };
+          });
+        return next;
+      });
+      const needsConfirmation = zones.find(
+        (zone) =>
+          zone.zone_type.toLowerCase().includes("tripwire") &&
+          zone.tripwire_requires_confirmation,
+      );
+      if (needsConfirmation) {
+        setConfirmationZone(needsConfirmation);
+        setTripwireForm({
+          name: needsConfirmation.zone_name || "Tripwire",
+          allowedGroupSize: String(
+            needsConfirmation.tripwire_allowed_group_size ?? "",
+          ),
+          currentOccupancy: "",
+          direction: needsConfirmation.tripwire_entry_direction ?? "",
+        });
+      }
       if (syncDraft) {
         setEditingZones(cloneZones(zones));
       }
@@ -391,6 +453,20 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             ...prev,
           ].slice(0, 3),
         );
+      }
+
+      if (message.event === "tripwire_state") {
+        if (message.data.camera_id !== selectedCameraRef.current) return;
+        setTripwireStates((current) => ({
+          ...current,
+          [message.data.zone_id]: {
+            current_occupancy: message.data.current_occupancy,
+            remaining_group_count: message.data.remaining_group_count,
+            over_limit_count: message.data.over_limit_count,
+            occupancy_confirmation_required:
+              message.data.occupancy_confirmation_required,
+          },
+        }));
       }
 
     };
@@ -607,6 +683,85 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         ctx.strokeStyle = "rgba(250, 204, 21, 0.95)";
         ctx.lineWidth = 3;
         ctx.stroke(path);
+        if (canvasCoords.length >= 2) {
+          const [first, second] = canvasCoords;
+          const midpointX = (first[0] + second[0]) / 2;
+          const midpointY = (first[1] + second[1]) / 2;
+          const state = tripwireStates[zone.zone_id];
+          if (state?.occupancy_confirmation_required) {
+            const pendingLabel = t("dashboard.tripwire.confirmationPending");
+            ctx.font = "600 12px sans-serif";
+            const pendingWidth = ctx.measureText(pendingLabel).width;
+            const pendingX = Math.max(
+              4,
+              Math.min(
+                midpointX - pendingWidth / 2,
+                canvas.width / ratio - pendingWidth - 4,
+              ),
+            );
+            const pendingY = Math.max(18, midpointY - 10);
+            ctx.fillStyle = "rgba(5, 12, 24, 0.86)";
+            ctx.fillRect(pendingX - 5, pendingY - 14, pendingWidth + 10, 20);
+            ctx.fillStyle = "#fcd34d";
+            ctx.fillText(pendingLabel, pendingX, pendingY);
+            return;
+          }
+
+          const occupancy =
+            state?.current_occupancy ?? zone.tripwire_current_occupancy ?? 0;
+          const allowed = zone.tripwire_allowed_group_size ?? 0;
+          const counters = [
+            {
+              value:
+                state?.over_limit_count ?? Math.max(0, occupancy - allowed),
+              color: "#f87171",
+            },
+            {
+              value: occupancy,
+              color: "#4ade80",
+            },
+            {
+              value:
+                state?.remaining_group_count ??
+                Math.max(0, allowed - occupancy),
+              color: "#60a5fa",
+            },
+          ];
+          ctx.font = "700 16px sans-serif";
+          const leftToRight =
+            Math.abs(second[0] - first[0]) >= Math.abs(second[1] - first[1])
+              ? [first, second].sort((a, b) => a[0] - b[0])
+              : [first, second].sort((a, b) => a[1] - b[1]);
+          const anchors: [[number, number], [number, number], [number, number]] =
+            [
+              leftToRight[0],
+              [midpointX, midpointY],
+              leftToRight[1],
+            ];
+          const canvasWidth = canvas.width / ratio;
+          const canvasHeight = canvas.height / ratio;
+          counters.forEach((counter, index) => {
+            const text = String(counter.value);
+            const textWidth = ctx.measureText(text).width;
+            const [anchorX, anchorY] = anchors[index];
+            const counterX = Math.max(
+              textWidth / 2 + 2,
+              Math.min(anchorX, canvasWidth - textWidth / 2 - 2),
+            );
+            const labelY = Math.max(
+              18,
+              Math.min(anchorY - 10, canvasHeight - 4),
+            );
+            ctx.fillStyle = counter.color;
+            ctx.shadowColor = "rgba(0, 0, 0, 0.75)";
+            ctx.shadowBlur = 3;
+            ctx.textAlign = "center";
+            ctx.fillText(text, counterX, labelY);
+          });
+          ctx.textAlign = "start";
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+        }
         return;
       }
       if (fill) {
@@ -690,6 +845,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     canvasZones,
     getSavedZoneCanvasCoords,
     mapNormalizedToCanvasCoords,
+    t,
+    tripwireStates,
   ]);
 
   useLayoutEffect(() => {
@@ -740,6 +897,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       setDrawingPointsByType(emptyDrawingPoints());
       setAnnotationHistory([]);
       setEditingZones([]);
+      setConfirmationZone(null);
+      setTripwireModalOpen(false);
       void fetchZones(selectedCamera);
     } else {
       editorCameraRef.current = null;
@@ -747,6 +906,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       setEditingZones([]);
       setDrawingPointsByType(emptyDrawingPoints());
       setAnnotationHistory([]);
+      setConfirmationZone(null);
+      setTripwireModalOpen(false);
     }
   }, [selectedCamera, fetchZones]);
 
@@ -963,11 +1124,26 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             ? t("dashboard.drawingInstructions.restrictedMinPoints")
             : `${zoneType} requires exactly 2 points.`,
         );
+
+        return;
+      }
+      if (drawingMode === "tripwire" && !tripwireModalOpen) {
+        setTripwireDraftPoints(points);
+        setTripwireForm({
+          name: "",
+          allowedGroupSize: "",
+          currentOccupancy: "",
+          direction: "",
+        });
+        setTripwireModalOpen(true);
         return;
       }
       const zone = {
         zone_id: `draft-${crypto.randomUUID()}`,
-        zone_name: `${t("dashboard.inCameraAnnotation")} - ${zoneType}`,
+        zone_name:
+          drawingMode === "tripwire" && tripwireForm.name.trim()
+            ? tripwireForm.name.trim()
+            : `${t("dashboard.inCameraAnnotation")} - ${zoneType}`,
         zone_type: zoneType,
         polygon_coords: cloneZones([
           {
@@ -979,6 +1155,17 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         ])[0].polygon_coords,
         video_width: vid.naturalWidth || undefined,
         video_height: vid.naturalHeight || undefined,
+        ...(drawingMode === "tripwire"
+          ? {
+              tripwire_allowed_group_size: Number(
+                tripwireForm.allowedGroupSize,
+              ),
+              tripwire_initial_occupancy: Number(
+                tripwireForm.currentOccupancy,
+              ),
+              tripwire_entry_direction: tripwireForm.direction as TripwireDirection,
+            }
+          : {}),
       } satisfies ZoneData;
       setEditingZones((prev) => [...prev, zone]);
       setAnnotationHistory((prev) => [
@@ -995,8 +1182,102 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       setHoverPoint(null);
       setDrawingInstructions(t("dashboard.drawingInstructions.saved"));
     },
-    [drawingMode, drawingPoints, selectedCamera, t],
+    [
+      drawingMode,
+      drawingPoints,
+      selectedCamera,
+      t,
+      tripwireForm,
+      tripwireModalOpen,
+    ],
   );
+
+  const confirmTripwireConfiguration = useCallback(() => {
+    const name = tripwireForm.name.trim();
+    const allowed = Number(tripwireForm.allowedGroupSize);
+    const occupancy = Number(tripwireForm.currentOccupancy);
+    if (
+      !name ||
+      name.length > 100 ||
+      !Number.isInteger(allowed) ||
+      allowed <= 0 ||
+      !Number.isInteger(occupancy) ||
+      occupancy < 0 ||
+      !tripwireForm.direction
+    ) {
+      setDrawingInstructions(t("dashboard.tripwire.invalidConfiguration"));
+      return;
+    }
+    if (confirmationZone && selectedCamera) {
+      void cameraService
+        .confirmTripwireOccupancy(
+          selectedCamera,
+          confirmationZone.zone_id,
+          occupancy,
+          allowed,
+          name,
+        )
+        .then((response) => {
+          const confirmed = response.data;
+          setConfirmationZone(null);
+          setTripwireModalOpen(false);
+          setTripwireForm({
+            name: "",
+            allowedGroupSize: "",
+            currentOccupancy: "",
+            direction: "",
+          });
+          setSavedZones((current) =>
+            current.map((zone) =>
+              zone.zone_id === confirmed.zone_id ? confirmed : zone,
+            ),
+          );
+          setEditingZones((current) =>
+            current.map((zone) =>
+              zone.zone_id === confirmed.zone_id ? confirmed : zone,
+            ),
+          );
+          setTripwireStates((current) => ({
+            ...current,
+            [confirmed.zone_id]: {
+              current_occupancy: occupancy,
+              remaining_group_count: Math.max(
+                0,
+                (confirmed.tripwire_allowed_group_size ?? allowed) - occupancy,
+              ),
+              over_limit_count: Math.max(
+                0,
+                occupancy - (confirmed.tripwire_allowed_group_size ?? allowed),
+              ),
+              occupancy_confirmation_required: false,
+            },
+          }));
+        })
+        .catch((error) => {
+          console.error("Failed to confirm tripwire occupancy:", error);
+          setDrawingInstructions(t("dashboard.tripwire.confirmationFailed"));
+        });
+      return;
+    }
+    if (tripwireDraftPoints) {
+      setTripwireModalOpen(false);
+      finishDrawing(tripwireDraftPoints);
+      setTripwireDraftPoints(null);
+      setTripwireForm({
+        name: "",
+        allowedGroupSize: "",
+        currentOccupancy: "",
+        direction: "",
+      });
+    }
+  }, [
+    confirmationZone,
+    finishDrawing,
+    selectedCamera,
+    t,
+    tripwireDraftPoints,
+    tripwireForm,
+  ]);
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return;
@@ -1166,6 +1447,189 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                 {localDateTime}
               </div>
             </div>
+
+              {tripwireModalOpen ? (
+                <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center p-4">
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      confirmTripwireConfiguration();
+                    }}
+                    className="pointer-events-auto relative max-h-[calc(100vh-2rem)] w-full max-w-md space-y-5 overflow-y-auto rounded-2xl border border-white/15 bg-[#0c1322] p-6 text-white shadow-2xl"
+                  >
+                    <button
+                      type="button"
+                      aria-label="Close TRIPWIRE configuration"
+                      onClick={() => {
+                        setTripwireModalOpen(false);
+                        if (!confirmationZone) {
+                          setTripwireDraftPoints(null);
+                          setDrawingPointsByType((current) => ({
+                            ...current,
+                            tripwire: [],
+                          }));
+                          setAnnotationHistory((history) =>
+                            history.filter(
+                              (action) =>
+                                action.type !== "point-added" ||
+                                action.mode !== "tripwire",
+                            ),
+                          );
+                        }
+                      }}
+                      className="absolute right-4 top-4 rounded-full p-1 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <X size={18} />
+                    </button>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400">
+                        TRIPWIRE
+                      </p>
+                      <h2 className="mt-1 text-lg font-bold">
+                        {confirmationZone
+                          ? t("dashboard.tripwire.confirmTitle")
+                          : t("dashboard.tripwire.configureTitle")}
+                      </h2>
+                      {confirmationZone ? (
+                        <p className="mt-2 text-xs text-amber-200">
+                          {t("dashboard.tripwire.confirmDescription")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <label className="block text-xs text-gray-300">
+                      {t("dashboard.tripwire.name")}
+                      <input
+                        type="text"
+                        maxLength={100}
+                        required
+                        value={tripwireForm.name}
+                        onChange={(event) =>
+                          setTripwireForm((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
+                        }
+                        placeholder={t("dashboard.tripwire.namePlaceholder")}
+                        className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white"
+                      />
+                    </label>
+                    <label className="block text-xs text-gray-300">
+                      {t("dashboard.tripwire.allowedGroupSize")}
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        value={tripwireForm.allowedGroupSize}
+                        onChange={(event) =>
+                          setTripwireForm((current) => ({
+                            ...current,
+                            allowedGroupSize: event.target.value,
+                          }))
+                        }
+                        className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white"
+                      />
+                    </label>
+                    <label className="block text-xs text-gray-300">
+                      {t("dashboard.tripwire.currentOccupancy")}
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        required
+                        value={tripwireForm.currentOccupancy}
+                        onChange={(event) =>
+                          setTripwireForm((current) => ({
+                            ...current,
+                            currentOccupancy: event.target.value,
+                          }))
+                        }
+                        className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white"
+                      />
+                    </label>
+                    <fieldset>
+                      <legend className="text-xs text-gray-300">
+                        {t("dashboard.tripwire.entryDirection")}
+                      </legend>
+                      <div className="mt-2 grid grid-cols-2 gap-3">
+                        {(
+                          [
+                            ["left", directionLeftImage],
+                            ["right", directionRightImage],
+                          ] as const
+                        ).map(([direction, image]) => (
+                          <button
+                            key={direction}
+                            type="button"
+                            onClick={() =>
+                              setTripwireForm((current) => ({
+                                ...current,
+                                direction,
+                              }))
+                            }
+                            className={`rounded-xl border p-2 transition ${
+                              tripwireForm.direction === direction
+                                ? "border-ag-success bg-ag-success/15"
+                                : "border-white/15 bg-black/20 hover:border-white/35"
+                            }`}
+                          >
+                            <img
+                              src={image}
+                              alt={t(
+                                direction === "left"
+                                  ? "dashboard.tripwire.directionLeft"
+                                  : "dashboard.tripwire.directionRight",
+                              )}
+                              className="h-12 w-full object-contain"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <p className="min-h-4 text-xs text-red-300">
+                      {drawingInstructions ===
+                      t("dashboard.tripwire.invalidConfiguration")
+                        ? drawingInstructions
+                        : ""}
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      {!confirmationZone ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTripwireModalOpen(false);
+                            if (!confirmationZone) {
+                              setTripwireDraftPoints(null);
+                              setDrawingPointsByType((current) => ({
+                                ...current,
+                                tripwire: [],
+                              }));
+                              setAnnotationHistory((history) =>
+                                history.filter(
+                                  (action) =>
+                                    action.type !== "point-added" ||
+                                    action.mode !== "tripwire",
+                                ),
+                              );
+                            }
+                          }}
+                          className="rounded-lg border border-white/15 px-4 py-2 text-xs text-gray-300"
+                        >
+                          {t("common.cancel")}
+                        </button>
+                      ) : null}
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-ag-success px-4 py-2 text-xs font-semibold text-black"
+                      >
+                        {confirmationZone
+                          ? t("dashboard.tripwire.confirm")
+                          : t("common.save")}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : null}
 
             {/* Video Stream Implementation */}
             {selectedCamera ? (
@@ -1377,7 +1841,70 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                                   {t("common.points")}:{" "}
                                   {zone.polygon_coords.length}
                                 </div>
+                                {zone.zone_type.toLowerCase().includes("tripwire") ? (
+                                  tripwireStates[zone.zone_id]
+                                    ?.occupancy_confirmation_required ? (
+                                    <div className="mt-1 text-[10px] text-amber-200">
+                                      {t("dashboard.tripwire.confirmationPending")}
+                                    </div>
+                                  ) : (
+                                    <div className="mt-1 flex gap-2 text-[10px]">
+                                      <span className="text-blue-300">
+                                        {t("dashboard.tripwire.remaining")}:{" "}
+                                        {tripwireStates[zone.zone_id]
+                                          ?.remaining_group_count ??
+                                          Math.max(
+                                            0,
+                                            (zone.tripwire_allowed_group_size ?? 0) -
+                                              (zone.tripwire_current_occupancy ?? 0),
+                                          )}
+                                      </span>
+                                      <span className="text-green-300">
+                                        {t("dashboard.tripwire.inside")}:{" "}
+                                        {tripwireStates[zone.zone_id]
+                                          ?.current_occupancy ??
+                                          zone.tripwire_current_occupancy ??
+                                          0}
+                                      </span>
+                                      {(tripwireStates[zone.zone_id]
+                                        ?.over_limit_count ??
+                                        Math.max(
+                                          0,
+                                          (zone.tripwire_current_occupancy ?? 0) -
+                                            (zone.tripwire_allowed_group_size ?? 0),
+                                        )) > 0 ? (
+                                        <span className="animate-pulse text-red-300">
+                                          {t("dashboard.tripwire.overLimit")}:{" "}
+                                          {tripwireStates[zone.zone_id]
+                                            ?.over_limit_count ??
+                                            0}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  )
+                                ) : null}
                               </div>
+                              {zone.tripwire_requires_confirmation ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmationZone(zone);
+                                    setTripwireForm({
+                                      name: zone.zone_name || "Tripwire",
+                                      allowedGroupSize: String(
+                                        zone.tripwire_allowed_group_size ?? "",
+                                      ),
+                                      currentOccupancy: "",
+                                      direction:
+                                        zone.tripwire_entry_direction ?? "",
+                                    });
+                                    setTripwireModalOpen(true);
+                                  }}
+                                  className="rounded-lg border border-amber-300/40 px-2 py-1 text-[10px] text-amber-200 hover:bg-amber-300/10"
+                                >
+                                  {t("dashboard.tripwire.confirm")}
+                                </button>
+                              ) : null}
                               <button
                                 onClick={() => deleteZone(zone.zone_id)}
                                 className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-gray-200 hover:bg-white/10 transition"

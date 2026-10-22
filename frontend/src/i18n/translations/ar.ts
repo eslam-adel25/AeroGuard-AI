@@ -193,6 +193,27 @@ const ar = {
       saveFailed: "فشل حفظ المنطقة.",
       restrictedMinPoints: "تتطلب المنطقة المقيدة 3 نقاط على الأقل.",
     },
+    tripwire: {
+      configureTitle: "إعداد سلك العبور",
+      confirmTitle: "تأكيد الإشغال الحالي",
+      confirmDescription:
+        "يحتاج هذا السلك إلى تأكيد إشغال جديد بعد إعادة تشغيل النظام.",
+      name: "اسم سلك العبور",
+      namePlaceholder: "مثال: المدخل الرئيسي",
+      allowedGroupSize: "الحد الأقصى لحجم المجموعة",
+      currentOccupancy: "عدد الأشخاص داخل الغرفة",
+      entryDirection: "اتجاه الدخول (نحو D)",
+      directionLeft: "الدخول نحو D على اليسار",
+      directionRight: "الدخول نحو D على اليمين",
+      remaining: "المتبقي",
+      inside: "بالداخل",
+      overLimit: "تجاوز الحد",
+      confirm: "تأكيد الإشغال",
+      invalidConfiguration:
+        "أدخل اسماً وحداً موجباً وإشغالاً غير سالب واختر اتجاه الدخول.",
+      confirmationFailed: "تعذر تأكيد إشغال سلك العبور.",
+      confirmationPending: "بانتظار تأكيد الإشغال",
+    },
     controls: {
       pause: "إيقاف مؤقت",
       play: "تشغيل",

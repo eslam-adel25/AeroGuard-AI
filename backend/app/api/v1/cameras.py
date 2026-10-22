@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import cv2
 import asyncio
@@ -11,7 +12,12 @@ from urllib.parse import urlparse
 
 from ...database.session import get_db
 from ...models.models import Camera, RestrictedZone, AIEvent, Detection, Tracking
-from ...schemas.schemas import CameraResponse, ZoneCreate, ZoneResponse
+from ...schemas.schemas import (
+    CameraResponse,
+    TripwireOccupancyConfirmation,
+    ZoneCreate,
+    ZoneResponse,
+)
 from ...core.auth_middleware import get_current_user
 from ...repositories.camera_repository import CameraRepository
 from ...services.camera_status import apply_camera_runtime_statuses
@@ -159,12 +165,30 @@ def _build_zone_response(zone: RestrictedZone):
         "polygon_coords": polygon_coords,
         "video_width": video_width,
         "video_height": video_height,
+        "tripwire_allowed_group_size": zone.tripwire_allowed_group_size,
+        "tripwire_initial_occupancy": zone.tripwire_initial_occupancy,
+        "tripwire_current_occupancy": zone.tripwire_current_occupancy,
+        "tripwire_entry_direction": zone.tripwire_entry_direction,
+        "tripwire_requires_confirmation": bool(zone.tripwire_requires_confirmation),
     }
 
 
 @router.post("/{camera_id}/zones", response_model=ZoneResponse)
 def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
+    zone_name = zone.zone_name.strip()
+    if not zone_name:
+        raise HTTPException(status_code=422, detail="Zone name cannot be empty")
+    is_tripwire = zone.zone_type.strip().lower() == "tripwire"
+    if is_tripwire and (
+        zone.tripwire_allowed_group_size is None
+        or zone.tripwire_initial_occupancy is None
+        or zone.tripwire_entry_direction not in {"left", "right"}
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Tripwire configuration requires a positive group size, non-negative occupancy, and direction",
+        )
 
     stored_polygon = {
         "points": zone.polygon_coords,
@@ -174,10 +198,15 @@ def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(
 
     new_zone = RestrictedZone(
         camera_id=camera_id,
-        zone_name=zone.zone_name,
+        zone_name=zone_name,
         zone_type=zone.zone_type,
         polygon_coords=stored_polygon,
-        owner_id=current_user.get("user_id")
+        owner_id=current_user.get("user_id"),
+        tripwire_allowed_group_size=zone.tripwire_allowed_group_size if is_tripwire else None,
+        tripwire_initial_occupancy=zone.tripwire_initial_occupancy if is_tripwire else None,
+        tripwire_current_occupancy=zone.tripwire_initial_occupancy if is_tripwire else None,
+        tripwire_entry_direction=zone.tripwire_entry_direction if is_tripwire else None,
+        tripwire_requires_confirmation=False,
     )
     db.add(new_zone)
     db.commit()
@@ -204,6 +233,36 @@ def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(g
     db.delete(zone)
     db.commit()
     return {"message": "Zone deleted successfully"}
+
+
+@router.post("/{camera_id}/zones/{zone_id}/tripwire/confirm", response_model=ZoneResponse)
+def confirm_tripwire_occupancy(
+    camera_id: str,
+    zone_id: str,
+    confirmation: TripwireOccupancyConfirmation,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    _get_camera_for_user(db, camera_id, current_user)
+    zone = db.query(RestrictedZone).filter(
+        RestrictedZone.zone_id == zone_id,
+        RestrictedZone.camera_id == camera_id,
+        func.lower(RestrictedZone.zone_type) == "tripwire",
+    ).first()
+    if not zone:
+        raise HTTPException(status_code=404, detail="Tripwire not found")
+    if confirmation.allowed_group_size is not None:
+        zone.tripwire_allowed_group_size = confirmation.allowed_group_size
+    if confirmation.zone_name is not None:
+        zone_name = confirmation.zone_name.strip()
+        if not zone_name:
+            raise HTTPException(status_code=422, detail="Zone name cannot be empty")
+        zone.zone_name = zone_name
+    zone.tripwire_current_occupancy = confirmation.current_occupancy
+    zone.tripwire_requires_confirmation = False
+    db.commit()
+    db.refresh(zone)
+    return _build_zone_response(zone)
 
 # 3. تشغيل الـ AI
 @router.post("/{camera_id}/start")
