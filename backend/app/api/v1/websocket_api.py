@@ -36,6 +36,37 @@ def _build_alarm_state_snapshot(user_id, role):
         db.close()
 
 
+def _build_tripwire_alarm_snapshot(user_id, role):
+    if ai_engine is None:
+        return {}
+    is_admin = role == "Administrator"
+    if not is_admin and not user_id:
+        return {}
+
+    db = SessionLocal()
+    try:
+        cameras = CameraRepository(db).get_all_cameras(
+            owner_id=user_id,
+            is_admin=is_admin,
+        )
+        return {
+            str(camera.camera_id): {
+                str(zone_id): {
+                    "active": bool(state.get("active")),
+                    "event_id": state.get("event_id"),
+                }
+                for zone_id, state in ai_engine._active_tripwire_alarm_states.get(
+                    str(camera.camera_id),
+                    {},
+                ).items()
+                if state.get("active") and state.get("event_id")
+            }
+            for camera in cameras
+        }
+    finally:
+        db.close()
+
+
 @router.websocket("/ws/dashboard")
 async def websocket_endpoint(websocket: WebSocket):
     token = websocket.query_params.get("token")
@@ -60,6 +91,12 @@ async def websocket_endpoint(websocket: WebSocket):
             "event": "alarm_state_snapshot",
             "data": {
                 "states": _build_alarm_state_snapshot(user_id, role),
+            },
+        })
+        await websocket.send_json({
+            "event": "tripwire_alarm_snapshot",
+            "data": {
+                "states": _build_tripwire_alarm_snapshot(user_id, role),
             },
         })
         while True:

@@ -222,7 +222,7 @@ def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current
 
 
 @router.delete("/{camera_id}/zones/{zone_id}")
-def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     zone = db.query(RestrictedZone).filter(
         RestrictedZone.zone_id == zone_id,
@@ -230,8 +230,27 @@ def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(g
     ).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")
+    is_tripwire = "tripwire" in (zone.zone_type or "").lower()
     db.delete(zone)
     db.commit()
+    if is_tripwire:
+        state = (
+            ai_engine.clear_tripwire_alarm_state(camera_id, zone_id)
+            if ai_engine is not None
+            else None
+        )
+        await manager.broadcast(
+            {
+                "event": "tripwire_alarm_state",
+                "data": {
+                    "camera_id": str(camera_id),
+                    "zone_id": str(zone_id),
+                    "active": False,
+                    "event_id": state.get("event_id") if state else None,
+                },
+            },
+            audience_user_id=str(cam.owner_id),
+        )
     return {"message": "Zone deleted successfully"}
 
 

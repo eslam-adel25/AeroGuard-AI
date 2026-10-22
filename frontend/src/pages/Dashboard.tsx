@@ -149,6 +149,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const {
     alarmStateByCamera,
     mutedCameraIds,
+    tripwireAlarmStates,
+    silenceTripwireAlarm,
     toggleCameraMute,
   } = useAlertAudio();
   const [localDateTime, setLocalDateTime] = useState(() =>
@@ -1896,33 +1898,67 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                                   )
                                 ) : null}
                               </div>
-                              {zone.tripwire_requires_confirmation ? (
+                              <div className="flex shrink-0 flex-col items-end gap-1">
+                                {zone.tripwire_requires_confirmation ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmationZone(zone);
+                                      setTripwireForm({
+                                        name: zone.zone_name || "Tripwire",
+                                        allowedGroupSize: String(
+                                          zone.tripwire_allowed_group_size ?? "",
+                                        ),
+                                        currentOccupancy: "",
+                                        direction:
+                                          zone.tripwire_entry_direction ?? "",
+                                      });
+                                      setTripwireModalOpen(true);
+                                    }}
+                                    className="rounded-lg border border-amber-300/40 px-2 py-1 text-[10px] text-amber-200 hover:bg-amber-300/10"
+                                  >
+                                    {t("dashboard.tripwire.confirm")}
+                                  </button>
+                                ) : null}
                                 <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmationZone(zone);
-                                    setTripwireForm({
-                                      name: zone.zone_name || "Tripwire",
-                                      allowedGroupSize: String(
-                                        zone.tripwire_allowed_group_size ?? "",
-                                      ),
-                                      currentOccupancy: "",
-                                      direction:
-                                        zone.tripwire_entry_direction ?? "",
-                                    });
-                                    setTripwireModalOpen(true);
-                                  }}
-                                  className="rounded-lg border border-amber-300/40 px-2 py-1 text-[10px] text-amber-200 hover:bg-amber-300/10"
+                                  onClick={() => deleteZone(zone.zone_id)}
+                                  className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-gray-200 hover:bg-white/10 transition"
                                 >
-                                  {t("dashboard.tripwire.confirm")}
+                                  {t("common.delete")}
                                 </button>
-                              ) : null}
-                              <button
-                                onClick={() => deleteZone(zone.zone_id)}
-                                className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-gray-200 hover:bg-white/10 transition"
-                              >
-                                {t("common.delete")}
-                              </button>
+                                {zone.zone_type
+                                  .toLowerCase()
+                                  .includes("tripwire") &&
+                                selectedCamera &&
+                                tripwireAlarmStates[selectedCamera]?.[
+                                  zone.zone_id
+                                ] ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      silenceTripwireAlarm(
+                                        selectedCamera,
+                                        zone.zone_id,
+                                      )
+                                    }
+                                    disabled={
+                                      tripwireAlarmStates[selectedCamera][
+                                        zone.zone_id
+                                      ].silenced
+                                    }
+                                    className="inline-flex items-center gap-1 rounded-lg border border-red-300/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-200 transition hover:bg-red-500/20 disabled:cursor-default disabled:opacity-70"
+                                  >
+                                    <VolumeX size={12} />
+                                    {t(
+                                      tripwireAlarmStates[selectedCamera][
+                                        zone.zone_id
+                                      ].silenced
+                                        ? "dashboard.tripwire.alarmSilenced"
+                                        : "dashboard.tripwire.silenceAlarm",
+                                    )}
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
                           ))}
                         </div>

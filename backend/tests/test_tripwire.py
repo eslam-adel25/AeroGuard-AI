@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from app.ai.processor import (
+    AIProcessor,
     _tripwire_became_over_limit,
     _tripwire_crossing,
     _tripwire_crossing_with_hysteresis,
@@ -16,6 +17,7 @@ from app.database.session import Base
 from app.models.models import Camera, RestrictedZone
 from app.api.v1 import cameras as cameras_api
 from app.schemas.schemas import TripwireOccupancyConfirmation
+from app.websocket.manager import ConnectionManager
 
 
 def test_tripwire_direction_uses_horizontal_movement_for_supported_line_geometries():
@@ -123,7 +125,10 @@ def test_tripwire_counter_calculations():
     assert _update_tripwire_occupancy(0, "exit") == 0
     assert _tripwire_became_over_limit("entry", 4, 5, 4)
     assert not _tripwire_became_over_limit("entry", 3, 4, 4)
+    assert _tripwire_became_over_limit("entry", 5, 6, 4)
+    assert _tripwire_became_over_limit("entry", 6, 7, 4)
     assert not _tripwire_became_over_limit("exit", 5, 4, 4)
+    assert not _tripwire_became_over_limit(None, 5, 6, 4)
 
 
 def test_tripwire_immediate_alert_contains_wire_and_occupancy_metadata(monkeypatch):
@@ -168,6 +173,132 @@ def test_tripwire_immediate_alert_contains_wire_and_occupancy_metadata(monkeypat
         "allowed_group_size": 4,
         "over_limit_count": 1,
     }
+
+
+def test_tripwire_alarm_state_broadcast_is_scoped_to_camera_owner():
+    class FakeWebSocket:
+        def __init__(self):
+            self.messages = []
+
+        async def send_json(self, message):
+            self.messages.append(message)
+
+    owner_socket = FakeWebSocket()
+    other_socket = FakeWebSocket()
+    admin_socket = FakeWebSocket()
+    manager = ConnectionManager()
+    manager.active_connections = [
+        (owner_socket, "owner-a", "User"),
+        (other_socket, "owner-b", "User"),
+        (admin_socket, "admin", "Administrator"),
+    ]
+
+    asyncio.run(
+        manager.broadcast(
+            {
+                "event": "tripwire_alarm_state",
+                "data": {
+                    "camera_id": "camera-a",
+                    "zone_id": "wire-a",
+                    "active": True,
+                    "event_id": "event-a",
+                },
+            },
+            audience_user_id="owner-a",
+        )
+    )
+
+    assert len(owner_socket.messages) == 1
+    assert other_socket.messages == []
+    assert len(admin_socket.messages) == 1
+
+
+def test_tripwire_alarm_cleanup_is_scoped_to_camera_and_zone():
+    processor = AIProcessor.__new__(AIProcessor)
+    processor.tripwire_runtime = {
+        "camera-a:wire-a": {"occupancy": 5},
+        "camera-b:wire-b": {"occupancy": 6},
+    }
+    processor._active_tripwire_alarm_states = {
+        "camera-a": {"wire-a": {"active": True, "event_id": "event-a"}},
+        "camera-b": {"wire-b": {"active": True, "event_id": "event-b"}},
+    }
+    processor._deleted_tripwire_zones = set()
+
+    cleared = processor.clear_tripwire_alarm_state("camera-a", "wire-a")
+
+    assert cleared == {"active": True, "event_id": "event-a"}
+    assert "camera-a:wire-a" not in processor.tripwire_runtime
+    assert processor.tripwire_runtime["camera-b:wire-b"]["occupancy"] == 6
+    assert "camera-a" not in processor._active_tripwire_alarm_states
+    assert processor._active_tripwire_alarm_states["camera-b"]["wire-b"][
+        "event_id"
+    ] == "event-b"
+    assert processor._deleted_tripwire_zones == {("camera-a", "wire-a")}
+
+
+def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch):
+    camera = SimpleNamespace(owner_id="owner-a")
+    zone = SimpleNamespace(zone_type="Tripwire")
+    cleared = []
+    messages = []
+
+    class FakeQuery:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return camera if self.model is Camera else zone
+
+    class FakeDB:
+        def query(self, model):
+            return FakeQuery(model)
+
+        def delete(self, item):
+            assert item is zone
+
+        def commit(self):
+            pass
+
+    async def fake_broadcast(message, audience_user_id=None):
+        messages.append((message, audience_user_id))
+
+    monkeypatch.setattr(
+        cameras_api,
+        "ai_engine",
+        SimpleNamespace(
+            clear_tripwire_alarm_state=lambda camera_id, zone_id: (
+                cleared.append((camera_id, zone_id))
+                or {"event_id": "event-a"}
+            )
+        ),
+    )
+    monkeypatch.setattr(cameras_api.manager, "broadcast", fake_broadcast)
+
+    response = asyncio.run(
+        cameras_api.delete_restricted_zone(
+            "camera-a",
+            "wire-a",
+            db=FakeDB(),
+            current_user={"user_id": "owner-a", "role": "User"},
+        )
+    )
+
+    assert response == {"message": "Zone deleted successfully"}
+    assert cleared == [("camera-a", "wire-a")]
+    assert messages[0][0] == {
+        "event": "tripwire_alarm_state",
+        "data": {
+            "camera_id": "camera-a",
+            "zone_id": "wire-a",
+            "active": False,
+            "event_id": "event-a",
+        },
+    }
+    assert messages[0][1] == "owner-a"
 
 
 def _build_tripwire_session():

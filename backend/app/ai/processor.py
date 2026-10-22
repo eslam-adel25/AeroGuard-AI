@@ -252,7 +252,6 @@ def _tripwire_became_over_limit(
 ):
     return (
         crossing == "entry"
-        and previous_occupancy <= allowed_group_size
         and current_occupancy > allowed_group_size
     )
 
@@ -299,6 +298,8 @@ class AIProcessor:
         self._active_camera_lock = threading.Lock()
         self._active_alarm_state = {}  # camera_id -> bool
         self._active_alarm_sources = {}  # camera_id -> list[str]
+        self._active_tripwire_alarm_states = {}  # camera_id -> zone_id -> event state
+        self._deleted_tripwire_zones = set()
         self._settings_by_owner = {}
         self._settings_lock = threading.Lock()
 
@@ -430,6 +431,43 @@ class AIProcessor:
             }, audience_user_id=str(audience_user_id) if audience_user_id else None)
         except Exception:
             pass
+
+    async def _broadcast_tripwire_alarm_state(
+        self,
+        camera_id,
+        zone_id,
+        active,
+        event_id,
+        audience_user_id=None,
+    ):
+        try:
+            await manager.broadcast(
+                {
+                    "event": "tripwire_alarm_state",
+                    "data": {
+                        "camera_id": str(camera_id),
+                        "zone_id": str(zone_id),
+                        "active": bool(active),
+                        "event_id": str(event_id) if event_id else None,
+                    },
+                },
+                audience_user_id=(
+                    str(audience_user_id) if audience_user_id else None
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to broadcast Tripwire alarm state")
+
+    def clear_tripwire_alarm_state(self, camera_id, zone_id):
+        camera_key = str(camera_id)
+        zone_key = str(zone_id)
+        self._deleted_tripwire_zones.add((camera_key, zone_key))
+        self.tripwire_runtime.pop(f"{camera_key}:{zone_key}", None)
+        camera_states = self._active_tripwire_alarm_states.get(camera_key, {})
+        state = camera_states.pop(zone_key, None)
+        if not camera_states:
+            self._active_tripwire_alarm_states.pop(camera_key, None)
+        return state
 
     def _register_critical_alert(self, camera_id) -> None:
         camera_key = str(camera_id)
@@ -911,6 +949,10 @@ class AIProcessor:
         self.active_critical_alerts[camera_key] = []
         self._active_alarm_state[camera_key] = False
         self._active_alarm_sources[camera_key] = []
+        self._active_tripwire_alarm_states.setdefault(camera_key, {})
+        self._deleted_tripwire_zones = {
+            key for key in self._deleted_tripwire_zones if key[0] != camera_key
+        }
 
     def _clear_camera_runtime_state(self, camera_id):
         camera_key = str(camera_id)
@@ -930,12 +972,16 @@ class AIProcessor:
             self.crowd_cooldown,
             self._active_alarm_state,
             self._active_alarm_sources,
+            self._active_tripwire_alarm_states,
             getattr(self, "tripwire_runtime", {}),
         ):
             state.pop(camera_key, None)
         for runtime_key in list(getattr(self, "tripwire_runtime", {})):
             if runtime_key.startswith(f"{camera_key}:"):
                 self.tripwire_runtime.pop(runtime_key, None)
+        self._deleted_tripwire_zones = {
+            key for key in self._deleted_tripwire_zones if key[0] != camera_key
+        }
         self._reset_inactive_alert_persistence(camera_key, set())
 
     def get_latest_frame(self, camera_id):
@@ -1652,6 +1698,11 @@ class AIProcessor:
                 try:
                     if iteration % 30 == 0:
                         zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+                        self._deleted_tripwire_zones = {
+                            key
+                            for key in self._deleted_tripwire_zones
+                            if key[0] != camera_id_str
+                        }
                         for refreshed_zone in zones:
                             if "tripwire" not in (refreshed_zone.zone_type or "").lower():
                                 continue
@@ -1788,6 +1839,12 @@ class AIProcessor:
                                 if not coords:
                                     continue
                                 ztype = (zone.zone_type or "").lower()
+                                if (
+                                    "tripwire" in ztype
+                                    and (camera_id_str, str(zone.zone_id))
+                                    in self._deleted_tripwire_zones
+                                ):
+                                    continue
 
                                 # Legacy compatibility path: persisted Direction zones
                                 # remain active and can generate WRONG DIRECTION alerts.
@@ -1920,7 +1977,7 @@ class AIProcessor:
                                             await manager.broadcast(tripwire_message)
                                             if became_over_limit:
                                                 self._register_critical_alert(camera_id)
-                                                await self._register_immediate_tripwire_alert(
+                                                event = await self._register_immediate_tripwire_alert(
                                                     ai_service,
                                                     camera_id,
                                                     tripwire_id,
@@ -1931,6 +1988,21 @@ class AIProcessor:
                                                     allowed_group_size,
                                                     over_limit_count,
                                                     annotated_frame,
+                                                )
+                                                event_id = str(event.event_id)
+                                                self._active_tripwire_alarm_states.setdefault(
+                                                    camera_id_str,
+                                                    {},
+                                                )[tripwire_id] = {
+                                                    "active": True,
+                                                    "event_id": event_id,
+                                                }
+                                                await self._broadcast_tripwire_alarm_state(
+                                                    camera_id,
+                                                    tripwire_id,
+                                                    True,
+                                                    event_id,
+                                                    camera_owner_id,
                                                 )
                                                 tripwire_alert_handled = True
                                             status = "DANGER" if became_over_limit else "NORMAL"
@@ -2033,7 +2105,7 @@ class AIProcessor:
                         status,
                     )
 
-                    if status == "DANGER":
+                    if status == "DANGER" and display_label != "TRIPWIRE":
                         alarm_sources.add(display_label)
 
                     # Abandoned bag detection
@@ -2200,6 +2272,17 @@ class AIProcessor:
                     )
                 except Exception as exc:
                     print(f"⚠️ [{camera_id}] alarm cleanup broadcast failed: {type(exc).__name__}: {exc}")
+
+            for zone_id, state in list(
+                self._active_tripwire_alarm_states.get(camera_id_str, {}).items()
+            ):
+                await self._broadcast_tripwire_alarm_state(
+                    camera_id,
+                    zone_id,
+                    False,
+                    state.get("event_id"),
+                    camera_owner_id,
+                )
 
             try:
                 self._clear_camera_runtime_state(camera_id_str)

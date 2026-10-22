@@ -40,6 +40,8 @@ def _processor_state():
     processor.crowd_cooldown = {}
     processor._active_alarm_state = {}
     processor._active_alarm_sources = {}
+    processor._active_tripwire_alarm_states = {}
+    processor._deleted_tripwire_zones = set()
     processor.last_frames = {}
     processor.alert_persistence = {}
     return processor
@@ -620,6 +622,10 @@ def test_alarm_snapshot_contains_only_authorized_camera_state(monkeypatch):
     processor = SimpleNamespace(
         _active_alarm_state={"camera-a": True, "camera-b": True},
         _active_alarm_sources={"camera-a": ["fire"], "camera-b": ["security"]},
+        _active_tripwire_alarm_states={
+            "camera-a": {"wire-a": {"active": True, "event_id": "event-a"}},
+            "camera-b": {"wire-b": {"active": True, "event_id": "event-b"}},
+        },
     )
     monkeypatch.setattr(websocket_api, "ai_engine", processor)
     monkeypatch.setattr(websocket_api, "SessionLocal", FakeDB)
@@ -634,4 +640,15 @@ def test_alarm_snapshot_contains_only_authorized_camera_state(monkeypatch):
     assert requested_scope == {"owner_id": "owner-a", "is_admin": False}
     assert snapshot == {
         "camera-a": {"active": True, "sources": ["fire"]},
+    }
+
+    tripwire_snapshot = websocket_api._build_tripwire_alarm_snapshot(
+        "owner-a",
+        "User",
+    )
+
+    assert tripwire_snapshot == {
+        "camera-a": {
+            "wire-a": {"active": True, "event_id": "event-a"},
+        },
     }

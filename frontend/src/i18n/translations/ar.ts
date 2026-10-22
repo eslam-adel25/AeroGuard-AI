@@ -213,6 +213,8 @@ const ar = {
         "أدخل اسماً وحداً موجباً وإشغالاً غير سالب واختر اتجاه الدخول.",
       confirmationFailed: "تعذر تأكيد إشغال سلك العبور.",
       confirmationPending: "بانتظار تأكيد الإشغال",
+      silenceAlarm: "إسكات الإنذار",
+      alarmSilenced: "تم إسكات الإنذار",
     },
     controls: {
       pause: "إيقاف مؤقت",

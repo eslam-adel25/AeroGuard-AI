@@ -49,6 +49,20 @@ export type AlarmStateSnapshotWSData = {
   states: Record<string, Omit<AlarmStateWSData, "camera_id">>;
 };
 
+export type TripwireAlarmStateWSData = {
+  camera_id: string;
+  zone_id: string;
+  active: boolean;
+  event_id: string | null;
+};
+
+export type TripwireAlarmSnapshotWSData = {
+  states: Record<
+    string,
+    Record<string, { active: boolean; event_id: string }>
+  >;
+};
+
 export type CameraStatusWSData = {
   camera_id: string;
   status: string;
@@ -69,6 +83,8 @@ export type WSMessage =
   | { event: "ai_event"; data: AIEventWSData }
   | { event: "alarm_state"; data: AlarmStateWSData }
   | { event: "alarm_state_snapshot"; data: AlarmStateSnapshotWSData }
+  | { event: "tripwire_alarm_state"; data: TripwireAlarmStateWSData }
+  | { event: "tripwire_alarm_snapshot"; data: TripwireAlarmSnapshotWSData }
   | { event: "camera_status"; data: CameraStatusWSData }
   | { event: "tripwire_state"; data: TripwireStateWSData }
   | { event: "socket_disconnected"; data: Record<string, never> };
@@ -86,6 +102,9 @@ let reconnectAttempts = 0;
 let alarmStates: AlarmStateSnapshotWSData["states"] = {};
 let liveAlarmOverrides: AlarmStateSnapshotWSData["states"] = {};
 let hasAlarmSnapshot = false;
+let tripwireAlarmStates: TripwireAlarmSnapshotWSData["states"] = {};
+let liveTripwireAlarmOverrides: TripwireAlarmStateWSData[] = [];
+let hasTripwireAlarmSnapshot = false;
 
 const broadcastMessage = (message: WSMessage) => {
   subscribers.forEach((_count, subscriber) => subscriber(message));
@@ -96,10 +115,25 @@ const alarmSnapshotMessage = (): WSMessage => ({
   data: { states: { ...alarmStates } },
 });
 
+const tripwireAlarmSnapshotMessage = (): WSMessage => ({
+  event: "tripwire_alarm_snapshot",
+  data: {
+    states: Object.fromEntries(
+      Object.entries(tripwireAlarmStates).map(([cameraId, states]) => [
+        cameraId,
+        { ...states },
+      ]),
+    ),
+  },
+});
+
 const clearAlarmStates = () => {
   alarmStates = {};
   liveAlarmOverrides = {};
   hasAlarmSnapshot = false;
+  tripwireAlarmStates = {};
+  liveTripwireAlarmOverrides = [];
+  hasTripwireAlarmSnapshot = false;
 };
 
 const cancelReconnect = () => {
@@ -186,6 +220,8 @@ const connectSocket = () => {
     }
     liveAlarmOverrides = {};
     hasAlarmSnapshot = false;
+    liveTripwireAlarmOverrides = [];
+    hasTripwireAlarmSnapshot = false;
     console.log("🚀 [AeroGuard] Secure Socket Link Established");
   };
 
@@ -220,6 +256,46 @@ const connectSocket = () => {
         hasAlarmSnapshot = true;
         reconnectAttempts = 0;
         broadcastMessage(alarmSnapshotMessage());
+      } else if (parsed.event === "tripwire_alarm_state") {
+        const { camera_id: cameraId, zone_id: zoneId } = parsed.data;
+        const cameraStates = (tripwireAlarmStates[cameraId] ??= {});
+        if (parsed.data.active && parsed.data.event_id) {
+          cameraStates[zoneId] = {
+            active: true,
+            event_id: parsed.data.event_id,
+          };
+        } else {
+          delete cameraStates[zoneId];
+          if (Object.keys(cameraStates).length === 0) {
+            delete tripwireAlarmStates[cameraId];
+          }
+        }
+        liveTripwireAlarmOverrides.push(parsed.data);
+        broadcastMessage(parsed);
+      } else if (parsed.event === "tripwire_alarm_snapshot") {
+        tripwireAlarmStates = Object.fromEntries(
+          Object.entries(parsed.data.states).map(([cameraId, states]) => [
+            cameraId,
+            { ...states },
+          ]),
+        );
+        liveTripwireAlarmOverrides.forEach((state) => {
+          const cameraStates = (tripwireAlarmStates[state.camera_id] ??= {});
+          if (state.active && state.event_id) {
+            cameraStates[state.zone_id] = {
+              active: true,
+              event_id: state.event_id,
+            };
+          } else {
+            delete cameraStates[state.zone_id];
+            if (Object.keys(cameraStates).length === 0) {
+              delete tripwireAlarmStates[state.camera_id];
+            }
+          }
+        });
+        liveTripwireAlarmOverrides = [];
+        hasTripwireAlarmSnapshot = true;
+        broadcastMessage(tripwireAlarmSnapshotMessage());
       } else {
         broadcastMessage(parsed);
       }
@@ -266,6 +342,13 @@ export const createSocket = (
     socket?.readyState === WebSocket.OPEN
   ) {
     onMessage(alarmSnapshotMessage());
+  }
+  if (
+    isNewSubscriber &&
+    hasTripwireAlarmSnapshot &&
+    socket?.readyState === WebSocket.OPEN
+  ) {
+    onMessage(tripwireAlarmSnapshotMessage());
   }
   let closed = false;
 

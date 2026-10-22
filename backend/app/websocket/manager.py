@@ -26,7 +26,13 @@ class ConnectionManager:
         dead_connections = []
         for connection, user_id, role in self.active_connections:
             if (
-                message.get("event") in {"ai_event", "alarm_state"}
+                message.get("event")
+                in {
+                    "ai_event",
+                    "alarm_state",
+                    "tripwire_alarm_state",
+                    "tripwire_alarm_snapshot",
+                }
                 and role != "Administrator"
                 and (
                     audience_user_id is None

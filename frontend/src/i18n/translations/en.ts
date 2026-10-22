@@ -217,6 +217,8 @@ const en = {
         "Enter a name, positive group size, non-negative occupancy, and select a direction.",
       confirmationFailed: "Unable to confirm tripwire occupancy.",
       confirmationPending: "Occupancy confirmation pending",
+      silenceAlarm: "Silence alarm",
+      alarmSilenced: "Alarm silenced",
     },
     controls: {
       pause: "Pause",
