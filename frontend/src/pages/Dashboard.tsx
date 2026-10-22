@@ -9,8 +9,14 @@ import {
 import {
   cameraService,
   getStoredAuthToken,
+  userService,
   type ZoneData,
 } from "../services/api";
+import {
+  deleteFrozenFrame,
+  getFrozenFramesForUser,
+  saveFrozenFrame,
+} from "../services/frozenFrameStore";
 import { createSocket } from "../services/socket";
 import type { WSMessage } from "../services/socket";
 import directionLeftImage from "../assets/images/tripwire/direction-left.png";
@@ -172,6 +178,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const videoRef = useRef<HTMLImageElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const selectedCameraRef = useRef<string | null>(null);
+  const [frozenFrames, setFrozenFrames] = useState<Record<string, string>>({});
+  const frozenFramesRef = useRef<Record<string, string>>({});
+  const currentUserIdRef = useRef<string | null>(null);
+  const cameraStatusesRef = useRef<Record<string, string | undefined>>({});
+  const freezeGenerationByCameraRef = useRef(new Map<string, number>());
+  const startAcceptedCameraIdsRef = useRef(new Set<string>());
+  const frozenUrlCleanupTimerRef = useRef<number | null>(null);
   const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -211,6 +224,139 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     (zone) => zone.zone_type === zoneTypeForDrawingMode(drawingMode),
   );
 
+  const updateFrozenFrame = useCallback(
+    (cameraId: string, frameUrl: string | null) => {
+      const current = frozenFramesRef.current;
+      const previousUrl = current[cameraId];
+      if (previousUrl && previousUrl !== frameUrl && previousUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      const nextFrames = { ...current };
+      if (frameUrl) {
+        nextFrames[cameraId] = frameUrl;
+      } else {
+        delete nextFrames[cameraId];
+      }
+      frozenFramesRef.current = nextFrames;
+      setFrozenFrames(nextFrames);
+    },
+    [],
+  );
+
+  const clearFrozenFrame = useCallback(
+    (cameraId: string) => {
+      freezeGenerationByCameraRef.current.set(
+        cameraId,
+        (freezeGenerationByCameraRef.current.get(cameraId) ?? 0) + 1,
+      );
+      updateFrozenFrame(cameraId, null);
+      const userId = currentUserIdRef.current;
+      if (userId) {
+        void deleteFrozenFrame(userId, cameraId).catch((error: unknown) => {
+          console.warn("Failed to clear stored frozen frame:", error);
+        });
+      }
+    },
+    [updateFrozenFrame],
+  );
+
+  const captureFrozenFrame = useCallback((cameraId: string) => {
+    const image = videoRef.current;
+    const overlay = overlayCanvasRef.current;
+    if (
+      frozenFramesRef.current[cameraId] ||
+      selectedCameraRef.current !== cameraId ||
+      !image ||
+      !overlay ||
+      image.naturalWidth === 0 ||
+      image.naturalHeight === 0 ||
+      overlay.width === 0 ||
+      overlay.height === 0
+    ) {
+      return;
+    }
+
+    const imageRect = image.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    const pixelRatio = window.devicePixelRatio || 1;
+    const width = Math.round(imageRect.width * pixelRatio);
+    const height = Math.round(imageRect.height * pixelRatio);
+    if (width === 0 || height === 0) return;
+
+    try {
+      const composite = document.createElement("canvas");
+      composite.width = width;
+      composite.height = height;
+      const context = composite.getContext("2d");
+      if (!context) return;
+
+      const scale = Math.max(
+        width / image.naturalWidth,
+        height / image.naturalHeight,
+      );
+      const sourceWidth = width / scale;
+      const sourceHeight = height / scale;
+      const sourceX = (image.naturalWidth - sourceWidth) / 2;
+      const sourceY = (image.naturalHeight - sourceHeight) / 2;
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        width,
+        height,
+      );
+
+      context.drawImage(
+        overlay,
+        0,
+        0,
+        overlay.width,
+        overlay.height,
+        (overlayRect.left - imageRect.left) * pixelRatio,
+        (overlayRect.top - imageRect.top) * pixelRatio,
+        overlayRect.width * pixelRatio,
+        overlayRect.height * pixelRatio,
+      );
+
+      const previewUrl = composite.toDataURL("image/png");
+      updateFrozenFrame(cameraId, previewUrl);
+      const userId = currentUserIdRef.current;
+      const generation =
+        (freezeGenerationByCameraRef.current.get(cameraId) ?? 0) + 1;
+      freezeGenerationByCameraRef.current.set(cameraId, generation);
+      composite.toBlob((blob) => {
+        if (!blob) {
+          console.warn("Failed to encode frozen camera frame as PNG");
+          return;
+        }
+        if (
+          freezeGenerationByCameraRef.current.get(cameraId) !== generation ||
+          frozenFramesRef.current[cameraId] !== previewUrl
+        ) {
+          return;
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        updateFrozenFrame(cameraId, objectUrl);
+        if (userId) {
+          void saveFrozenFrame({
+            userId,
+            cameraId,
+            blob,
+            capturedAt: Date.now(),
+          }).catch((error: unknown) => {
+            console.warn("Failed to persist frozen camera frame:", error);
+          });
+        }
+      }, "image/png");
+    } catch (error) {
+      console.error("Failed to capture the frozen camera frame:", error);
+    }
+  }, [updateFrozenFrame]);
+
   useEffect(() => {
     if (drawingMode === "direction") {
       setDrawingMode("restricted");
@@ -225,6 +371,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       if (selectedCameraRef.current === id) {
         setCameraStatus("Offline");
       }
+      cameraStatusesRef.current[id] = "Offline";
       setCameras((current) =>
         current.map((camera) =>
           camera.camera_id === id ? { ...camera, status: "Offline" } : camera,
@@ -236,6 +383,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, []);
 
   const startCameraAI = useCallback(async (id: string) => {
+    startAcceptedCameraIdsRef.current.delete(id);
+    cameraStatusesRef.current[id] = "Processing";
     setCameraStatus("Processing");
     setCameras((current) =>
       current.map((camera) =>
@@ -246,7 +395,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     );
     try {
       await cameraService.start(id);
+      startAcceptedCameraIdsRef.current.add(id);
+      if (selectedCameraRef.current === id) {
+        setIsPaused(false);
+      }
     } catch {
+      startAcceptedCameraIdsRef.current.delete(id);
       console.log("AI initializing...");
       try {
         const response = await cameraService.getAll();
@@ -254,6 +408,9 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         const statuses = new Map(
           updatedCameras.map((camera) => [camera.camera_id, camera.status]),
         );
+        updatedCameras.forEach((camera) => {
+          cameraStatusesRef.current[camera.camera_id] = camera.status;
+        });
         setCameras((current) =>
           current.map((camera) =>
             camera.camera_id === id
@@ -277,6 +434,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           setIsPaused(!running);
         }
       } catch {
+        cameraStatusesRef.current[id] = "Offline";
         setCameras((current) =>
           current.map((camera) =>
             camera.camera_id === id ? { ...camera, status: "Offline" } : camera,
@@ -294,6 +452,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     (id: string, status?: string) => {
       setSelectedCamera(id);
       selectedCameraRef.current = id;
+      cameraStatusesRef.current[id] = status;
       localStorage.setItem("ag_selected_camera", id);
       const running = isCameraRunning(status);
       setCameraStatus(running ? (status as "Running" | "Processing") : "Offline");
@@ -417,6 +576,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         }
         setCameraStatus("Running");
         if (message.data.camera_id) {
+          cameraStatusesRef.current[message.data.camera_id] = "Running";
           setCameras((current) =>
             current.map((camera) =>
               camera.camera_id === message.data.camera_id
@@ -425,7 +585,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             ),
           );
           if (message.data.camera_id === selectedCameraRef.current) {
-            setIsPaused(false);
+            if (
+              !frozenFramesRef.current[message.data.camera_id] ||
+              startAcceptedCameraIdsRef.current.has(message.data.camera_id)
+            ) {
+              setIsPaused(false);
+            }
           }
         }
       }
@@ -436,6 +601,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           (message.data.status as "Running" | "Offline" | "Processing") ||
           "Offline";
         if (cameraId) {
+          cameraStatusesRef.current[cameraId] = status;
           setCameras((current) =>
             current.map((camera) =>
               camera.camera_id === cameraId
@@ -445,8 +611,15 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           );
         }
         if (cameraId === selectedCameraRef.current) {
+          const startAccepted =
+            startAcceptedCameraIdsRef.current.has(cameraId);
+          if (status === "Offline" && !startAccepted) {
+            captureFrozenFrame(cameraId);
+          }
           setCameraStatus(status);
-          setIsPaused(!isCameraRunning(status));
+          if (!startAccepted) {
+            setIsPaused(!isCameraRunning(status));
+          }
         }
       }
 
@@ -486,10 +659,53 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
 
     const socket = createSocket(handleMessage);
 
+    let cancelled = false;
     const init = async () => {
       try {
         const res = await cameraService.getAll();
         const data = res.data as CameraData[];
+        const restoredFrames: Record<string, string> = {};
+        try {
+          const profileResponse = await userService.getProfile();
+          const userId = String(profileResponse.data?.user_id ?? "");
+          if (userId) {
+            currentUserIdRef.current = userId;
+            const records = await getFrozenFramesForUser(userId);
+            if (cancelled) return;
+            records.forEach((record) => {
+              const camera = data.find(
+                (item) => item.camera_id === record.cameraId,
+              );
+              const latestStatus =
+                cameraStatusesRef.current[record.cameraId] ?? camera?.status;
+              if (
+                camera &&
+                typeof latestStatus === "string" &&
+                !isCameraRunning(latestStatus) &&
+                record.blob instanceof Blob
+              ) {
+                restoredFrames[record.cameraId] = URL.createObjectURL(
+                  record.blob,
+                );
+              }
+            });
+          }
+        } catch (error) {
+          console.warn("Failed to restore stored frozen camera frames:", error);
+        }
+        if (cancelled) {
+          Object.values(restoredFrames).forEach((url) =>
+            URL.revokeObjectURL(url),
+          );
+          return;
+        }
+        data.forEach((camera) => {
+          if (!(camera.camera_id in cameraStatusesRef.current)) {
+            cameraStatusesRef.current[camera.camera_id] = camera.status;
+          }
+        });
+        frozenFramesRef.current = restoredFrames;
+        setFrozenFrames(restoredFrames);
         setCameras(data);
         if (data.length > 0) {
           const storedCameraId = localStorage.getItem("ag_selected_camera");
@@ -497,21 +713,43 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             data.find((camera) => camera.camera_id === storedCameraId) ??
             data.find((camera) => isCameraRunning(camera.status)) ??
             data[0];
+          const selectedStatus =
+            cameraStatusesRef.current[selectedCamera.camera_id] ??
+            selectedCamera.status;
           handleCameraSelection(
             selectedCamera.camera_id,
-            selectedCamera.status,
+            selectedStatus,
           );
         }
       } catch {
-        console.error("Link failed");
+        if (!cancelled) console.error("Link failed");
       }
     };
 
     init();
     return () => {
+      cancelled = true;
       socket.close();
     };
-  }, [handleCameraSelection]);
+  }, [captureFrozenFrame, handleCameraSelection]);
+
+  useEffect(
+    () => {
+      if (frozenUrlCleanupTimerRef.current !== null) {
+        window.clearTimeout(frozenUrlCleanupTimerRef.current);
+        frozenUrlCleanupTimerRef.current = null;
+      }
+      return () => {
+        frozenUrlCleanupTimerRef.current = window.setTimeout(() => {
+          Object.values(frozenFramesRef.current).forEach((url) => {
+            if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+          });
+          frozenUrlCleanupTimerRef.current = null;
+        }, 0);
+      };
+    },
+    [],
+  );
 
   // --- Control Functions ---
   const toggleFullscreen = () => {
@@ -1660,16 +1898,33 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                   onLoad={() => {
                     updateOverlayCanvas();
                     drawOverlay();
+                    if (
+                      selectedCamera &&
+                      selectedCameraRef.current === selectedCamera &&
+                      startAcceptedCameraIdsRef.current.has(selectedCamera)
+                    ) {
+                      startAcceptedCameraIdsRef.current.delete(selectedCamera);
+                      if (frozenFramesRef.current[selectedCamera]) {
+                        clearFrozenFrame(selectedCamera);
+                      }
+                    }
                   }}
                   className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
                 />
+                {frozenFrames[selectedCamera] ? (
+                  <img
+                    src={frozenFrames[selectedCamera]}
+                    alt="Frozen camera frame"
+                    className="absolute inset-0 z-20 h-full w-full object-cover"
+                  />
+                ) : null}
                 <canvas
                   ref={overlayCanvasRef}
                   onClick={onCanvasClick}
                   onDoubleClick={onCanvasDoubleClick}
                   onContextMenu={onCanvasContextMenu}
                   onMouseMove={onCanvasMouseMove}
-                  className={`absolute left-0 top-0 z-30 ${isDrawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
+                  className={`absolute left-0 top-0 z-30 ${frozenFrames[selectedCamera] ? "pointer-events-none opacity-0" : isDrawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
                 />
               </>
             ) : (
@@ -1694,6 +1949,10 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       await startCameraAI(selectedCamera);
                     }
                   } else {
+                    if (selectedCamera) {
+                      captureFrozenFrame(selectedCamera);
+                      startAcceptedCameraIdsRef.current.delete(selectedCamera);
+                    }
                     setIsPaused(true);
                     if (selectedCamera) {
                       await stopCameraSession(selectedCamera);
