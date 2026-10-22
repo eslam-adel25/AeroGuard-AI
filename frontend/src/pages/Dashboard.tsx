@@ -2035,7 +2035,10 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                     className={`w-2 h-2 rounded-full ${selectedCamera === cam.camera_id ? "bg-white" : "bg-gray-700"}`}
                   ></div>
                   {cam.camera_name.toUpperCase()}
-                  {alarmStateByCamera[cam.camera_id]?.active ? (
+                  {alarmStateByCamera[cam.camera_id]?.active ||
+                  Object.values(
+                    tripwireAlarmStates[cam.camera_id] ?? {},
+                  ).some((alarm) => !alarm.silenced) ? (
                     <span
                       aria-label="Active alarm"
                       title="Active alarm"
