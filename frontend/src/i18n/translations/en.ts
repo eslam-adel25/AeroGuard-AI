@@ -1311,7 +1311,7 @@ const en = {
     timeZone: "Time Zone",
     aiCore: "AI Core",
     objectConfidenceThreshold: "Object Confidence Threshold",
-    faceRecognition: "Face Recognition",
+    faceRecognition: "Person Recognition",
     motionTracking: "Motion Tracking",
     notificationEngine: "Notification Engine",
     dashboardAudioSiren: "Dashboard Audio Siren",

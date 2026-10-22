@@ -1262,7 +1262,7 @@ const ar = {
     timeZone: "المنطقة الزمنية",
     aiCore: "اللب الذكي",
     objectConfidenceThreshold: "عتبة ثقة الكائن",
-    faceRecognition: "التعرف على الوجوه",
+    faceRecognition: "التعرّف على الأشخاص",
     motionTracking: "تتبع الحركة",
     notificationEngine: "محرك الإشعارات",
     dashboardAudioSiren: "إنذار صوتي للوحة التحكم",

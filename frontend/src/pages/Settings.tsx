@@ -419,6 +419,15 @@ const Settings = () => {
           </section>
 
           {/* AI Vision Modules */}
+          {/*
+            Standalone DIRECTION is excluded from the active UI workflow, so the
+            Wrong Direction settings row is intentionally hidden. Its setting
+            key and backend implementation remain preserved for compatibility;
+            this does not disable saved Direction rules or their alerts. Do not
+            remove the underlying setting or backend processing without a
+            separate impact assessment and approval. TRIPWIRE entry-direction
+            configuration is separate and remains unchanged.
+          */}
           <section className="bg-[#11131a] border border-[#1e212b] rounded-xl p-6">
             <div className="flex items-center gap-2 mb-6">
               <Eye className="text-orange-500" size={18} />
@@ -453,11 +462,6 @@ const Settings = () => {
                   label: t("settings.modules.abandonedBag"),
                   sub: t("settings.modules.abandonedBagDescription"),
                   key: "abandoned_bag_enabled",
-                },
-                {
-                  label: t("settings.modules.wrongDirection"),
-                  sub: t("settings.modules.wrongDirectionDescription"),
-                  key: "wrong_direction_enabled",
                 },
                 {
                   label: t("settings.modules.restrictedArea"),
