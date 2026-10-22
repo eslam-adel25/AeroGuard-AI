@@ -1946,16 +1946,23 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                                         zone.zone_id
                                       ].silenced
                                     }
-                                    className="inline-flex items-center gap-1 rounded-lg border border-red-300/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-200 transition hover:bg-red-500/20 disabled:cursor-default disabled:opacity-70"
-                                  >
-                                    <VolumeX size={12} />
-                                    {t(
+                                    aria-label={t(
                                       tripwireAlarmStates[selectedCamera][
                                         zone.zone_id
                                       ].silenced
                                         ? "dashboard.tripwire.alarmSilenced"
                                         : "dashboard.tripwire.silenceAlarm",
                                     )}
+                                    title={t(
+                                      tripwireAlarmStates[selectedCamera][
+                                        zone.zone_id
+                                      ].silenced
+                                        ? "dashboard.tripwire.alarmSilenced"
+                                        : "dashboard.tripwire.silenceAlarm",
+                                    )}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-red-300/30 bg-red-500/10 px-2 py-1 text-[10px] text-red-200 transition hover:bg-red-500/20 disabled:cursor-default disabled:opacity-70"
+                                  >
+                                    <VolumeX size={12} />
                                   </button>
                                 ) : null}
                               </div>
