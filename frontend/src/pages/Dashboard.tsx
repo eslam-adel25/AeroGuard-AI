@@ -99,6 +99,8 @@ const toZoneCreatePayload = (zone: ZoneData) => ({
 });
 
 const zoneTypeForDrawingMode = (mode: DrawingMode) =>
+  // Direction remains supported for legacy saved zones; it is intentionally
+  // excluded from the active selector. TRIPWIRE entry direction is separate.
   mode === "restricted"
     ? "Restricted Area"
     : mode === "direction"
@@ -110,6 +112,8 @@ const emptyDrawingPoints = (): DrawingPointsByType => ({
   direction: [],
   tripwire: [],
 });
+
+const visibleDrawingModes: DrawingMode[] = ["restricted", "tripwire"];
 
 const alertBadgeLabel = (alert: AlertData, t: (key: string) => string) => {
   const typeLabel = alert.type?.trim();
@@ -204,6 +208,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const filteredSavedZones = editingZones.filter(
     (zone) => zone.zone_type === zoneTypeForDrawingMode(drawingMode),
   );
+
+  useEffect(() => {
+    if (drawingMode === "direction") {
+      setDrawingMode("restricted");
+    }
+  }, [drawingMode]);
 
   // --- AI Operations ---
   const stopCameraSession = useCallback(async (id: string | null) => {
@@ -1767,10 +1777,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       </button>
                     </div>
 
-                    {/* Mode Selector */}
+                    {/* Standalone DIRECTION is legacy UI intentionally hidden.
+                        Its implementation remains for compatibility with saved
+                        zones and must not be removed or repurposed without an
+                        impact review. TRIPWIRE direction is separate. */}
                     <div className="flex flex-wrap gap-2">
-                      {(["restricted", "direction", "tripwire"] as const).map(
-                        (mode) => (
+                      {visibleDrawingModes.map((mode) => (
                           <button
                             key={mode}
                             onClick={() => {
@@ -1797,8 +1809,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                           >
                             {mode.toUpperCase()}
                           </button>
-                        ),
-                      )}
+                      ))}
                     </div>
 
                     {/* Instructions */}

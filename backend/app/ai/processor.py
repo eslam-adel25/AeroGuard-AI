@@ -1713,7 +1713,10 @@ class AIProcessor:
                                     continue
                                 ztype = (zone.zone_type or "").lower()
 
-                                # Direction rule (line): detect crossing and check allowed direction
+                                # Legacy compatibility path: persisted Direction zones
+                                # remain active and can generate WRONG DIRECTION alerts.
+                                # Hiding the frontend option does not disable this runtime
+                                # behavior; review records, alerts, reports, and users before changing it.
                                 if "direction" in ztype:
                                     prev_point = camera_history.get(obj_id)
                                     line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
