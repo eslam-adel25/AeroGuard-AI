@@ -30,6 +30,7 @@ from .ownership_config import (
 
 logger = logging.getLogger(__name__)
 FIRE_SMOKE_MODEL_DEFAULT_PATH = "models/fire-smoke-yolov8n.pt"
+TRIPWIRE_CROSSING_HYSTERESIS_PX = 3.0
 GENERAL_DETECTION_LABELS = {
     "person",
     "bag",
@@ -179,6 +180,8 @@ def _segments_intersect(a, b, c, d):
 def _tripwire_crossing(a, b, previous, current, entry_direction):
     if a == b or previous == current:
         return None
+    if entry_direction not in {"left", "right"}:
+        return None
     previous_side = _point_side(a, b, previous)
     current_side = _point_side(a, b, current)
     if previous_side * current_side >= 0:
@@ -186,17 +189,72 @@ def _tripwire_crossing(a, b, previous, current, entry_direction):
     if not _segments_intersect(previous, current, a, b):
         return None
 
-    ordered_start, ordered_end = a, b
-    if (ordered_start[0], ordered_start[1]) > (ordered_end[0], ordered_end[1]):
-        ordered_start, ordered_end = ordered_end, ordered_start
-    movement = (current[0] - previous[0], current[1] - previous[1])
-    line_vector = (
-        ordered_end[0] - ordered_start[0],
-        ordered_end[1] - ordered_start[1],
-    )
-    dot = movement[0] * line_vector[0] + movement[1] * line_vector[1]
-    enters = dot > 0 if entry_direction == "right" else dot < 0
+    horizontal_movement = current[0] - previous[0]
+    if horizontal_movement == 0:
+        return None
+    enters = horizontal_movement > 0 if entry_direction == "right" else horizontal_movement < 0
     return "entry" if enters else "exit"
+
+
+def _tripwire_crossing_with_hysteresis(
+    a,
+    b,
+    current,
+    entry_direction,
+    track_state,
+):
+    line_length = math.hypot(b[0] - a[0], b[1] - a[1])
+    if line_length == 0:
+        return None
+
+    distance_from_line = _point_side(a, b, current) / line_length
+    if distance_from_line > TRIPWIRE_CROSSING_HYSTERESIS_PX:
+        current_side = 1
+    elif distance_from_line < -TRIPWIRE_CROSSING_HYSTERESIS_PX:
+        current_side = -1
+    else:
+        return None
+
+    stable_point = track_state.get("stable_point")
+    stable_side = track_state.get("stable_side")
+    if stable_point is None or stable_side is None:
+        track_state["stable_point"] = current
+        track_state["stable_side"] = current_side
+        return None
+
+    if current_side == stable_side:
+        track_state["stable_point"] = current
+        return None
+
+    crossing = _tripwire_crossing(
+        a,
+        b,
+        stable_point,
+        current,
+        entry_direction,
+    )
+    track_state["stable_point"] = current
+    track_state["stable_side"] = current_side
+    return crossing
+
+
+def _update_tripwire_occupancy(occupancy, crossing):
+    if crossing == "entry":
+        return occupancy + 1
+    return max(0, occupancy - 1)
+
+
+def _tripwire_became_over_limit(
+    crossing,
+    previous_occupancy,
+    current_occupancy,
+    allowed_group_size,
+):
+    return (
+        crossing == "entry"
+        and previous_occupancy <= allowed_group_size
+        and current_occupancy > allowed_group_size
+    )
 
 
 class AIProcessor:
@@ -1618,6 +1676,24 @@ class AIProcessor:
                     print(f"⚠️ [{camera_id}] failed to reload restricted zones: {type(zone_reload_exc).__name__}: {zone_reload_exc}")
                     local_db.rollback()
 
+                active_person_track_ids = {
+                    self._get_track_id(track)
+                    for track in active_tracks
+                    if track.class_name == "person"
+                }
+                for zone in zones:
+                    if "tripwire" not in (zone.zone_type or "").lower():
+                        continue
+                    runtime_key = f"{camera_id_str}:{zone.zone_id}"
+                    runtime_state = self.tripwire_runtime.get(runtime_key, {})
+                    crossing_track_states = runtime_state.get(
+                        "crossing_track_states",
+                        {},
+                    )
+                    for track_id in list(crossing_track_states):
+                        if track_id not in active_person_track_ids:
+                            crossing_track_states.pop(track_id, None)
+
                 restricted_area_enabled = bool(
                     getattr(camera_settings, "restricted_area_enabled", False)
                 )
@@ -1780,61 +1856,68 @@ class AIProcessor:
                                             "over_limit": False,
                                         },
                                     )
-                                    prev_point = camera_history.get(obj_id)
                                     line_coords = _line_coords_in_frame(coords, annotated_frame.shape)
                                     a = tuple(line_coords[0])
                                     b = tuple(line_coords[-1])
                                     cv2.line(annotated_frame, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), (255, 255, 255), 1)
+                                    crossing_track_state = None
+                                    if label_name == "person":
+                                        crossing_track_states = tripwire_state.setdefault(
+                                            "crossing_track_states",
+                                            {},
+                                        )
+                                        crossing_track_state = crossing_track_states.setdefault(
+                                            obj_id,
+                                            {},
+                                        )
                                     if (
-                                        prev_point is not None
+                                        crossing_track_state is not None
                                         and not tripwire_state["requires_confirmation"]
                                         and tripwire_state["entry_direction"] in {"left", "right"}
                                     ):
-                                        crossing = _tripwire_crossing(
+                                        crossing = _tripwire_crossing_with_hysteresis(
                                             a,
                                             b,
-                                            prev_point,
                                             base_point,
                                             tripwire_state["entry_direction"],
+                                            crossing_track_state,
                                         )
                                         if crossing is not None:
                                             previous_occupancy = tripwire_state["occupancy"]
-                                            if crossing == "entry":
-                                                tripwire_state["occupancy"] += 1
-                                            else:
-                                                tripwire_state["occupancy"] = max(
-                                                    0, tripwire_state["occupancy"] - 1
-                                                )
+                                            tripwire_state["occupancy"] = _update_tripwire_occupancy(
+                                                previous_occupancy,
+                                                crossing,
+                                            )
                                             current_occupancy = tripwire_state["occupancy"]
                                             allowed_group_size = tripwire_state["allowed_group_size"]
                                             over_limit_count = max(
                                                 0,
                                                 current_occupancy - allowed_group_size,
                                             )
-                                            became_over_limit = (
-                                                crossing == "entry"
-                                                and previous_occupancy <= allowed_group_size
-                                                and current_occupancy > allowed_group_size
+                                            became_over_limit = _tripwire_became_over_limit(
+                                                crossing,
+                                                previous_occupancy,
+                                                current_occupancy,
+                                                allowed_group_size,
                                             )
                                             tripwire_state["over_limit"] = current_occupancy > allowed_group_size
                                             zone.tripwire_current_occupancy = current_occupancy
                                             local_db.commit()
-                                            await manager.broadcast(
-                                                {
-                                                    "event": "tripwire_state",
-                                                    "data": {
-                                                        "camera_id": str(camera_id),
-                                                        "zone_id": tripwire_id,
-                                                        "current_occupancy": current_occupancy,
-                                                        "remaining_group_count": max(
-                                                            0,
-                                                            allowed_group_size - current_occupancy,
-                                                        ),
-                                                        "over_limit_count": over_limit_count,
-                                                        "occupancy_confirmation_required": False,
-                                                    },
-                                                }
-                                            )
+                                            tripwire_message = {
+                                                "event": "tripwire_state",
+                                                "data": {
+                                                    "camera_id": str(camera_id),
+                                                    "zone_id": tripwire_id,
+                                                    "current_occupancy": current_occupancy,
+                                                    "remaining_group_count": max(
+                                                        0,
+                                                        allowed_group_size - current_occupancy,
+                                                    ),
+                                                    "over_limit_count": over_limit_count,
+                                                    "occupancy_confirmation_required": False,
+                                                },
+                                            }
+                                            await manager.broadcast(tripwire_message)
                                             if became_over_limit:
                                                 self._register_critical_alert(camera_id)
                                                 await self._register_immediate_tripwire_alert(

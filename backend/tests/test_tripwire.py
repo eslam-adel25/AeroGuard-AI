@@ -6,18 +6,42 @@ import numpy as np
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
-from app.ai.processor import _tripwire_crossing
+from app.ai.processor import (
+    _tripwire_became_over_limit,
+    _tripwire_crossing,
+    _tripwire_crossing_with_hysteresis,
+    _update_tripwire_occupancy,
+)
 from app.database.session import Base
 from app.models.models import Camera, RestrictedZone
 from app.api.v1 import cameras as cameras_api
 from app.schemas.schemas import TripwireOccupancyConfirmation
 
 
+def test_tripwire_direction_uses_horizontal_movement_for_supported_line_geometries():
+    cases = [
+        ((50, 0), (50, 100), (40, 50), (60, 50)),
+        ((0, 50), (100, 50), (40, 40), (60, 60)),
+        ((20, 20), (80, 80), (40, 60), (60, 40)),
+        ((50, 0), (50, 100), (40, 40), (60, 60)),
+    ]
+
+    for a, b, previous, current in cases:
+        assert _tripwire_crossing(a, b, previous, current, "right") == "entry"
+        assert _tripwire_crossing(a, b, current, previous, "right") == "exit"
+        assert _tripwire_crossing(a, b, current, previous, "left") == "entry"
+        assert _tripwire_crossing(a, b, previous, current, "left") == "exit"
+
+
 def test_tripwire_direction_is_stable_when_endpoints_are_reversed():
-    assert _tripwire_crossing((0, 50), (100, 50), (40, 40), (60, 60), "right") == "entry"
-    assert _tripwire_crossing((100, 50), (0, 50), (40, 40), (60, 60), "right") == "entry"
-    assert _tripwire_crossing((0, 50), (100, 50), (60, 60), (40, 40), "right") == "exit"
-    assert _tripwire_crossing((0, 50), (100, 50), (40, 40), (60, 60), "left") == "exit"
+    previous = (40, 40)
+    current = (60, 60)
+    assert _tripwire_crossing((0, 50), (100, 50), previous, current, "right") == "entry"
+    assert _tripwire_crossing((100, 50), (0, 50), previous, current, "right") == "entry"
+    assert _tripwire_crossing((0, 50), (100, 50), current, previous, "right") == "exit"
+    assert _tripwire_crossing((100, 50), (0, 50), current, previous, "right") == "exit"
+    assert _tripwire_crossing((0, 50), (100, 50), previous, current, "left") == "exit"
+    assert _tripwire_crossing((100, 50), (0, 50), previous, current, "left") == "exit"
 
 
 def test_tripwire_rejects_crossing_the_infinite_extension():
@@ -26,15 +50,80 @@ def test_tripwire_rejects_crossing_the_infinite_extension():
 
 def test_tripwire_supports_vertical_and_diagonal_segments():
     assert _tripwire_crossing((50, 0), (50, 100), (40, 40), (60, 60), "right") == "entry"
-    assert _tripwire_crossing((0, 0), (100, 100), (20, 40), (40, 20), "right") == "exit"
+    assert _tripwire_crossing((0, 0), (100, 100), (20, 40), (40, 20), "right") == "entry"
+
+
+def test_tripwire_rejects_parallel_motion_and_points_that_do_not_change_sides():
+    assert _tripwire_crossing((50, 0), (50, 100), (40, 30), (40, 70), "right") is None
+    assert _tripwire_crossing((20, 20), (80, 80), (20, 40), (30, 50), "right") is None
+    assert _tripwire_crossing((0, 50), (100, 50), (20, 40), (40, 40), "right") is None
+
+
+def test_tripwire_rejects_vertical_movement_without_left_or_right_direction():
+    assert _tripwire_crossing((0, 50), (100, 50), (50, 40), (50, 60), "right") is None
+
+
+def test_tripwire_does_not_count_repeated_positions_or_same_side_jitter():
+    line = ((50, 0), (50, 100))
+    assert _tripwire_crossing(*line, (40, 50), (40, 50), "right") is None
+    assert _tripwire_crossing(*line, (40, 50), (41, 51), "right") is None
+
+
+def test_tripwire_hysteresis_suppresses_boundary_jitter_and_allows_a_later_exit():
+    line = ((50, 0), (50, 100))
+    track_state = {}
+
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (40, 50),
+        "right",
+        track_state,
+    ) is None
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (52, 50),
+        "right",
+        track_state,
+    ) is None
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (48, 50),
+        "right",
+        track_state,
+    ) is None
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (54, 50),
+        "right",
+        track_state,
+    ) == "entry"
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (52, 50),
+        "right",
+        track_state,
+    ) is None
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (48, 50),
+        "right",
+        track_state,
+    ) is None
+    assert _tripwire_crossing_with_hysteresis(
+        *line,
+        (46, 50),
+        "right",
+        track_state,
+    ) == "exit"
 
 
 def test_tripwire_counter_calculations():
-    allowed = 4
-    occupancy = 6
-    assert max(0, allowed - occupancy) == 0
-    assert occupancy == 6
-    assert max(0, occupancy - allowed) == 2
+    assert _update_tripwire_occupancy(4, "entry") == 5
+    assert _update_tripwire_occupancy(4, "exit") == 3
+    assert _update_tripwire_occupancy(0, "exit") == 0
+    assert _tripwire_became_over_limit("entry", 4, 5, 4)
+    assert not _tripwire_became_over_limit("entry", 3, 4, 4)
+    assert not _tripwire_became_over_limit("exit", 5, 4, 4)
 
 
 def test_tripwire_immediate_alert_contains_wire_and_occupancy_metadata(monkeypatch):

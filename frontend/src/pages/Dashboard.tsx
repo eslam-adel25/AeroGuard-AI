@@ -466,7 +466,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       }
 
       if (message.event === "tripwire_state") {
-        if (message.data.camera_id !== selectedCameraRef.current) return;
+        const selectedCameraId = selectedCameraRef.current;
+        if (message.data.camera_id !== selectedCameraId) return;
         setTripwireStates((current) => ({
           ...current,
           [message.data.zone_id]: {
