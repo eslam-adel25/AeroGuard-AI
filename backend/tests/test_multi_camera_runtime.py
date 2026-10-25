@@ -36,6 +36,7 @@ def _processor_state():
     processor.bag_owner_person_state = {}
     processor.bag_owner_evidence = {}
     processor.bag_owner_status = {}
+    processor.abandoned_bag_runtime = {}
     processor.active_critical_alerts = {}
     processor.crowd_cooldown = {}
     processor._active_alarm_state = {}
@@ -52,6 +53,18 @@ def test_camera_runtime_state_is_distinct_and_cleaned_independently():
 
     processor._initialize_camera_runtime_state("camera-a")
     processor._initialize_camera_runtime_state("camera-b")
+    processor.abandoned_bag_runtime["camera-a"][1] = {
+        "started_at": 0,
+        "confirmed": False,
+        "alert_key": "camera-a_1_ABANDONED",
+        "last_capture_at": None,
+    }
+    processor.abandoned_bag_runtime["camera-b"][1] = {
+        "started_at": 0,
+        "confirmed": False,
+        "alert_key": "camera-b_1_ABANDONED",
+        "last_capture_at": None,
+    }
     detection = {
         "bbox": [0, 0, 20, 20],
         "class_name": "person",
@@ -70,8 +83,10 @@ def test_camera_runtime_state_is_distinct_and_cleaned_independently():
 
     assert "camera-b" not in processor.trackers
     assert "camera-b" not in processor.object_history
+    assert "camera-b" not in processor.abandoned_bag_runtime
     assert "camera-a" in processor.trackers
     assert processor.object_history["camera-a"] == {track_a.track_id: (10, 20)}
+    assert 1 in processor.abandoned_bag_runtime["camera-a"]
 
 
 def test_camera_start_reservation_and_stop_are_scoped_per_camera():

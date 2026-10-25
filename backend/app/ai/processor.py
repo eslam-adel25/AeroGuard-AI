@@ -300,6 +300,7 @@ class AIProcessor:
         self.bag_owner_person_state = {}  # camera_id -> {bag_internal_id: persistent_person_id}
         self.bag_owner_evidence = {}  # camera_id -> {bag_internal_id: {candidate_owner, confirm_streak, missing_streak, confirmed_owner}}
         self.bag_owner_status = {}  # camera_id -> {bag_internal_id: "owned" | "lost" | "unknown"}
+        self.abandoned_bag_runtime = {}  # camera_id -> {bag_internal_id: {started_at, confirmed, alert_key, last_capture_at}}
         self.active_critical_alerts = {}  # camera_id -> [alert_timestamps]
         self._detection_persist_cooldown = {}  # key -> last persisted timestamp
         self._stop_flags = {}
@@ -442,7 +443,7 @@ class AIProcessor:
                 },
             }, audience_user_id=str(audience_user_id) if audience_user_id else None)
         except Exception:
-            pass
+            logger.exception("Failed to broadcast alarm state for camera %s", camera_id)
 
     async def _broadcast_tripwire_alarm_state(
         self,
@@ -502,27 +503,50 @@ class AIProcessor:
         annotated_frame,
         active_alert_keys,
         capture_screenshot=False,
+        capture_immediately=False,
     ):
         active_alert_keys.add(alert_key)
         now = time.monotonic()
         state = self.alert_persistence.get(alert_key)
 
         if state is None:
-            if time.time() - self.last_alert_time.get(alert_key, 0) <= 5:
+            if time.time() - self.last_alert_time.get(alert_key, 0) <= 5 and not capture_screenshot:
                 return
             state = {
                 "started_at": now,
                 "finalized": False,
+                "event_id": None,
+                "last_screenshot_at": None,
+                "active": True,
             }
             self.alert_persistence[alert_key] = state
 
-        if (
-            not capture_screenshot
-            or state["finalized"]
-            or now - state["started_at"] < 5
-        ):
+        if not capture_screenshot:
+            state["active"] = bool(alert_key in active_alert_keys)
             return
 
+        if alert_key not in active_alert_keys and state.get("event_id") is not None:
+            state["active"] = False
+            return
+
+        if state.get("event_id") is not None:
+            last_screenshot_at = state.get("last_screenshot_at")
+            if alert_key not in active_alert_keys:
+                state["active"] = False
+                return
+            if last_screenshot_at is not None and (now - last_screenshot_at) < 5:
+                state["active"] = True
+                return
+        elif state.get("finalized"):
+            return
+        elif (
+            not capture_immediately
+            and (now - state.get("started_at", now)) < 5
+        ):
+            state["active"] = True
+            return
+
+        state["active"] = True
         screenshot_bytes = None
         try:
             encoded, jpg = cv2.imencode(".jpg", annotated_frame)
@@ -536,19 +560,34 @@ class AIProcessor:
                 f"{type(exc).__name__}: {exc}"
             )
 
-        event = ai_service.register_event(
-            camera_id=camera_id,
-            detection_type=detection_type,
-            severity=severity,
-            confidence=confidence,
-            track_id=track_id,
-            user_id=owner_id,
-            metadata=metadata,
-            screenshot_bytes=screenshot_bytes,
-        )
-        state["event_id"] = str(event.event_id)
-        state["finalized"] = True
-        state["screenshot_persisted"] = bool(event.screenshot_path)
+        if not screenshot_bytes:
+            state["finalized"] = bool(state.get("event_id") is not None)
+            return
+
+        if state.get("event_id") is None:
+            event = ai_service.register_event(
+                camera_id=camera_id,
+                detection_type=detection_type,
+                severity=severity,
+                confidence=confidence,
+                track_id=track_id,
+                user_id=owner_id,
+                metadata=metadata,
+                screenshot_bytes=screenshot_bytes,
+            )
+            state["event_id"] = str(event.event_id)
+            state["finalized"] = True
+            state["screenshot_persisted"] = bool(event.screenshot_path)
+            state["last_screenshot_at"] = now
+        else:
+            attach_screenshot = getattr(ai_service, "attach_screenshot", None)
+            if callable(attach_screenshot):
+                await attach_screenshot(
+                    str(state["event_id"]),
+                    screenshot_bytes,
+                )
+            state["last_screenshot_at"] = now
+            state["finalized"] = True
         self.last_alert_time[alert_key] = time.time()
 
     async def _register_immediate_tripwire_alert(
@@ -661,9 +700,14 @@ class AIProcessor:
         return SimpleNamespace(
             **{
                 field_name: (
-                    False
-                    if field_name in _FIRST_TERM_DISABLED_PROCESSING_SETTINGS
-                    else getattr(settings_model, field_name, None)
+                    60
+                    if field_name == "abandoned_bag_seconds"
+                    else (
+                        False
+                        if field_name
+                        in _FIRST_TERM_DISABLED_PROCESSING_SETTINGS
+                        else getattr(settings_model, field_name, None)
+                    )
                 )
                 for field_name in field_names
             }
@@ -963,6 +1007,7 @@ class AIProcessor:
         self.bag_owner_person_state[camera_key] = {}
         self.bag_owner_evidence[camera_key] = {}
         self.bag_owner_status[camera_key] = {}
+        self.abandoned_bag_runtime[camera_key] = {}
         self.active_critical_alerts[camera_key] = []
         self._active_alarm_state[camera_key] = False
         self._active_alarm_sources[camera_key] = []
@@ -985,6 +1030,7 @@ class AIProcessor:
             self.bag_owner_person_state,
             self.bag_owner_evidence,
             self.bag_owner_status,
+            self.abandoned_bag_runtime,
             self.active_critical_alerts,
             self.crowd_cooldown,
             self._active_alarm_state,
@@ -1000,6 +1046,107 @@ class AIProcessor:
             key for key in self._deleted_tripwire_zones if key[0] != camera_key
         }
         self._reset_inactive_alert_persistence(camera_key, set())
+
+    def _reset_abandoned_bag_runtime(self, camera_id, bag_id):
+        camera_key = str(camera_id)
+        bag_key = str(bag_id)
+        if getattr(self, "abandoned_bag_runtime", None) is None:
+            self.abandoned_bag_runtime = {}
+        runtime = self.abandoned_bag_runtime.setdefault(camera_key, {})
+        runtime.pop(bag_key, None)
+        if not runtime:
+            self.abandoned_bag_runtime.pop(camera_key, None)
+
+    def _update_abandoned_bag_runtime(
+        self,
+        camera_id,
+        bag_id,
+        unattended_started_at,
+        now_ts,
+        timer_origin="owner_left",
+    ):
+        camera_key = str(camera_id)
+        bag_key = str(bag_id)
+        if getattr(self, "abandoned_bag_runtime", None) is None:
+            self.abandoned_bag_runtime = {}
+        runtime = self.abandoned_bag_runtime.setdefault(camera_key, {})
+        state = runtime.get(bag_key)
+
+        if timer_origin not in {"owner_left", "ownerless"}:
+            self._reset_abandoned_bag_runtime(camera_key, bag_key)
+            return {
+                "confirmed": False,
+                "newly_confirmed": False,
+                "capture": False,
+                "alert_key": None,
+            }
+        if timer_origin == "owner_left" and unattended_started_at is None:
+            self._reset_abandoned_bag_runtime(camera_key, bag_key)
+            return {
+                "confirmed": False,
+                "newly_confirmed": False,
+                "capture": False,
+                "alert_key": None,
+            }
+
+        started_at = (
+            unattended_started_at
+            if timer_origin == "owner_left"
+            else None
+        )
+        if (
+            state is None
+            or state.get("timer_origin") != timer_origin
+            or (
+                timer_origin == "owner_left"
+                and state["started_at"] != started_at
+            )
+        ):
+            state = {
+                "started_at": now_ts if started_at is None else started_at,
+                "timer_origin": timer_origin,
+                "confirmed": False,
+                "alert_key": f"{camera_key}_{bag_key}_ABANDONED",
+                "last_capture_at": None,
+            }
+            runtime[bag_key] = state
+
+        newly_confirmed = (
+            not state["confirmed"]
+            and now_ts - state["started_at"] >= UNATTENDED_TIMEOUT_SECONDS
+        )
+        if newly_confirmed:
+            state["confirmed"] = True
+        if state["confirmed"] and (
+            newly_confirmed
+            or state["last_capture_at"] is None
+            or now_ts - state["last_capture_at"] >= 5
+        ):
+            state["last_capture_at"] = now_ts
+            return {
+                "confirmed": True,
+                "newly_confirmed": newly_confirmed,
+                "capture": True,
+                "alert_key": state["alert_key"],
+                "started_at": state["started_at"],
+            }
+
+        return {
+            "confirmed": bool(state["confirmed"]),
+            "newly_confirmed": False,
+            "capture": False,
+            "alert_key": state["alert_key"],
+            "started_at": state["started_at"],
+        }
+
+    @staticmethod
+    def _get_abandoned_bag_visual_state(object_label):
+        return {
+            "display_label": "ABANDONED_BAG",
+            "status": "DANGER",
+            "box_color": (0, 0, 255),
+            "overlay_label": f"{object_label}\nABANDONED",
+        }
 
     def get_latest_frame(self, camera_id):
         return self.last_frames.get(str(camera_id))
@@ -1177,6 +1324,7 @@ class AIProcessor:
                 else:
                     evidence["state"] = "unknown"
                     evidence["state_started_at"] = None
+                    evidence["candidate_owner"] = None
                     owner_map[bag_id] = None
                     bag_owner_status[bag_id] = "unknown"
             else:
@@ -1229,6 +1377,16 @@ class AIProcessor:
         for stale_bag_id in list(bag_owner_status.keys()):
             if stale_bag_id not in visible_bag_ids:
                 del bag_owner_status[stale_bag_id]
+        abandoned_runtime = getattr(self, "abandoned_bag_runtime", {}).get(
+            camera_key,
+            {},
+        )
+        visible_bag_keys = {str(bag_id) for bag_id in visible_bag_ids}
+        for stale_bag_id in list(abandoned_runtime):
+            if str(stale_bag_id) not in visible_bag_keys:
+                abandoned_runtime.pop(stale_bag_id, None)
+        if not abandoned_runtime:
+            getattr(self, "abandoned_bag_runtime", {}).pop(camera_key, None)
 
         if getattr(self, "bag_owner_state", None) is None:
             self.bag_owner_state = {}
@@ -1819,14 +1977,14 @@ class AIProcessor:
                             status = "NORMAL"
                             ownership_state[obj_id] = "temporary_unattended"
                         elif bag_state == "unattended":
-                            box_color = (0, 0, 255)
+                            box_color = self._get_detection_box_color(label_name)
                             object_label = (
                                 f"Owned ID {int(owner_person_id):03d} Bag\nUNATTENDED"
                                 if owner_person_id is not None
                                 else "UNATTENDED"
                             )
                             display_label = "UNATTENDED"
-                            status = "DANGER"
+                            status = "NORMAL"
                             ownership_state[obj_id] = "unattended"
                         else:
                             box_color = self._get_detection_box_color(label_name)
@@ -1840,6 +1998,8 @@ class AIProcessor:
                     camera_history = self.object_history.setdefault(str(camera_id), {})
                     overlay_label = object_label
                     alert_key = None
+                    abandoned_capture_screenshot = False
+                    abandoned_capture_immediately = False
                     tripwire_alert_handled = False
                     in_restricted = False
                     should_skip_rule_engine = (
@@ -2134,7 +2294,6 @@ class AIProcessor:
                         cam_bags = self.bag_tracker.setdefault(str(camera_id), {})
                         now_ts = time.time()
                         bag_rec = cam_bags.get(obj_id)
-                        # find nearest person
                         nearest_person_dist = None
                         for p in active_tracks:
                             if p.class_name == "person":
@@ -2146,36 +2305,78 @@ class AIProcessor:
                                 if nearest_person_dist is None or d < nearest_person_dist:
                                     nearest_person_dist = d
                         if bag_rec is None:
-                            cam_bags[obj_id] = {"first_seen": now_ts, "last_near_person": now_ts if (nearest_person_dist is not None and nearest_person_dist < 120) else 0}
+                            cam_bags[obj_id] = {
+                                "first_seen": now_ts,
+                                "last_near_person": now_ts if (nearest_person_dist is not None and nearest_person_dist < 120) else 0,
+                            }
                         else:
                             if nearest_person_dist is not None and nearest_person_dist < 120:
                                 bag_rec["last_near_person"] = now_ts
-                            # evaluate abandoned
-                            abandoned_enabled = False
-                            abandoned_seconds = 20
-                            if camera_settings is not None:
-                                abandoned_enabled = getattr(camera_settings, "abandoned_bag_enabled", False) or False
-                                abandoned_seconds = getattr(camera_settings, "abandoned_bag_seconds", 20) or 20
-                            if abandoned_enabled:
-                                first_seen = bag_rec.get("first_seen", now_ts)
-                                last_near = bag_rec.get("last_near_person", 0)
-                                if (now_ts - first_seen >= abandoned_seconds) and (now_ts - last_near >= abandoned_seconds):
-                                    alert_key = f"{camera_id}_{obj_id}_ABANDONED"
-                                    await self._register_persistent_alert(
-                                        ai_service,
-                                        camera_id,
-                                        alert_key,
-                                        "ABANDONED_BAG",
-                                        "High",
-                                        float(conf),
-                                        str(obj_id),
-                                        camera_owner_id,
-                                        {"bbox": [x1, y1, x2, y2]},
-                                        annotated_frame,
-                                        active_alert_keys,
-                                    )
 
-                    if status in ["DANGER", "WARNING"] and not tripwire_alert_handled:
+                        abandoned_enabled = False
+                        if camera_settings is not None:
+                            abandoned_enabled = getattr(camera_settings, "abandoned_bag_enabled", False) or False
+
+                        timer_origin = None
+                        unattended_started_at = None
+                        if abandoned_enabled and bag_state in {
+                            "temporary_unattended",
+                            "unattended",
+                        }:
+                            timer_origin = "owner_left"
+                            unattended_started_at = bag_evidence.get("state_started_at")
+                        elif (
+                            abandoned_enabled
+                            and bag_state == "unknown"
+                            and bag_evidence.get("confirmed_owner") is None
+                            and bag_evidence.get("candidate_owner") is None
+                        ):
+                            timer_origin = "ownerless"
+
+                        if timer_origin is not None:
+                            abandoned_state = self._update_abandoned_bag_runtime(
+                                camera_id,
+                                obj_id,
+                                unattended_started_at,
+                                now_ts,
+                                timer_origin,
+                            )
+                            if abandoned_state["confirmed"]:
+                                alert_key = abandoned_state["alert_key"]
+                                visual_state = (
+                                    self._get_abandoned_bag_visual_state(
+                                        object_label
+                                    )
+                                )
+                                display_label = visual_state["display_label"]
+                                alarm_sources.add(display_label)
+                                status = visual_state["status"]
+                                box_color = visual_state["box_color"]
+                                overlay_label = visual_state["overlay_label"]
+                                if abandoned_state["newly_confirmed"]:
+                                    self._register_critical_alert(camera_id)
+                                abandoned_capture_screenshot = (
+                                    abandoned_state["capture"]
+                                )
+                                abandoned_capture_immediately = (
+                                    abandoned_state["newly_confirmed"]
+                                )
+                            elif timer_origin == "ownerless":
+                                remaining = max(
+                                    0,
+                                    int(
+                                        UNATTENDED_TIMEOUT_SECONDS
+                                        - (
+                                            now_ts
+                                            - abandoned_state["started_at"]
+                                        )
+                                    ),
+                                )
+                                object_label = f"UNATTENDED\nLEFT {remaining}s"
+                                overlay_label = object_label
+                        else:
+                            self._reset_abandoned_bag_runtime(camera_id, obj_id)
+                    if status in ["DANGER", "WARNING"] and not tripwire_alert_handled and display_label != "ABANDONED_BAG":
                         if overlay_label == object_label:
                             overlay_label = f"{object_label}\n{display_label}"
                         alert_key = alert_key or f"{camera_id}_{obj_id}_{display_label}"
@@ -2207,7 +2408,31 @@ class AIProcessor:
                         draw_settings,
                     )
 
-                    if alert_key is not None and not tripwire_alert_handled:
+                    if display_label == "ABANDONED_BAG":
+                        try:
+                            await self._register_persistent_alert(
+                                ai_service,
+                                camera_id,
+                                alert_key,
+                                display_label,
+                                "Critical",
+                                float(conf),
+                                str(obj_id),
+                                camera_owner_id,
+                                {"bbox": [x1, y1, x2, y2]},
+                                annotated_frame,
+                                active_alert_keys,
+                                capture_screenshot=abandoned_capture_screenshot,
+                                capture_immediately=abandoned_capture_immediately,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to persist abandoned-bag event camera=%s bag=%s",
+                                camera_id,
+                                obj_id,
+                            )
+
+                    if alert_key is not None and not tripwire_alert_handled and display_label != "ABANDONED_BAG":
                         await self._register_persistent_alert(
                             ai_service,
                             camera_id,

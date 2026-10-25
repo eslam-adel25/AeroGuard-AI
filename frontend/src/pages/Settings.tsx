@@ -37,7 +37,7 @@ const DEFAULT_SETTINGS: ISystemSettings = {
   crowd_density_enabled: false,
   crowd_density_threshold: 10,
   abandoned_bag_enabled: false,
-  abandoned_bag_seconds: 20,
+  abandoned_bag_seconds: 60,
   wrong_direction_enabled: false,
   wrong_direction_angle_threshold: 150,
   restricted_area_enabled: false,
@@ -285,7 +285,6 @@ const Settings = () => {
                 {t("settings.notificationEngine")}
               </h3>
             </div>
-            {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: This second-term feature is forced disabled and visually locked for the first-term submission. Restore the original feature state and interaction for the second-term release. Preserve the implementation. */}
             <div className="relative flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
               <div className="flex items-center gap-3">
                 <Volume2 className="text-orange-500" size={18} />
@@ -298,15 +297,15 @@ const Settings = () => {
                   </div>
                 </div>
               </div>
-              <Toggle enabled={false} disabled onToggle={() => {}} />
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-[#090a11]/35 px-3 text-center backdrop-blur-[1px]">
-                <span className="text-[10px] font-bold text-white">
-                  {t("dashboard.comingSoon.title")}
-                </span>
-                <span className="text-[9px] font-medium text-gray-300">
-                  {t("dashboard.comingSoon.description")}
-                </span>
-              </div>
+              <Toggle
+                enabled={config.enable_alert_sounds}
+                onToggle={() =>
+                  setConfig({
+                    ...config,
+                    enable_alert_sounds: !config.enable_alert_sounds,
+                  })
+                }
+              />
             </div>
           </section>
 

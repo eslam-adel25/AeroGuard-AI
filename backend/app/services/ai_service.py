@@ -136,8 +136,9 @@ class AIService:
 
     async def attach_screenshot(self, event_id: str, image_bytes: bytes):
         ev = self.repo.get_event(event_id)
-        if not ev or ev.screenshot_path:
+        if not ev:
             return ev
+        notify_event = not ev.screenshot_path
 
         camera = None
         if hasattr(self.repo, "db") and hasattr(self.repo.db, "query"):
@@ -154,40 +155,48 @@ class AIService:
                 when=datetime.utcnow(),
             )
         except Exception:
+            logger.exception("Failed to persist AI event screenshot")
             return ev
 
         metadata = dict(ev.event_metadata or {})
         metadata.pop("_pending_screenshot", None)
+        screenshot_paths = list(metadata.get("screenshot_paths") or [])
+        if ev.screenshot_path and ev.screenshot_path not in screenshot_paths:
+            screenshot_paths.append(ev.screenshot_path)
+        screenshot_paths.append(path)
+        metadata["screenshot_paths"] = screenshot_paths
         ev = self.repo.update_event(
             str(ev.event_id),
             screenshot_path=path,
             event_metadata=metadata,
         )
         if ev is None:
+            logger.error("Failed to update AI event %s with screenshot path", event_id)
             return None
 
-        try:
-            await manager.broadcast(
-                {
-                    "event": "ai_event",
-                    "data": {
-                        "event_id": str(ev.event_id),
-                        "camera_id": str(ev.camera_id),
-                        "detection_type": ev.detection_type,
-                        "severity": ev.severity,
-                        "confidence": ev.confidence,
-                        "created_at": ev.created_at.isoformat(),
-                        "screenshot": ev.screenshot_path,
-                    }
-                },
-                audience_user_id=(
-                    str(
-                        getattr(camera, "owner_id", None)
-                        or getattr(ev, "detected_by", "")
-                    )
-                ),
-            )
-        except Exception:
-            pass
+        if notify_event:
+            try:
+                await manager.broadcast(
+                    {
+                        "event": "ai_event",
+                        "data": {
+                            "event_id": str(ev.event_id),
+                            "camera_id": str(ev.camera_id),
+                            "detection_type": ev.detection_type,
+                            "severity": ev.severity,
+                            "confidence": ev.confidence,
+                            "created_at": ev.created_at.isoformat(),
+                            "screenshot": ev.screenshot_path,
+                        }
+                    },
+                    audience_user_id=(
+                        str(
+                            getattr(camera, "owner_id", None)
+                            or getattr(ev, "detected_by", "")
+                        )
+                    ),
+                )
+            except Exception:
+                pass
         return ev
         

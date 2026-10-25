@@ -28,7 +28,7 @@ def test_runtime_settings_force_second_term_features_off_and_preserve_abandoned_
     assert snapshot.fire_detection_enabled is False
     assert snapshot.smoke_detection_enabled is False
     assert snapshot.abandoned_bag_enabled is True
-    assert snapshot.abandoned_bag_seconds == 20
+    assert snapshot.abandoned_bag_seconds == 60
     assert snapshot.wrong_direction_enabled is True
 
 

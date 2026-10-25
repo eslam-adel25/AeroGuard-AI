@@ -95,8 +95,7 @@ export const AlertAudioProvider = ({ children }: { children: ReactNode }) => {
   const [silencedTripwireEvents, setSilencedTripwireEvents] = useState<
     Record<string, string>
   >(loadSilencedTripwireEvents);
-  // TEMPORARY v2.1 FIRST-TERM RESTRICTION: This second-term feature is forced disabled and visually locked for the first-term submission. Restore the original feature state and interaction for the second-term release. Preserve the implementation.
-  const [alertSoundsEnabled, setAlertSoundsEnabled] = useState(false);
+  const [alertSoundsEnabled, setAlertSoundsEnabled] = useState(true);
   const settingsVersionRef = useRef(0);
   const fireAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const securityAlarmAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -137,9 +136,9 @@ export const AlertAudioProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
-  const updateAlertSoundsEnabled = useCallback(() => {
+  const updateAlertSoundsEnabled = useCallback((enabled: boolean) => {
     settingsVersionRef.current += 1;
-    setAlertSoundsEnabled(false);
+    setAlertSoundsEnabled(enabled);
   }, []);
 
   const handleMessage = useCallback(
@@ -272,9 +271,9 @@ export const AlertAudioProvider = ({ children }: { children: ReactNode }) => {
     const socket = createSocket(handleMessage);
     void settingsService
       .get()
-      .then(() => {
+      .then((res) => {
         if (mounted && settingsVersionRef.current === settingsVersion) {
-          setAlertSoundsEnabled(false);
+          setAlertSoundsEnabled(res.data.enable_alert_sounds);
         }
       })
       .catch((error) => {

@@ -98,7 +98,7 @@ class SystemSettings(Base):
     crowd_density_enabled = Column(Boolean, default=False)
     crowd_density_threshold = Column(Integer, default=10)
     abandoned_bag_enabled = Column(Boolean, default=False)
-    abandoned_bag_seconds = Column(Integer, default=20)
+    abandoned_bag_seconds = Column(Integer, default=60)
     wrong_direction_enabled = Column(Boolean, default=False)
     wrong_direction_angle_threshold = Column(Integer, default=150)
     restricted_area_enabled = Column(Boolean, default=False)
@@ -249,7 +249,7 @@ class UserSettings(Base):
     crowd_density_threshold = Column(Integer, default=10)
 
     abandoned_bag_enabled = Column(Boolean, default=False)
-    abandoned_bag_seconds = Column(Integer, default=20)
+    abandoned_bag_seconds = Column(Integer, default=60)
 
     wrong_direction_enabled = Column(Boolean, default=False)
     wrong_direction_angle_threshold = Column(Integer, default=150)

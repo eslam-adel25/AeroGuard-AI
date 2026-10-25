@@ -889,8 +889,8 @@ const en = {
       abandonedBags: {
         title: "Abandoned Bags",
         summary:
-          "The abandoned-bag workflow uses ownership and deployment-configured elapsed conditions.",
-        body: "A bag is first associated with a nearby owner when the matching conditions are met. If the owner is temporarily missing, ownership may be preserved; after the configured missing-frame and unattended conditions, the bag becomes unattended and is shown as DANGER. The processor emits an ABANDONED_BAG event with High severity and a five-second event cooldown when the configured elapsed conditions are reached.\nThe current implementation reads abandoned_bag_seconds from settings; it does not prove a universal 60-second behavior. A returning owner can restore the association when tracking matches again. Review the event and evidence rather than relying on color alone.",
+          "A bag must remain continuously unattended for 60 seconds before confirmation.",
+        body: "A nearby person is associated with a bag using the existing camera-local ownership rules. After owner loss is confirmed, the bag remains in a pending state for 60 continuous seconds; an owner return resets that timer. At 60 seconds the bag turns red, an ABANDONED_BAG critical event and alarm are activated once, and a screenshot is captured immediately. Further screenshots are attached to the same event every five seconds until the event ends. The configured abandoned_bag_seconds value is normalized to 60 seconds.",
       },
       restrictedArea: {
         title: "Restricted Area",
@@ -1156,8 +1156,8 @@ const en = {
       abandonedBags: {
         title: "Abandoned Bag Issues",
         summary:
-          "Yellow and red states depend on ownership loss and deployment-configured timing.",
-        body: "What you see: a bag remains owned, turns yellow, stays in a timer state, returns to normal when an owner returns, or becomes red with an event.\nCheck that the person was actually associated, the camera is Running, the bag remains visible, and the configured ownership/unattended timeout has had time to complete. The current implementation reads abandoned_bag_seconds from settings; do not assume a universal 60-second duration. When conditions are reached, it emits ABANDONED_BAG with High severity and a five-second event cooldown.\nExpected result: a returning owner may restore the association; an unattended bag can become DANGER and produce an event. Contact support with camera, time, visible owner label, state progression, and event details.",
+          "A pending bag turns red only after 60 continuous unattended seconds.",
+        body: "What you see: an owned bag is green, a pending unattended bag is yellow, and a confirmed abandoned bag is red with an active event.\nCheck that the person was actually associated and the camera is Running. The timer starts when owner loss is confirmed, resets if the owner returns, and requires 60 continuous unattended seconds. Confirmation activates one ABANDONED_BAG critical event and alarm, captures a screenshot immediately, then captures another every five seconds while the event remains active.\nExpected result: a returning owner cancels the pending timer; a later owner loss starts a fresh 60-second interval. Contact support with camera, time, visible owner label, state progression, and event details.",
       },
       noAlerts: {
         title: "No Alerts",

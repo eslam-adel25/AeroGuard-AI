@@ -24,7 +24,9 @@ def get_current_settings(db: Session = Depends(get_db), current_user: dict = Dep
     settings = repo.get_by_owner(owner_id)
     if not settings:
         settings = repo.create_defaults_for(owner_id)
-    return SettingsResponse.model_validate(settings).model_dump()
+    response = SettingsResponse.model_validate(settings).model_dump()
+    response["abandoned_bag_seconds"] = 60
+    return response
 
 
 @router.put("/", response_model=SettingsResponse)
@@ -32,7 +34,9 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), curr
     """Update user settings and reload AI processor"""
     repo = SettingsRepository(db)
     owner_id = current_user.get("user_id")
-    settings = repo.update(owner_id, payload.model_dump(exclude_none=True))
+    settings_data = payload.model_dump(exclude_none=True)
+    settings_data["abandoned_bag_seconds"] = 60
+    settings = repo.update(owner_id, settings_data)
     
     # Notify AI processor to reload settings
     if _ai_processor is not None:
@@ -42,7 +46,9 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), curr
         except Exception as e:
             print(f"⚠️ Failed to reload AI processor: {e}")
     
-    return SettingsResponse.model_validate(settings).model_dump()
+    response = SettingsResponse.model_validate(settings).model_dump()
+    response["abandoned_bag_seconds"] = 60
+    return response
 
 
 @router.post("/reset", response_model=SettingsResponse)
@@ -60,4 +66,6 @@ def reset_settings(db: Session = Depends(get_db), current_user: dict = Depends(g
         except Exception as e:
             print(f"⚠️ Failed to reload AI processor: {e}")
     
-    return SettingsResponse.model_validate(settings).model_dump()
+    response = SettingsResponse.model_validate(settings).model_dump()
+    response["abandoned_bag_seconds"] = 60
+    return response

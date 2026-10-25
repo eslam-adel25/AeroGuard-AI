@@ -91,3 +91,55 @@ def test_event_broadcast_does_not_depend_on_screenshot_persistence(monkeypatch):
     assert len(messages) == 1
     assert messages[0]["event"] == "ai_event"
     assert messages[0]["data"]["event_id"] == str(event.event_id)
+
+
+def test_attach_screenshot_persists_all_paths_on_one_event(monkeypatch):
+    event = SimpleNamespace(
+        event_id=uuid.uuid4(),
+        camera_id="cam-1",
+        detection_type="ABANDONED_BAG",
+        severity="Critical",
+        confidence=0.9,
+        created_at=datetime.now(),
+        screenshot_path="first.jpg",
+        event_metadata={"bbox": [1, 2, 3, 4]},
+        detected_by="owner-1",
+    )
+
+    class ScreenshotRepo:
+        def get_event(self, _event_id):
+            return event
+
+        def update_event(self, _event_id, **kwargs):
+            for key, value in kwargs.items():
+                setattr(event, key, value)
+            return event
+
+    service = ai_service.AIService(db_session=object())
+    service.repo = ScreenshotRepo()
+    saved_paths = iter(["second.jpg", "third.jpg"])
+    monkeypatch.setattr(
+        service,
+        "_save_screenshot",
+        lambda *_args, **_kwargs: next(saved_paths),
+    )
+    messages = []
+
+    async def fake_broadcast(*_args, **_kwargs):
+        messages.append(_args)
+
+    monkeypatch.setattr(ai_service.manager, "broadcast", fake_broadcast)
+
+    async def attach_both():
+        await service.attach_screenshot(str(event.event_id), b"second")
+        await service.attach_screenshot(str(event.event_id), b"third")
+
+    asyncio.run(attach_both())
+
+    assert event.screenshot_path == "third.jpg"
+    assert event.event_metadata["screenshot_paths"] == [
+        "first.jpg",
+        "second.jpg",
+        "third.jpg",
+    ]
+    assert messages == []
