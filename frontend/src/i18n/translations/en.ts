@@ -184,6 +184,13 @@ const en = {
     captureIncident: "Capture Incident",
     drawingMode: "Drawing Mode",
     inCameraAnnotation: "In-Camera Annotation",
+    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: remove these messages when
+    // restoring the RESTRICTED panel for the second-term release.
+    comingSoon: {
+      title: "Coming Soon",
+      description:
+        "We're working on this feature and plan to make it available in a future update.",
+    },
     drawingInstructions: {
       restricted: "Restricted zone: draw a polygon and double-click to finish.",
       direction:

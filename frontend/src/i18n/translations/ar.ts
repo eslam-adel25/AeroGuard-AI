@@ -181,6 +181,13 @@ const ar = {
     captureIncident: "التقاط الحادث",
     drawingMode: "وضع الرسم",
     inCameraAnnotation: "التعليق داخل الكاميرا",
+    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: remove these messages when
+    // restoring the RESTRICTED panel for the second-term release.
+    comingSoon: {
+      title: "هذه الميزة ستتوفر قريبًا",
+      description:
+        "نعمل على تجهيز هذه الميزة لتكون متاحة في تحديث قادم.",
+    },
     drawingInstructions: {
       restricted: "المنطقة المقيدة: ارسم مضلعًا وانقر مرتين لإنهائه.",
       direction: "خط الاتجاه: أنشئ خط سهم وانقر مرتين للحفظ.",

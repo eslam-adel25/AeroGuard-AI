@@ -64,12 +64,16 @@ const DEFAULT_SETTINGS: ISystemSettings = {
 const Toggle = ({
   enabled,
   onToggle,
+  disabled = false,
 }: {
   enabled: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }) => (
   <button
     onClick={onToggle}
+    disabled={disabled}
+    aria-disabled={disabled ? true : undefined}
     className={`w-10 h-5 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ease-in-out ${
       enabled ? "bg-[#34c759]" : "bg-[#3e404a]"
     }`}
@@ -281,7 +285,8 @@ const Settings = () => {
                 {t("settings.notificationEngine")}
               </h3>
             </div>
-            <div className="flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
+            {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: This second-term feature is forced disabled and visually locked for the first-term submission. Restore the original feature state and interaction for the second-term release. Preserve the implementation. */}
+            <div className="relative flex justify-between items-center px-4 py-4 bg-[#0d0e14] border border-[#1e212b] rounded-lg">
               <div className="flex items-center gap-3">
                 <Volume2 className="text-orange-500" size={18} />
                 <div>
@@ -293,15 +298,15 @@ const Settings = () => {
                   </div>
                 </div>
               </div>
-              <Toggle
-                enabled={config.enable_alert_sounds}
-                onToggle={() =>
-                  setConfig({
-                    ...config,
-                    enable_alert_sounds: !config.enable_alert_sounds,
-                  })
-                }
-              />
+              <Toggle enabled={false} disabled onToggle={() => {}} />
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-lg bg-[#090a11]/35 px-3 text-center backdrop-blur-[1px]">
+                <span className="text-[10px] font-bold text-white">
+                  {t("dashboard.comingSoon.title")}
+                </span>
+                <span className="text-[9px] font-medium text-gray-300">
+                  {t("dashboard.comingSoon.description")}
+                </span>
+              </div>
             </div>
           </section>
 
@@ -419,6 +424,7 @@ const Settings = () => {
           </section>
 
           {/* AI Vision Modules */}
+          {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: This second-term feature is forced disabled and visually locked for the first-term submission. Restore the original feature state and interaction for the second-term release. Preserve the implementation. */}
           {/*
             Standalone DIRECTION is excluded from the active UI workflow, so the
             Wrong Direction settings row is intentionally hidden. Its setting
@@ -452,11 +458,13 @@ const Settings = () => {
                   label: t("settings.modules.loiteringDetection"),
                   sub: t("settings.modules.loiteringDetectionDescription"),
                   key: "loitering_enabled",
+                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.crowdDensity"),
                   sub: t("settings.modules.crowdDensityDescription"),
                   key: "crowd_density_enabled",
+                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.abandonedBag"),
@@ -467,21 +475,24 @@ const Settings = () => {
                   label: t("settings.modules.restrictedArea"),
                   sub: t("settings.modules.restrictedAreaDescription"),
                   key: "restricted_area_enabled",
+                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.fireDetection"),
                   sub: t("settings.modules.fireDetectionDescription"),
                   key: "fire_detection_enabled",
+                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.smokeDetection"),
                   sub: t("settings.modules.smokeDetectionDescription"),
                   key: "smoke_detection_enabled",
+                  firstTermRestricted: true,
                 },
               ].map((module) => (
                 <div
                   key={module.key}
-                  className="flex justify-between items-center py-3 border-b border-[#1e212b]/50 last:border-0 group"
+                  className={`${module.firstTermRestricted ? "relative " : ""}flex justify-between items-center py-3 border-b border-[#1e212b]/50 last:border-0 group`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-500/20 group-hover:bg-blue-500 transition-colors"></div>
@@ -533,7 +544,11 @@ const Settings = () => {
                     </div>
                   ) : (
                     <Toggle
-                      enabled={!!config[module.key as keyof ISystemSettings]}
+                      enabled={
+                        !module.firstTermRestricted &&
+                        !!config[module.key as keyof ISystemSettings]
+                      }
+                      disabled={module.firstTermRestricted}
                       onToggle={() =>
                         setConfig({
                           ...config,
@@ -542,6 +557,16 @@ const Settings = () => {
                         })
                       }
                     />
+                  )}
+                  {module.firstTermRestricted && (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090a11]/35 px-3 text-center backdrop-blur-[1px]">
+                      <span className="text-[10px] font-bold text-white">
+                        {t("dashboard.comingSoon.title")}
+                      </span>
+                      <span className="text-[9px] font-medium text-gray-300">
+                        {t("dashboard.comingSoon.description")}
+                      </span>
+                    </div>
                   )}
                 </div>
               ))}

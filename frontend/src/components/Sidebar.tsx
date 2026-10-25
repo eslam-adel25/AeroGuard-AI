@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Video,
-  FileText,
   Settings,
   Shield,
   User,
@@ -42,7 +41,9 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
   const menuItems = [
     { id: "dashboard", label: t("sidebar.monitoring"), icon: LayoutDashboard },
     { id: "cameras", label: t("sidebar.cameras"), icon: Video },
-    { id: "reports", label: t("sidebar.analytics"), icon: FileText },
+    // TEMPORARY: Analytics is excluded from the v2.1 first-term submission.
+    // Restore this navigation item for the second-term release. Do not delete
+    // the Analytics implementation.
     { id: "users", label: t("sidebar.profile"), icon: User },
     { id: "settings", label: t("sidebar.control"), icon: Settings },
   ] as const;

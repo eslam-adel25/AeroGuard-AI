@@ -45,13 +45,21 @@ const ACTIVE_PAGE_IDS = [
   "settings",
 ] as const satisfies readonly ActivePage[];
 
+// TEMPORARY: Analytics page access is disabled for the v2.1 first-term
+// submission. Re-enable for the second-term release; preserve the page.
+const ANALYTICS_ENABLED = false;
+
 const isActivePage = (page: string): page is ActivePage =>
   ACTIVE_PAGE_IDS.some((validPage) => validPage === page);
 
 const getStoredActivePage = (): ActivePage | null => {
   const savedPage = localStorage.getItem("ag_active_page");
 
-  if (!savedPage || !isActivePage(savedPage)) {
+  if (
+    !savedPage ||
+    !isActivePage(savedPage) ||
+    (savedPage === "reports" && !ANALYTICS_ENABLED)
+  ) {
     return null;
   }
 
@@ -65,7 +73,7 @@ function App() {
       return "dashboard";
     }
 
-    return getStoredActivePage() ?? "reports";
+    return getStoredActivePage() ?? "dashboard";
   });
   const [isAuthenticated, setIsAuthenticated] =
     useState(!!getStoredAuthToken());
@@ -111,7 +119,7 @@ function App() {
     localStorage.setItem("ag_token", token);
     localStorage.removeItem("ag_active_page");
     setIsAuthenticated(true);
-    setActivePage("reports");
+    setActivePage("dashboard");
   };
 
   useEffect(() => {
@@ -745,7 +753,7 @@ function App() {
             <Dashboard onAlertBadgeClick={() => setIsNotificationsOpen(true)} />
           )}
           {activePage === "cameras" && <Cameras />}
-          {activePage === "reports" && <Analytics />}
+          {ANALYTICS_ENABLED && activePage === "reports" && <Analytics />}
           {activePage === "alerts" && <AlertHistory />}
           {activePage === "users" && <Users />}
           {activePage === "settings" && <Settings />}
