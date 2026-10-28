@@ -423,7 +423,6 @@ const Settings = () => {
           </section>
 
           {/* AI Vision Modules */}
-          {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: This second-term feature is forced disabled and visually locked for the first-term submission. Restore the original feature state and interaction for the second-term release. Preserve the implementation. */}
           {/*
             Standalone DIRECTION is excluded from the active UI workflow, so the
             Wrong Direction settings row is intentionally hidden. Its setting
@@ -457,13 +456,11 @@ const Settings = () => {
                   label: t("settings.modules.loiteringDetection"),
                   sub: t("settings.modules.loiteringDetectionDescription"),
                   key: "loitering_enabled",
-                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.crowdDensity"),
                   sub: t("settings.modules.crowdDensityDescription"),
                   key: "crowd_density_enabled",
-                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.abandonedBag"),
@@ -474,24 +471,21 @@ const Settings = () => {
                   label: t("settings.modules.restrictedArea"),
                   sub: t("settings.modules.restrictedAreaDescription"),
                   key: "restricted_area_enabled",
-                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.fireDetection"),
                   sub: t("settings.modules.fireDetectionDescription"),
                   key: "fire_detection_enabled",
-                  firstTermRestricted: true,
                 },
                 {
                   label: t("settings.modules.smokeDetection"),
                   sub: t("settings.modules.smokeDetectionDescription"),
                   key: "smoke_detection_enabled",
-                  firstTermRestricted: true,
                 },
               ].map((module) => (
                 <div
                   key={module.key}
-                  className={`${module.firstTermRestricted ? "relative " : ""}flex justify-between items-center py-3 border-b border-[#1e212b]/50 last:border-0 group`}
+                  className="flex justify-between items-center py-3 border-b border-[#1e212b]/50 last:border-0 group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-500/20 group-hover:bg-blue-500 transition-colors"></div>
@@ -543,11 +537,7 @@ const Settings = () => {
                     </div>
                   ) : (
                     <Toggle
-                      enabled={
-                        !module.firstTermRestricted &&
-                        !!config[module.key as keyof ISystemSettings]
-                      }
-                      disabled={module.firstTermRestricted}
+                      enabled={!!config[module.key as keyof ISystemSettings]}
                       onToggle={() =>
                         setConfig({
                           ...config,
@@ -556,16 +546,6 @@ const Settings = () => {
                         })
                       }
                     />
-                  )}
-                  {module.firstTermRestricted && (
-                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090a11]/35 px-3 text-center backdrop-blur-[1px]">
-                      <span className="text-[10px] font-bold text-white">
-                        {t("dashboard.comingSoon.title")}
-                      </span>
-                      <span className="text-[9px] font-medium text-gray-300">
-                        {t("dashboard.comingSoon.description")}
-                      </span>
-                    </div>
                   )}
                 </div>
               ))}

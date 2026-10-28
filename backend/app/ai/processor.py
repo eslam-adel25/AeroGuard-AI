@@ -31,18 +31,6 @@ from .ownership_config import (
 logger = logging.getLogger(__name__)
 FIRE_SMOKE_MODEL_DEFAULT_PATH = "models/fire-smoke-yolov8n.pt"
 TRIPWIRE_CROSSING_HYSTERESIS_PX = 3.0
-# TEMPORARY v2.1 FIRST-TERM RESTRICTION: Force these second-term detection
-# flags off in runtime snapshots; remove this override for the second-term
-# release. Persisted values and processing implementations remain intact.
-_FIRST_TERM_DISABLED_PROCESSING_SETTINGS = frozenset(
-    {
-        "loitering_enabled",
-        "crowd_density_enabled",
-        "restricted_area_enabled",
-        "fire_detection_enabled",
-        "smoke_detection_enabled",
-    }
-)
 GENERAL_DETECTION_LABELS = {
     "person",
     "bag",
@@ -702,12 +690,7 @@ class AIProcessor:
                 field_name: (
                     60
                     if field_name == "abandoned_bag_seconds"
-                    else (
-                        False
-                        if field_name
-                        in _FIRST_TERM_DISABLED_PROCESSING_SETTINGS
-                        else getattr(settings_model, field_name, None)
-                    )
+                    else getattr(settings_model, field_name, None)
                 )
                 for field_name in field_names
             }

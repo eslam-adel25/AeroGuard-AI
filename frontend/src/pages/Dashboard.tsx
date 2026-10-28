@@ -119,10 +119,6 @@ const emptyDrawingPoints = (): DrawingPointsByType => ({
   tripwire: [],
 });
 
-// TEMPORARY v2.1 FIRST-TERM RESTRICTION: centralize the RESTRICTED panel-lock
-// condition; remove it when restoring the original editor workflow.
-const isRestrictedModeLocked = (mode: DrawingMode) => mode === "restricted";
-
 const visibleDrawingModes: DrawingMode[] = ["restricted", "tripwire"];
 
 const alertBadgeLabel = (alert: AlertData, t: (key: string) => string) => {
@@ -197,10 +193,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [savedZones, setSavedZones] = useState<ZoneData[]>([]);
   const [editingZones, setEditingZones] = useState<ZoneData[]>([]);
   const [drawingMode, setDrawingMode] = useState<DrawingMode>("restricted");
-  // TEMPORARY v2.1 FIRST-TERM RESTRICTION: RESTRICTED mode is visually locked
-  // and non-interactive for the first-term submission. Set this predicate to
-  // false for the second-term release; preserve the feature implementation.
-  const restrictedModeLocked = isRestrictedModeLocked(drawingMode);
   const [drawingInstructions, setDrawingInstructions] = useState<string>("");
   const [hoverPoint, setHoverPoint] = useState<[number, number] | null>(null);
   const [annotationHistory, setAnnotationHistory] = useState<
@@ -1184,9 +1176,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, [savedZones, t]);
 
   const startNewRegion = useCallback(() => {
-    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: block panel actions in RESTRICTED
-    // mode; remove these guards when restoring the original editor workflow.
-    if (restrictedModeLocked) return;
     if (!selectedCameraRef.current) return;
     setDrawingPointsByType((prev) => ({
       ...prev,
@@ -1202,7 +1191,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     setIsSidebarOpen(true);
     setHoverPoint(null);
     setDrawingInstructions(t("dashboard.drawingInstructions.initial"));
-  }, [drawingMode, restrictedModeLocked, t]);
+  }, [drawingMode, t]);
 
   const exitDrawingMode = useCallback(() => {
     setIsDrawing(false);
@@ -1215,9 +1204,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, [savedZones]);
 
   const undoLastAction = useCallback(async () => {
-    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: keep restricted edits and saved
-    // zones unchanged; remove this guard when restoring RESTRICTED mode.
-    if (restrictedModeLocked) return;
     const lastAction = annotationHistory[annotationHistory.length - 1];
     if (!lastAction) return;
 
@@ -1260,16 +1246,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   }, [
     annotationHistory,
     fetchZones,
-    restrictedModeLocked,
     selectedCamera,
     t,
   ]);
 
   const deleteZone = useCallback(
     async (zoneId: string) => {
-      // TEMPORARY v2.1 FIRST-TERM RESTRICTION: prevent restricted-zone edits;
-      // remove this guard when restoring RESTRICTED mode.
-      if (restrictedModeLocked) return;
       const index = editingZones.findIndex((zone) => zone.zone_id === zoneId);
       if (index < 0) return;
       const zone = editingZones[index];
@@ -1297,13 +1279,10 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         },
       ]);
     },
-    [editingZones, fetchZones, restrictedModeLocked, selectedCamera],
+    [editingZones, fetchZones, selectedCamera],
   );
 
   const saveAnnotations = useCallback(async () => {
-    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: prevent restricted-zone writes;
-    // remove this guard when restoring RESTRICTED mode.
-    if (restrictedModeLocked) return;
     if (!selectedCamera || isSavingAnnotations) return;
     setIsSavingAnnotations(true);
     try {
@@ -1379,7 +1358,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     editingZones,
     fetchZones,
     isSavingAnnotations,
-    restrictedModeLocked,
     savedZones,
     selectedCamera,
     t,
@@ -1388,9 +1366,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const finishDrawing = useCallback(
     (points = drawingPoints) => {
       const isRestrictedMode = drawingMode === "restricted";
-      // TEMPORARY v2.1 FIRST-TERM RESTRICTION: prevent restricted drawing from
-      // being finalized; remove this guard when restoring RESTRICTED mode.
-      if (restrictedModeLocked) return;
       if (points.length === 0 || !selectedCamera) return;
       const vid = videoRef.current;
       if (!vid) return;
@@ -1467,7 +1442,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     [
       drawingMode,
       drawingPoints,
-      restrictedModeLocked,
       selectedCamera,
       t,
       tripwireForm,
@@ -1563,9 +1537,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   ]);
 
   const onCanvasClick = (event: MouseEvent<HTMLCanvasElement>) => {
-    // TEMPORARY v2.1 FIRST-TERM RESTRICTION: block drawing input paths in
-    // RESTRICTED mode; remove these guards when restoring that workflow.
-    if (!isDrawing || restrictedModeLocked) return;
+    if (!isDrawing) return;
     const normalized = getNormalizedVideoCoords(event);
     if (!normalized) return;
     setDrawingPointsByType((prev) => ({
@@ -1579,19 +1551,19 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   };
 
   const onCanvasDoubleClick = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || restrictedModeLocked) return;
+    if (!isDrawing) return;
     event.preventDefault();
     finishDrawing(drawingPoints.slice(0, -1));
   };
 
   const onCanvasContextMenu = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || restrictedModeLocked) return;
+    if (!isDrawing) return;
     event.preventDefault();
     undoLastAction();
   };
 
   const onCanvasMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || restrictedModeLocked) return;
+    if (!isDrawing) return;
     const normalized = getNormalizedVideoCoords(event);
     if (!normalized) return;
 
@@ -1616,9 +1588,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // TEMPORARY v2.1 FIRST-TERM RESTRICTION: suppress drawing shortcuts in
-      // RESTRICTED mode; remove this guard when restoring that workflow.
-      if (!isDrawing || restrictedModeLocked) return;
+      if (!isDrawing) return;
       if (event.key === "Escape") {
         exitDrawingMode();
       }
@@ -1635,7 +1605,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [
     isDrawing,
-    restrictedModeLocked,
     finishDrawing,
     exitDrawingMode,
     undoLastAction,
@@ -1966,7 +1935,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                   onDoubleClick={onCanvasDoubleClick}
                   onContextMenu={onCanvasContextMenu}
                   onMouseMove={onCanvasMouseMove}
-                  className={`absolute left-0 top-0 z-30 ${frozenFrames[selectedCamera] ? "pointer-events-none opacity-0" : isDrawing ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
+                  className={`absolute left-0 top-0 z-30 ${isDrawing ? "pointer-events-auto cursor-crosshair" : frozenFrames[selectedCamera] ? "pointer-events-none opacity-0" : "pointer-events-none"}`}
                 />
               </>
             ) : (
@@ -2061,12 +2030,10 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 className="h-full border-l border-white/10 bg-[#0c1322] flex flex-col text-white overflow-hidden"
               >
-                <div className="relative w-[320px] flex-1 p-6 flex flex-col justify-between h-full">
+                <div className="w-[320px] flex-1 p-6 flex flex-col justify-between h-full">
                   <div className="space-y-6">
                     {/* Header */}
-                    <div
-                      className="flex items-center justify-between gap-3"
-                    >
+                    <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[10px] uppercase tracking-[0.32em] text-gray-400">
                           {t("dashboard.drawingMode")}
@@ -2075,13 +2042,9 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                           {t("dashboard.inCameraAnnotation")}
                         </h3>
                       </div>
-                      {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: keep the
-                          existing Cancel exit above the blocking overlay. */}
                       <button
                         onClick={exitDrawingMode}
-                        className={`rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer ${
-                          restrictedModeLocked ? "relative z-20" : ""
-                        }`}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/10 transition cursor-pointer"
                       >
                         {t("common.cancel")}
                       </button>
@@ -2091,13 +2054,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                         Its implementation remains for compatibility with saved
                         zones and must not be removed or repurposed without an
                         impact review. TRIPWIRE direction is separate. */}
-                    {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: keep both mode
-                        selectors beneath the overlay; Cancel remains the
-                        existing, keyboard-accessible exit action. */}
-                    <div
-                      className="flex flex-wrap gap-2"
-                      inert={restrictedModeLocked}
-                    >
+                    <div className="flex flex-wrap gap-2">
                       {visibleDrawingModes.map((mode) => (
                           <button
                             key={mode}
@@ -2128,11 +2085,10 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       ))}
                     </div>
 
-                    <div inert={restrictedModeLocked}>
-                      {/* Instructions */}
-                      <p className="text-[12px] leading-5 text-gray-300">
-                        {drawingInstructions}
-                      </p>
+                    {/* Instructions */}
+                    <p className="text-[12px] leading-5 text-gray-300">
+                      {drawingInstructions}
+                    </p>
 
                     {/* Current drawing points */}
                     <div className="space-y-1 text-[11px] text-gray-400">
@@ -2308,39 +2264,14 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                         {t("common.save")}
                       </button>
                     </div>
-                    </div>
                   </div>
 
                   {/* Bottom Hint */}
-                  <div
-                    className="pt-6 border-t border-white/5"
-                    inert={restrictedModeLocked}
-                  >
+                  <div className="pt-6 border-t border-white/5">
                     <p className="text-[10px] uppercase tracking-[0.28em] text-gray-500 leading-relaxed">
                       {t("dashboard.controls.doubleClickHint")}
                     </p>
                   </div>
-                  {/* TEMPORARY v2.1 FIRST-TERM RESTRICTION: this hit-target
-                      locks the panel while retaining its visible content;
-                      Cancel remains layered above it to exit safely. */}
-                  {restrictedModeLocked ? (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0c1322]/60 px-5 text-center backdrop-blur-sm">
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        lang={i18n.language === "ar" ? "ar" : "en"}
-                        dir={i18n.language === "ar" ? "rtl" : "ltr"}
-                        className="max-w-full"
-                      >
-                        <h4 className="text-lg font-bold tracking-wide text-white">
-                          {t("dashboard.comingSoon.title")}
-                        </h4>
-                        <p className="mt-2 text-sm leading-6 text-gray-200">
-                          {t("dashboard.comingSoon.description")}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </motion.div>
             </div>
