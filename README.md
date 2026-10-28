@@ -1043,7 +1043,7 @@ This project contains original software and materials that may be protected by c
 
 Modifications do not automatically transfer ownership of the original materials or authorize false claims of authorship.
 
-Please review the [LICENSE](./LICENSE) file for the applicable restrictions and permissions.
+Please review the [LICENSE](./LICENSE.md) file for the applicable restrictions and permissions.
 
 Unauthorized use may be challenged under applicable law where the facts and legal requirements support such action.
 
