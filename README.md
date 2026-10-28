@@ -1033,3 +1033,20 @@ To contribute changes to AeroGuard AI:
 5. Update relevant technical documentation in `docs/` and review your changes with `git diff --check`.
 
 There is no separate root contribution guide in the files inventoried above. Avoid claiming tests passed unless they were run in the environment being reported.
+
+
+## Copyright and Intellectual Property
+
+Copyright © 2026 Eslam Adel Jadalrab. All rights reserved, subject to applicable third-party rights and licenses.
+
+This project contains original software and materials that may be protected by copyright and other applicable intellectual property laws. Public availability does not grant unrestricted permission to reuse, modify, redistribute, or commercially exploit these materials.
+
+Modifications do not automatically transfer ownership of the original materials or authorize false claims of authorship.
+
+Please review the [LICENSE](./LICENSE) file for the applicable restrictions and permissions.
+
+Unauthorized use may be challenged under applicable law where the facts and legal requirements support such action.
+
+**Copyright Contact:**  
+Eslam Adel Jadalrab  
+Email: eslam.adel2596@gmail.com
