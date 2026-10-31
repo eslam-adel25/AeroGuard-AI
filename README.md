@@ -132,7 +132,7 @@ flowchart LR
 
     subgraph Storage ["Persistence & Filesystem"]
         DB[("PostgreSQL Database")]
-        Uploads["Static Uploads (backend/uploads)"]
+        Uploads["Record-authorized Files (backend/uploads)"]
     end
 
     Browser -->|HTTP REST Requests| API
@@ -158,7 +158,7 @@ flowchart LR
 3. **In-Process Inference Engine**: Initialized as a singleton in `backend/app/ai/processor.py`. Camera ingestion workers run as background tasks within the primary backend process.
    - *State Volatility*: Workers are not persistent background daemons. A backend process restart terminates running workers and purges in-memory tracker states, alarm flags, and person identity sessions.
    - *Concurrency Model*: The YOLO model instance is shared across all active streams; inference passes are protected by a threading lock. Ingestion, tracking, loitering timers, and spatial rules maintain strict per-camera isolation.
-4. **Client Proxying**: In local development, Vite proxies `/api`, `/ws`, and `/uploads` directly to FastAPI. The Axios HTTP client attaches bearer tokens via headers, while WebSocket sessions authenticate via query string parameters.
+4. **Client Proxying**: In local development, Vite proxies `/api`, `/ws`, and `/uploads` directly to FastAPI. Upload requests require bearer authentication and a database ownership match; WebSocket sessions authenticate via query string parameters.
 
 ---
 
@@ -209,7 +209,7 @@ The source tree is divided into an isolated FastAPI backend service, a React/Typ
 
 | Module Path | Core Responsibilities |
 | :--- | :--- |
-| `backend/app/main.py` | Application factory, lifecycle hooks, static `/uploads` mounting, CORS policies, security headers, and router registrations. |
+| `backend/app/main.py` | Application factory, lifecycle hooks, CORS policies, security headers, and router registrations. |
 | `backend/app/database/session.py` | Environment loading (`backend/.env`), SQLAlchemy engine configuration, session generators, and startup schema verification. |
 | `backend/app/models/models.py` | ORM entity definitions, foreign key constraints, indexes, and relationship graphs. |
 | `backend/app/api/v1/cameras.py` | Camera provisioning, stream validation, worker start/stop endpoints, zone geometry, and authenticated MJPEG feeds. |
@@ -285,7 +285,7 @@ The application shell uses a state-driven navigation router keyed to the sidebar
 
 The backend entry point in `backend/app/main.py` coordinates initialization through the following sequence:
 
-1. **Static Filesystem Mount**: Mounts `backend/uploads` directly to `/uploads` to serve static assets.
+1. **Protected File Access**: `/uploads/{path}` resolves only files linked to a user avatar, owned camera, or owned AI event. Other files are not served through this route.
 2. **Metadata Synchronization**: Executes `Base.metadata.create_all(bind=engine)` against the configured database.
 3. **Compatibility Verification**: Runs `_ensure_schema_compatibility()` to inspect PostgreSQL catalogs for expected table structures and columns.
 4. **Engine Registration**: Binds the `AIProcessor` singleton reference to the user settings service so setting updates notify the running engine.
@@ -472,8 +472,8 @@ The REST API allows clients to query historical events, inspect event details, t
 
 - **Storage Location**: Alert frames are stored under `backend/uploads/ai_events/`.
 - **Capture Latency**: Some alert workflows create an initial `AIEvent` with a pending screenshot flag, then capture and write a JPEG frame once the alert condition persists for at least 5 seconds.
-- **Notification Updates**: When a screenshot is attached to an existing event, an updated `ai_event` message is broadcast over the WebSocket containing the image URL.
-- **Authorization Context**: While `GET /ai/events/{event_id}/screenshot` enforces camera ownership checks, the underlying storage directory is also mounted directly at `/uploads`.
+- **Notification Updates**: When a screenshot is attached to an existing event, an updated `ai_event` message is broadcast over the WebSocket. The client retrieves the image through the owner-checked screenshot endpoint.
+- **Authorization Context**: `GET /ai/events/{event_id}/screenshot` and direct `/uploads/ai_events/...` requests require active tenant membership and verified resource ownership; the database-backed Owner role has platform-wide access.
 
 ### Alarm State
 
@@ -522,12 +522,12 @@ Upon successful connection, the server validates the token and transmits an init
 | :--- | :--- | :--- |
 | `alarm_state_snapshot` | `states` (dictionary of camera IDs containing `active` and `sources`) | Sent to newly connected clients to establish baseline alarm state. |
 | `alarm_state` | `camera_id`, `active`, `sources` | Emitted on alarm state transitions. Filtered by camera ownership. |
-| `camera_status` | `camera_id`, `status` (`Processing`, `Running`, `Offline`) | Emitted on worker lifecycle changes. Broadcast globally to all connections. |
-| `ai_status` | `camera_id`, `fps`, `objects_count`, `persons_count`, `bags_count`, `cars_count`, `critical_alerts` | Real-time processing telemetry. Broadcast globally to all connections. |
+| `camera_status` | `camera_id`, `status` (`Processing`, `Running`, `Offline`) | Emitted on worker lifecycle changes. Delivered to the camera's customer; Owner receives platform-wide broadcasts. |
+| `ai_status` | `camera_id`, `fps`, `objects_count`, `persons_count`, `bags_count`, `cars_count`, `critical_alerts` | Real-time processing telemetry. Delivered to the camera's customer; Owner receives platform-wide broadcasts. |
 | `ai_event` | `event_id`, `camera_id`, `detection_type`, `severity`, `confidence`, `timestamp`, `screenshot_path` | Dispatched when an alert is created or updated. Filtered by camera ownership. |
 
-> [!CAUTION]
-> **Audience Isolation Notice**: The connection manager enforces ownership checks on `ai_event` and `alarm_state` messages. However, `camera_status` and `ai_status` updates are broadcast to **all** connected WebSockets. Take this into account when designing multi-tenant deployments.
+> [!NOTE]
+> Customer WebSocket audiences are resolved from database-backed CustomerProfile membership. The platform Owner is the only role that receives platform-wide broadcasts.
 
 ---
 
@@ -537,8 +537,10 @@ Relational data is stored in PostgreSQL using SQLAlchemy ORM entities with UUID 
 
 | Model | Schema Role and Description |
 | :--- | :--- |
-| `Role` | User role definition (e.g., `Administrator`, `Officer`). |
+| `Role` | User role definition (e.g., `Owner`, `Administrator`, `Officer`); Owner is separate from Administrator. |
 | `User` | User accounts, hashed passwords, verification state, and profile references. |
+| `CustomerProfile` | One-to-one customer lifecycle, access state, optional camera quota, and feature entitlement linked to an existing user. |
+| `CustomerFeaturePermission` | Per-customer feature grants or denials, unique by customer and feature key. |
 | `Camera` | Camera configurations, stream URLs, storage paths, source types, and owner bindings. |
 | `RestrictedZone` | Polygonal coordinate sets and video dimension references tied to a specific camera. |
 | `Detection` | Analytical records storing detected object class, priority, confidence, and violation flags. |
@@ -571,7 +573,8 @@ Relational data is stored in PostgreSQL using SQLAlchemy ORM entities with UUID 
 [ Host Filesystem (backend/uploads) ]
   ├── videos/      -> Uploaded video source files
   ├── ai_events/   -> Alert frame JPEG screenshots
-  └── reports/     -> Compiled PDF export documents
+  ├── avatars/     -> User profile images
+  └── reports/     -> Compiled PDF export documents (delivered through authorized report exports)
 ```
 
 ---
@@ -613,7 +616,7 @@ All REST endpoints are prefixed with `/api/v1` except for the WebSocket endpoint
 
 | Method & Path | Access Control | Purpose |
 | :--- | :--- | :--- |
-| `POST /auth/register` | Public (Rate-limited) | Create a new user account (defaults to `Officer` role). |
+| `POST /auth/register` | Public (Rate-limited) | Create a new pending Admin account and independent CustomerProfile. |
 | `POST /auth/login` | Public (Rate-limited) | Authenticate credentials and receive access and refresh tokens. |
 | `POST /auth/refresh` | Refresh Token | Exchange a valid refresh token for a new access token. |
 | `GET /auth/verify` | Public Token | Validate an email verification token. |
@@ -639,51 +642,51 @@ All REST endpoints are prefixed with `/api/v1` except for the WebSocket endpoint
 | `GET /users/profile/sessions` | Authenticated | List active refresh-token sessions and client metadata. |
 | `POST /users/profile/logout-all` | Authenticated | Invalidate all active refresh tokens for the current user. |
 | `GET /users/roles` | Authenticated | List all defined application roles. |
-| `GET /users/` | Administrator | List all registered user accounts. |
-| `POST /users/` | Administrator | Provision a new user account with a specified role. |
-| `DELETE /users/{user_id}` | Administrator | Remove a user account and associated credentials. |
+| `GET /users/` | Customer Admin (own tenant) / Owner (platform-wide) | List tenant members or platform users. |
+| `POST /users/` | Customer Admin (own tenant) / Owner (explicit customer profile) | Create an Officer in the applicable tenant. |
+| `DELETE /users/{user_id}` | Customer Admin (own tenant) / Owner (platform-wide) | Remove an Officer account. |
 
 ### Cameras — `/cameras`
 
 | Method & Path | Access Control | Purpose |
 | :--- | :--- | :--- |
-| `POST /cameras/` | Authenticated | Create a camera using multipart form data (name, location, type, URL/file). |
-| `GET /cameras/` | Authenticated | List all cameras visible to the current user. |
-| `DELETE /cameras/{camera_id}` | Owner / Admin | Stop workers, purge records, delete video files, and remove camera. |
-| `POST /cameras/{camera_id}/start` | Owner / Admin | Validate ingestion source, reserve slot, and schedule worker thread. |
-| `POST /cameras/{camera_id}/stop` | Owner / Admin | Set cooperative stop flag and mark camera status as `Offline`. |
-| `GET /cameras/{camera_id}/stream` | Owner / Admin | Retrieve authenticated MJPEG stream of latest annotated frames. |
-| `POST /cameras/{camera_id}/zones` | Owner / Admin | Create a polygonal restricted zone for a camera. |
-| `GET /cameras/{camera_id}/zones` | Owner / Admin | Retrieve all defined polygonal zones for a camera. |
-| `DELETE /cameras/{camera_id}/zones/{zone_id}` | Owner / Admin | Delete a specific polygonal zone from a camera. |
+| `POST /cameras/` | Customer Admin/Officer (own tenant); Owner (explicit customer profile) | Create a camera using multipart form data (name, location, type, URL/file). |
+| `GET /cameras/` | Customer Admin/Officer (own tenant); Owner (platform-wide) | List cameras available to the authenticated role. |
+| `DELETE /cameras/{camera_id}` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Stop workers, remove camera-owned records/files, and delete the camera. |
+| `POST /cameras/{camera_id}/start` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Validate ingestion source, reserve slot, and schedule worker thread. |
+| `POST /cameras/{camera_id}/stop` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Set cooperative stop flag and mark camera status as `Offline`. |
+| `GET /cameras/{camera_id}/stream` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve authenticated MJPEG stream of latest annotated frames. |
+| `POST /cameras/{camera_id}/zones` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Create a polygonal restricted zone for a camera. |
+| `GET /cameras/{camera_id}/zones` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve zones for an authorized camera. |
+| `DELETE /cameras/{camera_id}/zones/{zone_id}` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Delete a specific polygonal restricted zone. |
 
 ### AI Events — `/ai/events`
 
 | Method & Path | Access Control | Purpose |
 | :--- | :--- | :--- |
-| `GET /ai/events` | Authenticated | Paginated query for events, with optional camera and search filters. |
-| `GET /ai/events/{event_id}` | Owner / Admin | Retrieve detailed information for a single event. |
-| `PATCH /ai/events/{event_id}/read` | Owner / Admin | Mark a specific event as read. |
-| `POST /ai/events/read-all` | Authenticated | Mark all visible events as read. |
-| `POST /ai/events/manual` | Authenticated | Manually create an event record with optional image upload. |
-| `GET /ai/events/{event_id}/screenshot` | Owner / Admin | Download the attached JPEG screenshot for an event. |
+| `GET /ai/events` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Paginated query for events, with optional camera and search filters. |
+| `GET /ai/events/{event_id}` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve detailed information for a single event. |
+| `PATCH /ai/events/{event_id}/read` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Mark a specific event as read. |
+| `POST /ai/events/read-all` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Mark all visible events as read. |
+| `POST /ai/events/manual` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Manually create an event for an authorized camera. |
+| `GET /ai/events/{event_id}/screenshot` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Download the attached JPEG screenshot for an event. |
 
 ### Reports and Settings
 
 | Method & Path | Access Control | Purpose |
 | :--- | :--- | :--- |
-| `GET /reports/summary` | Authenticated | Retrieve aggregated detection statistics. |
-| `GET /reports/dashboard` | Authenticated | Retrieve structured analytical payload for the dashboard. |
-| `POST /reports/generate` | Authenticated | Run analytical aggregations and save as a `Report` record. |
-| `GET /reports/` | Authenticated | List saved report snapshots with search and pagination. |
-| `GET /reports/{report_id}` | Owner / Admin | Retrieve details and charts for a saved report. |
-| `DELETE /reports/{report_id}` | Owner / Admin | Delete a saved report record. |
-| `GET /reports/export/csv?report_id=...` | Owner / Admin | Export a saved report as a CSV file. |
-| `GET /reports/export/excel?report_id=...` | Owner / Admin | Export a saved report as an Excel spreadsheet. |
-| `GET /reports/export/pdf?report_id=...` | Owner / Admin | Export a saved report as a compiled PDF document. |
-| `GET /settings/` | Authenticated | Retrieve configuration settings for the current user. |
-| `PUT /settings/` | Authenticated | Update configuration settings and propagate to the active AI engine. |
-| `POST /settings/reset` | Authenticated | Reset configuration settings to default values. |
+| `GET /reports/summary` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve tenant-scoped or platform-wide detection statistics. |
+| `GET /reports/dashboard` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve structured analytical payload for the dashboard. |
+| `POST /reports/generate` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Run authorized analytical aggregations and save a report. |
+| `GET /reports/` | Customer Admin/Officer (own tenant); Owner (platform-wide) | List saved report snapshots with search and pagination. |
+| `GET /reports/{report_id}` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Retrieve details and charts for a saved report. |
+| `DELETE /reports/{report_id}` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Delete an authorized saved report. |
+| `GET /reports/export/csv?report_id=...` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Export an authorized report as CSV. |
+| `GET /reports/export/excel?report_id=...` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Export an authorized report as Excel. |
+| `GET /reports/export/pdf?report_id=...` | Customer Admin/Officer (own tenant); Owner (platform-wide) | Export an authorized report as PDF. |
+| `GET /settings/` | Authenticated customer; Owner's own account | Retrieve settings for the authenticated user. |
+| `PUT /settings/` | Authenticated customer; Owner's own account | Update user settings and propagate to the active AI engine. |
+| `POST /settings/reset` | Authenticated customer; Owner's own account | Reset the current user's settings. |
 
 ---
 
@@ -694,14 +697,16 @@ All REST endpoints are prefixed with `/api/v1` except for the WebSocket endpoint
 - **Password Hashing**: Passwords are hashed using bcrypt with 12 rounds. A minimum length of 8 characters is enforced during registration and password updates.
 - **Access Tokens**: Short-lived JSON Web Tokens signed using HMAC-SHA256 (`HS256`). Payloads contain `user_id`, `role`, `username`, and an `exp` expiration claim (configured via `ACCESS_TOKEN_EXPIRE_MINUTES`, defaulting to 60 minutes).
 - **Refresh Tokens**: Randomly generated tokens stored in the `RefreshToken` database table alongside client metadata and a 7-day expiration timestamp.
-- **Session Revocation**: Logging out invalidates the provided refresh token. The `/users/profile/logout-all` endpoint revokes all refresh tokens belonging to the user. Requests validate access tokens statelessly without querying the database on every call.
-- **Email Verification**: Disabled by default. When enabled via `REQUIRE_EMAIL_VERIFICATION=true`, accounts are created in a pending state until verified. If SMTP variables are not configured, verification tokens are written to the backend application logs instead of being sent via email.
+- **Session Revocation**: Logging out invalidates the provided refresh token. The `/users/profile/logout-all` endpoint revokes all refresh tokens belonging to the user. Protected requests resolve the user and role from the database, so role changes and account deactivation take effect immediately.
+- **Registration Lifecycle**: Each self-registration receives the `Admin` role and creates an independent pending `CustomerProfile`. Email verification (optional, controlled by `REQUIRE_EMAIL_VERIFICATION`) only moves a new account to the activation queue; Owner activation must set the profile to `PLATFORM_CUSTOMER` and `ACTIVE` before customer APIs are available.
+- **Current Identity**: `GET /api/v1/auth/me` returns the database-backed identity and workflow/account state for frontend routing. Pending and inactive users can reach this endpoint but cannot access customer APIs.
 
 ### Roles and Ownership
 
-- **Role Definitions**: Standard registrations are assigned the `Officer` role. Administrative endpoints require the `Administrator` role claim.
-- **Resource Ownership**: Camera streams, zones, events, and reports enforce ownership checks against the authenticated user. Administrators are granted access across all resources.
-- **WebSocket Access**: Real-time `ai_event` and `alarm_state` messages are scoped to the camera's owner. As noted in the WebSocket section, `camera_status` and `ai_status` updates are broadcast to all connected clients.
+- **Role Definitions**: `Admin` is the primary administrator of one customer tenant; `Officer` is a tenant member; `Owner` is the only platform-wide administrator. Customer Admins cannot access other tenants. Officer accounts created by an Admin inherit that Admin's CustomerProfile. Self-registration assigns Admin and creates a separate pending profile.
+- **Owner Provisioning**: After applying migration 004, run `python -m app.cli.create_owner` from `backend/`. The one-time command prompts for identity details and a hidden password confirmation, stores only a bcrypt hash, and requires the database's single-Owner constraint. Owner credentials are never accepted as command-line arguments.
+- **Resource Ownership**: Admin/Officer access is scoped to the authenticated database membership. Owner resource access is platform-wide; Owner-created cameras and Officers require an explicit existing CustomerProfile. Camera quotas remain enforced.
+- **WebSocket Access**: Customer events and camera updates are scoped to the camera's CustomerProfile. Only the authenticated Owner receives platform-wide broadcasts.
 
 ---
 
@@ -714,7 +719,7 @@ The backend reads configuration settings from `backend/.env` via `backend/app/da
 | Environment Variable | Default Value | Description and Operational Guidance |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | *Required* | SQLAlchemy connection URI. Must target a valid PostgreSQL database. |
-| `SECRET_KEY` | Source fallback | Secret key used to sign JWT access tokens. Must be changed in production. |
+| `SECRET_KEY` | Source fallback in development | Secret key used to sign JWT access tokens. Production startup requires an explicitly configured secret of at least 32 bytes. |
 | `JWT_SECRET` | None | Fallback secret name checked if `SECRET_KEY` is not present. |
 | `ALGORITHM` | `HS256` | Cryptographic signing algorithm for JWT tokens. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Lifetime of issued JWT access tokens in minutes. |
@@ -980,12 +985,11 @@ npm run build
 > [!CAUTION]
 > Review the following security considerations before deploying AeroGuard AI outside an isolated local development environment.
 
-- **Default JWT Secret Fallback**: If neither `SECRET_KEY` nor `JWT_SECRET` is set, the application falls back to a hardcoded string (`super_secret`). Always generate and configure a strong secret key in production environments.
+- **Default JWT Secret Fallback**: If neither `SECRET_KEY` nor `JWT_SECRET` is set, development falls back to a hardcoded string (`super_secret`). Production startup rejects missing, known-weak, or shorter-than-32-byte secrets.
 - **Default Demo Credentials**: The codebase includes a demo credential fallback (`admin123`) in development helpers. Do not deploy demo accounts or credentials to production instances.
-- **Unprotected Diagnostic Endpoint**: `GET /api/v1/auth/create-admin` requires no authentication and returns total user counts and usernames. Restrict or remove this endpoint before deploying.
-- **Static Directory Mounting**: The `backend/uploads` directory is mounted directly as static content at `/uploads`. Any file stored in this directory can be accessed without passing through the ownership checks enforced by `/api/v1/ai/events/{id}/screenshot`.
-- **Public Report PDF Access**: Compiled report PDFs are written to `backend/uploads/reports/`, which falls within the statically mounted upload tree.
-- **WebSocket Broadcast Scope**: The WebSocket server enforces ownership filtering on `ai_event` and `alarm_state` messages, but broadcasts `camera_status` and `ai_status` updates to **all** connected clients.
+- **Owner Provisioning**: The former unauthenticated `GET /api/v1/auth/create-admin` endpoint has been removed. Provision the single Owner account through the hidden-password CLI after applying migration 004.
+- **Protected Upload Files**: There is no public static mount for `backend/uploads`. Avatar, video, and event files under `/uploads` require authenticated authorization and a matching database record; customer users are tenant-scoped and Owner is platform-wide. Files without a supported ownership record are intentionally not served.
+- **Legacy Tenant Mapping**: Ambiguous legacy Officer membership and reports without verified tenant ownership remain preserved and unavailable to customer tenants until reviewed and explicitly mapped. Migration 006 is prepared but has not been run; it does not backfill ownership.
 - **Client Token Storage**: Access tokens are stored in browser `localStorage` and passed to WebSockets via URL query parameters. Use TLS (`https://` and `wss://`) to protect tokens in transit, and avoid logging full WebSocket query strings.
 - **CORS Configuration**: By default, CORS origins are restricted to `http://localhost:5173` and `http://127.0.0.1:5173`. Update allowed origins when deploying to other domains.
 - **Worker Memory Isolation**: Ingestion workers run as background threads within the main backend process. If the process terminates, all active streams stop and in-memory tracking states are cleared.

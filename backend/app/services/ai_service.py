@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 from ..repositories.ai_repository import AIRepository
 from ..websocket.manager import manager
 from ..models.models import Camera
+from ..core.tenant import tenant_owner_filter
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "ai_events")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -63,6 +64,7 @@ class AIService:
         track_id: Optional[str] = None,
         user_id: Optional[str] = None,
         owner_id: Optional[str] = None,
+        customer_profile_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         screenshot_bytes: Optional[bytes] = None,
         broadcast: bool = True,
@@ -77,15 +79,44 @@ class AIService:
         }
         camera = None
         if hasattr(self.repo, "db") and hasattr(self.repo.db, "query"):
-            try:
-                camera = self.repo.db.query(Camera).filter(Camera.camera_id == camera_id).first()
-            except Exception:
-                camera = None
-        if owner_id is not None and hasattr(self.repo, "db") and hasattr(self.repo.db, "query"):
-            if not camera:
-                raise ValueError("Camera not found")
-            if str(getattr(camera, "owner_id", None)) != str(owner_id):
-                raise PermissionError("Camera ownership mismatch")
+            camera_query = self.repo.db.query(Camera).filter(
+                Camera.camera_id == camera_id
+            )
+            if customer_profile_id:
+                camera_query = camera_query.filter(
+                    tenant_owner_filter(
+                        Camera,
+                        self.repo.db,
+                        customer_profile_id,
+                        Camera.owner_id,
+                    )
+                )
+            elif owner_id is not None:
+                camera_query = camera_query.filter(Camera.owner_id == owner_id)
+            camera = camera_query.first()
+        if not camera:
+            raise ValueError("Camera not found or customer membership mismatch")
+        audience_customer_profile_id = customer_profile_id
+        if audience_customer_profile_id is None:
+            audience_customer_profile_id = getattr(
+                camera, "customer_profile_id", None
+            )
+            if audience_customer_profile_id is None:
+                camera_owner = getattr(camera, "owner", None)
+                from ..core.tenant import customer_profile_for_user
+
+                profile = (
+                    customer_profile_for_user(camera_owner)
+                    if camera_owner is not None
+                    else None
+                )
+                if profile is not None:
+                    audience_customer_profile_id = profile.customer_profile_id
+        if audience_customer_profile_id is None:
+            raise PermissionError("Camera has no verified customer membership")
+        payload["customer_profile_id"] = getattr(
+            camera, "customer_profile_id", None
+        )
         if track_id is not None:
             try:
                 payload["track_id"] = str(track_id)
@@ -125,8 +156,10 @@ class AIService:
                             "screenshot": ev.screenshot_path,
                         }
                     },
-                    audience_user_id=(
-                        str(getattr(camera, "owner_id", "")) if camera else None
+                    audience_customer_profile_id=(
+                        str(audience_customer_profile_id)
+                        if audience_customer_profile_id
+                        else None
                     ),
                 ))
             except Exception:
@@ -189,11 +222,10 @@ class AIService:
                             "screenshot": ev.screenshot_path,
                         }
                     },
-                    audience_user_id=(
-                        str(
-                            getattr(camera, "owner_id", None)
-                            or getattr(ev, "detected_by", "")
-                        )
+                    audience_customer_profile_id=(
+                        str(getattr(camera, "customer_profile_id", None))
+                        if getattr(camera, "customer_profile_id", None)
+                        else None
                     ),
                 )
             except Exception:

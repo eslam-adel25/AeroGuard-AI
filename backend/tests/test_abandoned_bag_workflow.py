@@ -186,7 +186,7 @@ def test_confirmed_visual_state_is_explicitly_red_and_danger():
     }
 
 
-def test_settings_api_normalizes_legacy_and_submitted_thresholds(monkeypatch):
+def test_settings_api_preserves_existing_abandoned_bag_threshold(monkeypatch):
     stored_settings = SimpleNamespace(
         abandoned_bag_enabled=True,
         abandoned_bag_seconds=20,
@@ -214,14 +214,14 @@ def test_settings_api_normalizes_legacy_and_submitted_thresholds(monkeypatch):
         current_user={"user_id": "owner-1"},
     )
     updated_settings = settings_api.update_settings(
-        payload=SettingsUpdate(abandoned_bag_seconds=20),
+        payload=SettingsUpdate(detection_confidence=0.73),
         db=object(),
         current_user={"user_id": "owner-1"},
     )
 
-    assert read_settings["abandoned_bag_seconds"] == 60
-    assert updates[0]["abandoned_bag_seconds"] == 60
-    assert updated_settings["abandoned_bag_seconds"] == 60
+    assert read_settings["abandoned_bag_seconds"] == 20
+    assert "abandoned_bag_seconds" not in updates[0]
+    assert updated_settings["abandoned_bag_seconds"] == 20
 
 
 def test_first_screenshot_is_immediate_then_recurs_every_five_seconds(monkeypatch):
@@ -333,6 +333,7 @@ def test_ownerless_process_camera_publishes_red_frame_and_alarm_on_persistence_f
     camera = SimpleNamespace(
         camera_id="ownerless-camera",
         owner_id=None,
+        customer_profile_id="tenant-a",
         status="Processing",
     )
 
@@ -342,6 +343,9 @@ def test_ownerless_process_camera_publishes_red_frame_and_alarm_on_persistence_f
 
         def filter(self, *_args):
             return self
+
+        def exists(self):
+            return True
 
         def all(self):
             return []

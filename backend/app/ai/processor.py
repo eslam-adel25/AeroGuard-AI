@@ -13,7 +13,13 @@ from ultralytics import YOLO
 from ultralytics.nn import tasks as ultralytics_tasks
 from sqlalchemy.orm import Session
 from ..database.session import SessionLocal
-from ..models.models import Detection, Camera, RestrictedZone, UserSettings
+from ..models.models import (
+    Detection,
+    Camera,
+    RestrictedZone,
+    SystemSettings,
+    UserSettings,
+)
 from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
 from ..services.camera_status import CAMERA_NO_FRAME_GRACE_SECONDS
@@ -62,7 +68,14 @@ def _get_detection_persistence_label(label_name):
     return "Baggage"
 
 
-def build_detection_record(camera_id, owner_id, detection_type, confidence, status=None):
+def build_detection_record(
+    camera_id,
+    owner_id,
+    detection_type,
+    confidence,
+    status=None,
+    customer_profile_id=None,
+):
     priority = "Medium"
     is_violation = False
     violation_type = None
@@ -79,6 +92,7 @@ def build_detection_record(camera_id, owner_id, detection_type, confidence, stat
     return Detection(
         camera_id=camera_id,
         owner_id=owner_id,
+        customer_profile_id=customer_profile_id,
         detection_type=detection_type,
         confidence=float(confidence or 0),
         priority=priority,
@@ -419,7 +433,7 @@ class AIProcessor:
         camera_id,
         active,
         sources=None,
-        audience_user_id=None,
+        audience_customer_profile_id=None,
     ):
         try:
             await manager.broadcast({
@@ -429,7 +443,11 @@ class AIProcessor:
                     "active": bool(active),
                     "sources": sorted(sources) if sources else [],
                 },
-            }, audience_user_id=str(audience_user_id) if audience_user_id else None)
+            }, audience_customer_profile_id=(
+                str(audience_customer_profile_id)
+                if audience_customer_profile_id
+                else None
+            ))
         except Exception:
             logger.exception("Failed to broadcast alarm state for camera %s", camera_id)
 
@@ -439,7 +457,7 @@ class AIProcessor:
         zone_id,
         active,
         event_id,
-        audience_user_id=None,
+        audience_customer_profile_id=None,
     ):
         try:
             await manager.broadcast(
@@ -452,8 +470,10 @@ class AIProcessor:
                         "event_id": str(event_id) if event_id else None,
                     },
                 },
-                audience_user_id=(
-                    str(audience_user_id) if audience_user_id else None
+                audience_customer_profile_id=(
+                    str(audience_customer_profile_id)
+                    if audience_customer_profile_id
+                    else None
                 ),
             )
         except Exception:
@@ -624,7 +644,17 @@ class AIProcessor:
             if alert_key.startswith(prefix) and alert_key not in active_alert_keys:
                 self.alert_persistence.pop(alert_key, None)
 
-    def _persist_detection(self, db_session, camera_id, owner_id, detection_type, confidence, track_id, status=None):
+    def _persist_detection(
+        self,
+        db_session,
+        camera_id,
+        owner_id,
+        detection_type,
+        confidence,
+        track_id,
+        status=None,
+        customer_profile_id=None,
+    ):
         if not owner_id:
             return None
 
@@ -642,12 +672,15 @@ class AIProcessor:
             detection_type=detection_type,
             confidence=confidence,
             status=status,
+            customer_profile_id=customer_profile_id,
         )
         return repo.save_detection(detection)
 
-    def update_config(self, settings_model: UserSettings):
+    def update_config(self, settings_model: UserSettings, system_settings=None):
         """تحديث إعدادات المحرك فور ضغط زر Save في صفحة Settings (Section 2)"""
-        settings_snapshot = self._snapshot_camera_settings(settings_model)
+        settings_snapshot = self._snapshot_camera_settings(
+            settings_model, system_settings
+        )
         owner_id = settings_snapshot.owner_id
         if owner_id is not None:
             with self._settings_lock:
@@ -668,7 +701,7 @@ class AIProcessor:
             print(f"⚠️ AI Engine model reload failed: {type(exc).__name__}: {exc}")
 
     @staticmethod
-    def _snapshot_camera_settings(settings_model):
+    def _snapshot_camera_settings(settings_model, system_settings=None):
         field_names = (
             "owner_id",
             "detection_confidence",
@@ -685,16 +718,19 @@ class AIProcessor:
             "fire_detection_enabled",
             "smoke_detection_enabled",
         )
-        return SimpleNamespace(
-            **{
-                field_name: (
-                    60
-                    if field_name == "abandoned_bag_seconds"
-                    else getattr(settings_model, field_name, None)
-                )
-                for field_name in field_names
-            }
-        )
+        snapshot = {}
+        for field_name in field_names:
+            value = getattr(settings_model, field_name, None)
+            if field_name == "abandoned_bag_seconds" and value is None:
+                value = 60
+            if (
+                field_name.endswith("_enabled")
+                and system_settings is not None
+                and getattr(system_settings, field_name, None) is False
+            ):
+                value = False
+            snapshot[field_name] = value
+        return SimpleNamespace(**snapshot)
 
     def _get_settings_for_owner(self, owner_id, fallback=None):
         if owner_id is None:
@@ -1514,19 +1550,48 @@ class AIProcessor:
         last_frame_pos = -1
         status_broadcasted = False
         camera_owner_id = None
+        camera_tenant_id = None
+        camera_record_tenant_id = None
         last_frame_received_at = None
         try:
             local_db = db if db is not None else SessionLocal()
             if self._camera_stop_requested(camera_id_str):
                 return
             self._initialize_camera_runtime_state(camera_id_str)
+            camera_owner = (
+                local_db.query(Camera)
+                .filter(Camera.camera_id == camera_id)
+                .first()
+            )
+            camera_owner_id = getattr(camera_owner, "owner_id", None)
+            camera_tenant_id = getattr(camera_owner, "customer_profile_id", None)
+            camera_record_tenant_id = camera_tenant_id
+            if camera_tenant_id is None and camera_owner is not None:
+                camera_owner_user = getattr(camera_owner, "owner", None)
+                if camera_owner_user is not None:
+                    from ..core.tenant import customer_profile_for_user
+
+                    profile = customer_profile_for_user(camera_owner_user)
+                    camera_tenant_id = (
+                        getattr(profile, "customer_profile_id", None)
+                        if profile is not None
+                        else None
+                    )
+            if camera_tenant_id is None:
+                logger.error(
+                    "Camera %s has no verified customer membership; AI processing denied",
+                    camera_id,
+                )
+                return
             await manager.broadcast({
                 "event": "camera_status",
                 "data": {
                     "camera_id": str(camera_id),
                     "status": "Processing",
                 }
-            })
+            }, audience_customer_profile_id=(
+                str(camera_tenant_id) if camera_tenant_id else None
+            ))
             if self._camera_stop_requested(camera_id_str):
                 return
             # 1. تحديد نوع المصدر ومعالجته
@@ -1571,7 +1636,16 @@ class AIProcessor:
             # 2. تحميل إعدادات المناطق المحظورة (نُحمّلها أولياً ونقوم بتحديثها دورياً داخل الحلقة)
             zones = []
             try:
-                zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+                from ..core.tenant import tenant_camera_child_filter
+                zones = local_db.query(RestrictedZone).filter(
+                    RestrictedZone.camera_id == camera_id,
+                    tenant_camera_child_filter(
+                        RestrictedZone,
+                        local_db,
+                        camera_tenant_id,
+                        owner_column=RestrictedZone.owner_id,
+                    ),
+                ).all()
             except Exception as zone_exc:
                 print(f"⚠️ [{camera_id}] failed to load restricted zones: {type(zone_exc).__name__}: {zone_exc}")
                 zones = []
@@ -1613,9 +1687,12 @@ class AIProcessor:
                     if camera_owner_id
                     else None
                 )
+                system_settings = local_db.query(SystemSettings).first()
                 camera_settings = self._get_settings_for_owner(camera_owner_id)
                 if camera_settings is None and settings_row is not None:
-                    settings_snapshot = self._snapshot_camera_settings(settings_row)
+                    settings_snapshot = self._snapshot_camera_settings(
+                        settings_row, system_settings
+                    )
                     with self._settings_lock:
                         camera_settings = self._settings_by_owner.setdefault(
                             str(camera_owner_id),
@@ -1656,7 +1733,7 @@ class AIProcessor:
             next_frame_deadline = time.perf_counter()
             while cap.isOpened():
                 camera_settings = self._get_settings_for_owner(
-                    camera_owner_id,
+                    camera_tenant_id,
                     camera_settings,
                 )
                 iteration += 1
@@ -1756,7 +1833,9 @@ class AIProcessor:
                             "camera_id": str(camera_id),
                             "status": "Running",
                         }
-                    })
+                    }, audience_customer_profile_id=(
+                        str(camera_tenant_id) if camera_tenant_id else None
+                    ))
                     status_broadcasted = True
 
                 if last_valid_frame == 0:
@@ -1859,7 +1938,15 @@ class AIProcessor:
                 # Periodically refresh zones from DB so saved annotations are applied to live inference
                 try:
                     if iteration % 30 == 0:
-                        zones = local_db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+                        zones = local_db.query(RestrictedZone).filter(
+                            RestrictedZone.camera_id == camera_id,
+                            tenant_camera_child_filter(
+                                RestrictedZone,
+                                local_db,
+                                camera_tenant_id,
+                                owner_column=RestrictedZone.owner_id,
+                            ),
+                        ).all()
                         self._deleted_tripwire_zones = {
                             key
                             for key in self._deleted_tripwire_zones
@@ -2043,7 +2130,7 @@ class AIProcessor:
                                                     "Critical",
                                                     float(conf),
                                                     str(obj_id),
-                                                    camera_owner_id,
+                                                    camera_tenant_id,
                                                     {"bbox": [x1, y1, x2, y2]},
                                                     annotated_frame,
                                                     active_alert_keys,
@@ -2138,7 +2225,14 @@ class AIProcessor:
                                                     "occupancy_confirmation_required": False,
                                                 },
                                             }
-                                            await manager.broadcast(tripwire_message)
+                                            await manager.broadcast(
+                                                tripwire_message,
+                                                audience_customer_profile_id=(
+                                                    str(camera_tenant_id)
+                                                    if camera_tenant_id
+                                                    else None
+                                                ),
+                                            )
                                             if became_over_limit:
                                                 self._register_critical_alert(camera_id)
                                                 event = await self._register_immediate_tripwire_alert(
@@ -2147,7 +2241,7 @@ class AIProcessor:
                                                     tripwire_id,
                                                     float(conf),
                                                     str(obj_id),
-                                                    camera_owner_id,
+                                                    camera_tenant_id,
                                                     current_occupancy,
                                                     allowed_group_size,
                                                     over_limit_count,
@@ -2166,7 +2260,7 @@ class AIProcessor:
                                                     tripwire_id,
                                                     True,
                                                     event_id,
-                                                    camera_owner_id,
+                                                    camera_tenant_id,
                                                 )
                                                 tripwire_alert_handled = True
                                             status = "DANGER" if became_over_limit else "NORMAL"
@@ -2267,6 +2361,7 @@ class AIProcessor:
                         float(conf),
                         obj_id,
                         status,
+                        customer_profile_id=camera_record_tenant_id,
                     )
 
                     if status == "DANGER" and display_label != "TRIPWIRE":
@@ -2456,7 +2551,7 @@ class AIProcessor:
                         camera_id,
                         new_alarm_active,
                         current_alarm_sources,
-                        camera_owner_id,
+                        camera_tenant_id,
                     )
 
                 await manager.broadcast({
@@ -2470,7 +2565,9 @@ class AIProcessor:
                         "critical_alerts": critical_alert_count,
                         "camera_id": str(camera_id)
                    }
-                })
+                }, audience_customer_profile_id=(
+                    str(camera_tenant_id) if camera_tenant_id else None
+                ))
 
                 self.last_frames[str(camera_id)] = annotated_frame
                 if frame_period is not None:
@@ -2497,7 +2594,7 @@ class AIProcessor:
                         camera_id,
                         False,
                         [],
-                        camera_owner_id,
+                        camera_tenant_id,
                     )
                 except Exception as exc:
                     print(f"⚠️ [{camera_id}] alarm cleanup broadcast failed: {type(exc).__name__}: {exc}")
@@ -2510,7 +2607,7 @@ class AIProcessor:
                     zone_id,
                     False,
                     state.get("event_id"),
-                    camera_owner_id,
+                    camera_tenant_id,
                 )
 
             try:
@@ -2559,7 +2656,9 @@ class AIProcessor:
                         "camera_id": str(camera_id),
                         "status": "Offline",
                     }
-                })
+                }, audience_customer_profile_id=(
+                    str(camera_tenant_id) if camera_tenant_id else None
+                ))
             except Exception as exc:
                 print(f"⚠️ [{camera_id}] terminal status broadcast failed: {type(exc).__name__}: {exc}")
 

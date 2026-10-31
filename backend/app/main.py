@@ -2,12 +2,22 @@ from pathlib import Path
 from fastapi import FastAPI
 from sqlalchemy import func
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from .database.session import engine, Base, SessionLocal, _ensure_schema_compatibility
-from .api.v1 import auth, cameras, users, reports, settings, websocket_api, ai
+from .api.v1 import (
+    auth,
+    cameras,
+    owner,
+    users,
+    reports,
+    settings,
+    websocket_api,
+    ai,
+    uploads,
+)
 from .ai.processor import ai_engine
 from .services.camera_status import reconcile_orphaned_processing_statuses
+from .core.security import validate_secret_configuration
 import logging
 import os
 
@@ -20,10 +30,10 @@ UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AeroGuard AI API")
-    app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
     @app.on_event("startup")
     def startup_event() -> None:
+        validate_secret_configuration()
         Base.metadata.create_all(bind=engine)
         _ensure_schema_compatibility()
         # Camera processors are not restored across process restarts.
@@ -84,6 +94,8 @@ app.include_router(reports.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(websocket_api.router) # الـ WebSocket غالباً لا يحتاج بريفيكس
 app.include_router(ai.router, prefix="/api/v1")
+app.include_router(uploads.router)
+app.include_router(owner.router, prefix="/api/v1")
 
 
 def _resolve_bind_host() -> str:

@@ -36,7 +36,7 @@ def test_runtime_settings_preserve_feature_flags_and_abandoned_bag():
     for setting in FEATURE_SETTINGS:
         assert getattr(snapshot, setting) is True
     assert snapshot.abandoned_bag_enabled is True
-    assert snapshot.abandoned_bag_seconds == 60
+    assert snapshot.abandoned_bag_seconds == 20
     assert snapshot.wrong_direction_enabled is True
 
 
@@ -103,3 +103,38 @@ def test_runtime_settings_keep_abandoned_bag_disabled_when_original_setting_is_f
     snapshot = AIProcessor._snapshot_camera_settings(settings)
 
     assert snapshot.abandoned_bag_enabled is False
+    assert snapshot.abandoned_bag_seconds == 60
+
+
+def test_system_settings_can_disable_customer_detection_modules():
+    settings = SimpleNamespace(
+        owner_id="owner-1",
+        loitering_enabled=True,
+        crowd_density_enabled=True,
+        restricted_area_enabled=True,
+        wrong_direction_enabled=True,
+        abandoned_bag_enabled=True,
+        fire_detection_enabled=True,
+        smoke_detection_enabled=True,
+        abandoned_bag_seconds=20,
+    )
+    system_settings = SimpleNamespace(
+        loitering_enabled=False,
+        crowd_density_enabled=True,
+        restricted_area_enabled=False,
+        wrong_direction_enabled=True,
+        abandoned_bag_enabled=True,
+        fire_detection_enabled=False,
+        smoke_detection_enabled=True,
+    )
+
+    snapshot = AIProcessor._snapshot_camera_settings(settings, system_settings)
+
+    assert snapshot.loitering_enabled is False
+    assert snapshot.crowd_density_enabled is True
+    assert snapshot.restricted_area_enabled is False
+    assert snapshot.wrong_direction_enabled is True
+    assert snapshot.abandoned_bag_enabled is True
+    assert snapshot.fire_detection_enabled is False
+    assert snapshot.smoke_detection_enabled is True
+    assert snapshot.abandoned_bag_seconds == 20

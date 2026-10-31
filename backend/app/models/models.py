@@ -1,7 +1,22 @@
 import uuid
-from sqlalchemy import CHAR, Column, String, ForeignKey, TIMESTAMP, Text, Float, Integer, Boolean, JSON
+from sqlalchemy import (
+    CHAR,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    TIMESTAMP,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from sqlalchemy.types import TypeDecorator
 from ..database.session import Base
@@ -51,6 +66,16 @@ class User(Base):
     __tablename__ = "users"
     user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     role_id = Column(UUID(as_uuid=True), ForeignKey("roles.role_id"))
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "customer_profiles.customer_profile_id",
+            use_alter=True,
+            name="fk_users_customer_profile",
+        ),
+        nullable=True,
+        index=True,
+    )
     full_name = Column(String(150), nullable=False)
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(120), unique=True, nullable=False, index=True)
@@ -71,6 +96,114 @@ class User(Base):
     detections = relationship("Detection", back_populates="owner", foreign_keys="Detection.owner_id")
     reports = relationship("Report", back_populates="owner", foreign_keys="Report.owner_id")
     ai_events = relationship("AIEvent", back_populates="owner", foreign_keys="AIEvent.detected_by")
+    customer_profile = relationship(
+        "CustomerProfile",
+        back_populates="user",
+        uselist=False,
+        foreign_keys="CustomerProfile.user_id",
+    )
+    customer_membership = relationship(
+        "CustomerProfile",
+        back_populates="members",
+        foreign_keys=[customer_profile_id],
+    )
+
+
+class CustomerProfile(Base):
+    __tablename__ = "customer_profiles"
+    __table_args__ = (
+        CheckConstraint(
+            "workflow_status IN "
+            "('AWAITING_EMAIL_VERIFICATION', 'UNREAD', 'UNDER_REVIEW', "
+            "'PLATFORM_CUSTOMER')",
+            name="ck_customer_profiles_workflow_status",
+        ),
+        CheckConstraint(
+            "account_status IN ('PENDING', 'ACTIVE', 'INACTIVE')",
+            name="ck_customer_profiles_account_status",
+        ),
+        CheckConstraint(
+            "max_camera_count IS NULL OR max_camera_count >= 0",
+            name="ck_customer_profiles_max_camera_count_nonnegative",
+        ),
+        UniqueConstraint("user_id", name="uq_customer_profiles_user_id"),
+        Index("ix_customer_profiles_workflow_status", "workflow_status"),
+        Index("ix_customer_profiles_account_status", "account_status"),
+    )
+
+    customer_profile_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id"),
+        nullable=False,
+    )
+    workflow_status = Column(
+        String(32),
+        nullable=False,
+        default="AWAITING_EMAIL_VERIFICATION",
+        server_default="AWAITING_EMAIL_VERIFICATION",
+    )
+    account_status = Column(
+        String(16), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    max_camera_count = Column(Integer, nullable=True)
+    all_features = Column(Boolean, nullable=False, default=False, server_default="false")
+    activation_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    owner_notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now(), nullable=True)
+
+    user = relationship(
+        "User",
+        back_populates="customer_profile",
+        foreign_keys=[user_id],
+    )
+    members = relationship(
+        "User",
+        back_populates="customer_membership",
+        foreign_keys="User.customer_profile_id",
+    )
+    feature_permissions = relationship(
+        "CustomerFeaturePermission",
+        back_populates="customer_profile",
+        cascade="all, delete-orphan",
+    )
+
+    @validates("max_camera_count")
+    def validate_max_camera_count(self, key, value):
+        if value is not None and value < 0:
+            raise ValueError("max_camera_count must be non-negative")
+        return value
+
+
+class CustomerFeaturePermission(Base):
+    __tablename__ = "customer_feature_permissions"
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(feature_key)) > 0",
+            name="ck_customer_feature_permissions_feature_key_nonempty",
+        ),
+        UniqueConstraint(
+            "customer_profile_id",
+            "feature_key",
+            name="uq_customer_feature_permissions_profile_feature",
+        ),
+    )
+
+    permission_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature_key = Column(String(100), nullable=False)
+    is_allowed = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now(), nullable=True)
+
+    customer_profile = relationship(
+        "CustomerProfile", back_populates="feature_permissions"
+    )
 
 class SystemSettings(Base):
     __tablename__ = "system_settings"
@@ -107,6 +240,13 @@ class SystemSettings(Base):
 
 class Camera(Base):
     __tablename__ = "cameras"
+    __table_args__ = (
+        UniqueConstraint(
+            "camera_id",
+            "customer_profile_id",
+            name="uq_cameras_id_customer_profile",
+        ),
+    )
     camera_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_name = Column(String(100), nullable=False)
     location = Column(String(150), nullable=False)
@@ -114,39 +254,89 @@ class Camera(Base):
     camera_type = Column(String(20), default="LIVE") # LIVE, UPLOAD
     status = Column(String(20), default="Offline")
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     owner = relationship("User", back_populates="cameras", foreign_keys="Camera.owner_id")
-    zones = relationship("RestrictedZone", back_populates="camera", cascade="all, delete-orphan")
-    detections = relationship("Detection", back_populates="camera", cascade="all, delete-orphan")
+    zones = relationship(
+        "RestrictedZone",
+        back_populates="camera",
+        cascade="all, delete-orphan",
+        foreign_keys="RestrictedZone.camera_id",
+    )
+    detections = relationship(
+        "Detection",
+        back_populates="camera",
+        cascade="all, delete-orphan",
+        foreign_keys="Detection.camera_id",
+    )
     ai_events = relationship("AIEvent", back_populates="camera", cascade="all, delete-orphan", foreign_keys="AIEvent.camera_id")
 
 class RestrictedZone(Base):
     __tablename__ = "restricted_zones"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["camera_id", "customer_profile_id"],
+            ["cameras.camera_id", "cameras.customer_profile_id"],
+            name="fk_restricted_zones_camera_tenant",
+        ),
+    )
     zone_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False)
     zone_name = Column(String(100), nullable=False)
     zone_type = Column(String(50), default="Restricted Area")
     polygon_coords = Column(JSONB, nullable=False)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     tripwire_allowed_group_size = Column(Integer, nullable=True)
     tripwire_initial_occupancy = Column(Integer, nullable=True)
     tripwire_current_occupancy = Column(Integer, nullable=True)
     tripwire_entry_direction = Column(String(20), nullable=True)
     tripwire_requires_confirmation = Column(Boolean, nullable=False, default=False, server_default="false")
-    camera = relationship("Camera", back_populates="zones")
+    camera = relationship(
+        "Camera",
+        back_populates="zones",
+        foreign_keys=[camera_id],
+    )
 
 class Detection(Base):
     __tablename__ = "detections"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["camera_id", "customer_profile_id"],
+            ["cameras.camera_id", "cameras.customer_profile_id"],
+            name="fk_detections_camera_tenant",
+        ),
+    )
     detection_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     detection_type = Column(String(50), nullable=False)
     confidence = Column(Float, nullable=False)
     priority = Column(String(20))
     is_violation = Column(Boolean, default=False)
     violation_type = Column(String(50)) # Restricted, Wrong Direction
     detected_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    camera = relationship("Camera", back_populates="detections")
+    camera = relationship(
+        "Camera",
+        back_populates="detections",
+        foreign_keys=[camera_id],
+    )
     owner = relationship("User", back_populates="detections", foreign_keys="Detection.owner_id")
 
 
@@ -195,6 +385,12 @@ class UserSettings(Base):
     __tablename__ = "user_settings"
     settings_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, unique=True, index=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
 
     # General
     organization_name = Column(String(150), default="")
@@ -282,6 +478,12 @@ class Report(Base):
     report_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False, index=True)
     generated_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     generated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     title = Column(String(200), nullable=True)
     description = Column(Text, nullable=True)
@@ -297,8 +499,26 @@ class Report(Base):
 
 class Tracking(Base):
     __tablename__ = "trackings"
+    __table_args__ = (
+        UniqueConstraint(
+            "track_id",
+            "customer_profile_id",
+            name="uq_trackings_id_customer_profile",
+        ),
+        ForeignKeyConstraint(
+            ["camera_id", "customer_profile_id"],
+            ["cameras.camera_id", "cameras.customer_profile_id"],
+            name="fk_trackings_camera_tenant",
+        ),
+    )
     track_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False, index=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     track_type = Column(String(50), default="person")
     track_label = Column(String(150), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
@@ -309,10 +529,28 @@ class Tracking(Base):
 
 class AIEvent(Base):
     __tablename__ = "ai_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["camera_id", "customer_profile_id"],
+            ["cameras.camera_id", "cameras.customer_profile_id"],
+            name="fk_ai_events_camera_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["track_id", "customer_profile_id"],
+            ["trackings.track_id", "trackings.customer_profile_id"],
+            name="fk_ai_events_track_tenant",
+        ),
+    )
     event_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     track_id = Column(UUID(as_uuid=True), ForeignKey("trackings.track_id"), nullable=True, index=True)
     camera_id = Column(UUID(as_uuid=True), ForeignKey("cameras.camera_id"), nullable=False, index=True)
     detected_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=True)
+    customer_profile_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("customer_profiles.customer_profile_id"),
+        nullable=True,
+        index=True,
+    )
     detection_type = Column(String(100), nullable=False)
     severity = Column(String(20), nullable=False)
     confidence = Column(Float, nullable=True)

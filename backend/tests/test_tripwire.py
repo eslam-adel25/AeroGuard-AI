@@ -210,7 +210,7 @@ def test_tripwire_alarm_state_broadcast_is_scoped_to_camera_owner():
 
     assert len(owner_socket.messages) == 1
     assert other_socket.messages == []
-    assert len(admin_socket.messages) == 1
+    assert admin_socket.messages == []
 
 
 def test_tripwire_alarm_cleanup_is_scoped_to_camera_and_zone():
@@ -238,7 +238,10 @@ def test_tripwire_alarm_cleanup_is_scoped_to_camera_and_zone():
 
 
 def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch):
-    camera = SimpleNamespace(owner_id="owner-a")
+    camera = SimpleNamespace(
+        owner_id="owner-a",
+        customer_profile_id="tenant-a",
+    )
     zone = SimpleNamespace(zone_type="Tripwire")
     cleared = []
     messages = []
@@ -249,6 +252,9 @@ def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch)
 
         def filter(self, *_args):
             return self
+
+        def exists(self):
+            return True
 
         def first(self):
             return camera if self.model is Camera else zone
@@ -263,8 +269,8 @@ def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch)
         def commit(self):
             pass
 
-    async def fake_broadcast(message, audience_user_id=None):
-        messages.append((message, audience_user_id))
+    async def fake_broadcast(message, audience_customer_profile_id=None):
+        messages.append((message, audience_customer_profile_id))
 
     monkeypatch.setattr(
         cameras_api,
@@ -277,13 +283,27 @@ def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch)
         ),
     )
     monkeypatch.setattr(cameras_api.manager, "broadcast", fake_broadcast)
+    monkeypatch.setattr(
+        cameras_api,
+        "tenant_owner_filter",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        cameras_api,
+        "tenant_camera_child_filter",
+        lambda *_args, **_kwargs: True,
+    )
 
     response = asyncio.run(
         cameras_api.delete_restricted_zone(
             "camera-a",
             "wire-a",
             db=FakeDB(),
-            current_user={"user_id": "owner-a", "role": "User"},
+            current_user={
+                "user_id": "owner-a",
+                "role": "Admin",
+                "customer_profile_id": "tenant-a",
+            },
         )
     )
 
@@ -298,7 +318,7 @@ def test_tripwire_zone_deletion_clears_runtime_alarm_and_broadcasts(monkeypatch)
             "event_id": "event-a",
         },
     }
-    assert messages[0][1] == "owner-a"
+    assert messages[0][1] == "tenant-a"
 
 
 def _build_tripwire_session():

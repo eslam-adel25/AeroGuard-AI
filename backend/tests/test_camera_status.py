@@ -40,6 +40,7 @@ def _create_processor():
     processor.model_path = "test-model.pt"
     processor._active_alarm_state = {}
     processor._active_alarm_sources = {}
+    processor._active_tripwire_alarm_states = {}
     processor.trackers = {}
     processor.object_history = {}
     processor.loitering_tracker = {}
@@ -132,6 +133,9 @@ class _FakeCapture:
 
 
 def _processor_camera(db_camera, processor, monkeypatch, cap, events):
+    camera = getattr(db_camera, "camera", None)
+    if camera is not None and not getattr(camera, "customer_profile_id", None):
+        camera.customer_profile_id = "tenant-a"
     monkeypatch.setattr(
         processor_module,
         "SessionLocal",

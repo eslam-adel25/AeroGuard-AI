@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 interface UserSession {
-  token: string;
+  session_id: string;
   expires_at: string | null;
   revoked: boolean;
   created_at: string | null;
@@ -63,6 +63,7 @@ const Profile: React.FC = () => {
 
   // --- States ---
   const [profile, setProfile] = useState<IUserProfile | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -109,6 +110,35 @@ const Profile: React.FC = () => {
     loadProfile();
     loadSessions();
   }, [loadProfile]);
+
+  useEffect(() => {
+    if (!profile?.profile_picture) {
+      setAvatarUrl(null);
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+    userService
+      .getAvatar()
+      .then(({ data }) => {
+        objectUrl = URL.createObjectURL(data);
+        if (active) {
+          setAvatarUrl(objectUrl);
+        } else {
+          URL.revokeObjectURL(objectUrl);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load profile avatar", error);
+        if (active) setAvatarUrl(null);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [profile?.profile_picture]);
 
   const handleUpdateInfo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,9 +343,9 @@ const Profile: React.FC = () => {
             <div className="flex flex-col items-center">
               <div className="relative mb-6">
                 <div className="w-28 h-28 rounded-2xl bg-[#0c0e12] overflow-hidden border border-white/10 shadow-2xl">
-                  {profile?.profile_picture ? (
+                  {avatarUrl ? (
                     <img
-                      src={profile.profile_picture}
+                      src={avatarUrl}
                       className="w-full h-full object-cover"
                       alt="Avatar"
                     />
@@ -722,11 +752,12 @@ const Profile: React.FC = () => {
                   ) : (
                     sortedSessions.map((s, idx) => (
                       <tr
-                        key={s.token}
+                        key={s.session_id}
                         className="text-xs group hover:bg-white/[0.02] transition-colors"
                       >
                         <td className="py-6 px-4 font-mono text-gray-400">
-                          sess_{s.token.slice(0, 4)}...{s.token.slice(-3)}
+                          sess_{s.session_id.slice(0, 4)}...
+                          {s.session_id.slice(-3)}
                         </td>
                         <td className="py-6 px-4 text-gray-400">
                           {s.created_at

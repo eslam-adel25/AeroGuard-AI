@@ -6,7 +6,12 @@ import io, csv
 
 from ...database.session import get_db
 from ...services.report_service import ReportService # استدعاء الخدمة
-from ...core.auth_middleware import get_current_user
+from ...core.auth_middleware import (
+    get_resource_user,
+    require_tenant_isolation,
+)
+from ...core.customer_features import require_customer_feature
+from ...core.tenant import PLATFORM_TENANT_SCOPE, tenant_owner_filter
 from ...repositories.report_repository import ReportRepository
 from ...repositories.ai_repository import AIRepository
 from ...models.models import Camera
@@ -15,7 +20,14 @@ from ...services.camera_status import apply_camera_runtime_statuses
 import json
 from ...utils.report_generator import ReportGenerator
 
-router = APIRouter(prefix="/reports", tags=["Reports"])
+router = APIRouter(
+    prefix="/reports",
+    tags=["Reports"],
+    dependencies=[
+        Depends(require_customer_feature("analytics")),
+        Depends(require_tenant_isolation),
+    ],
+)
 
 @router.get("/summary")
 async def get_report_summary(
@@ -27,18 +39,17 @@ async def get_report_summary(
     confidence_min: float | None = Query(None),
     confidence_max: float | None = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_resource_user),
 ):
     """رابط جلب ملخص التقارير (Section 4)"""
     owner_id = current_user.get("user_id")
-    is_admin = current_user.get("role") == "Administrator"
     return ReportService.get_report_stats(
         db,
         start_date,
         end_date,
         camera_id=camera_id,
         owner_id=owner_id,
-        is_admin=is_admin,
+        customer_profile_id=current_user.get("customer_profile_id"),
         detection_type=detection_type,
         severity=severity,
         confidence_min=confidence_min,
@@ -59,7 +70,7 @@ async def get_dashboard(
     confidence_min: float | None = Query(None),
     confidence_max: float | None = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_resource_user),
 ):
     """
     يرجع جميع بيانات صفحة Analytics في Request واحد.
@@ -71,7 +82,7 @@ async def get_dashboard(
         end_date=end_date,
         camera_id=camera_id,
         owner_id=current_user.get("user_id"),
-        is_admin=(current_user.get("role") == "Administrator"),
+        customer_profile_id=current_user.get("customer_profile_id"),
         detection_type=detection_type,
         severity=severity,
         confidence_min=confidence_min,
@@ -101,10 +112,9 @@ async def generate_report(
     confidence_min: float | None = Body(None),
     confidence_max: float | None = Body(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_resource_user),
 ):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     report = ReportService.generate_report(
         db=db,
         start_date=start_date,
@@ -114,7 +124,7 @@ async def generate_report(
         generated_by=owner_id,
         title=title,
         report_type=report_type,
-        is_admin=is_admin,
+        customer_profile_id=current_user.get("customer_profile_id"),
         detection_type=detection_type,
         severity=severity,
         confidence_min=confidence_min,
@@ -137,14 +147,13 @@ async def list_reports(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_resource_user),
 ):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
     result = repo.list_reports(
         owner_id=owner_id,
-        is_admin=is_admin,
+        customer_profile_id=current_user.get("customer_profile_id"),
         limit=limit,
         offset=offset,
         query=query,
@@ -168,11 +177,14 @@ async def list_reports(
 
 
 @router.get("/{report_id}")
-async def get_report(report_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def get_report(report_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    report = repo.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    report = repo.get_report(
+        report_id,
+        owner_id=owner_id,
+        customer_profile_id=current_user.get("customer_profile_id"),
+    )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     return {
@@ -188,11 +200,14 @@ async def get_report(report_id: str, db: Session = Depends(get_db), current_user
 
 
 @router.get("/export/csv")
-async def export_report_csv(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def export_report_csv(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    report = repo.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    report = repo.get_report(
+        report_id,
+        owner_id=owner_id,
+        customer_profile_id=current_user.get("customer_profile_id"),
+    )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found or access denied")
 
@@ -224,48 +239,58 @@ async def export_report_csv(report_id: str = Query(...), db: Session = Depends(g
         for row in details:
             writer.writerow([row.get(k, "") for k in keys])
 
-    # AI Events section: include AI events matching the report filters
+    # AI Events section: include only events owned by the report customer.
+    ai_repo = AIRepository(db)
+    f = report.filters or {}
     try:
-        ai_repo = AIRepository(db)
-        f = report.filters or {}
-        # parse dates if present
-        sd = None
-        ed = None
-        try:
-            if f.get("start_date"):
-                sd = datetime.fromisoformat(str(f.get("start_date"))).date()
-            if f.get("end_date"):
-                ed = datetime.fromisoformat(str(f.get("end_date"))).date()
-        except Exception:
-            sd = None
-            ed = None
-
-        total_ai, ai_items = ai_repo.query_events_for_report(
-            camera_id=f.get("camera_id"),
-            detection_type=f.get("detection_type"),
-            severity=f.get("severity"),
-            start_date=sd,
-            end_date=ed,
-            limit=10000,
-            offset=0,
+        sd = (
+            datetime.fromisoformat(str(f["start_date"])).date()
+            if f.get("start_date")
+            else None
         )
-        writer.writerow([""])
-        writer.writerow(["AI Events"])
-        writer.writerow(["event_id", "camera_id", "detection_type", "severity", "confidence", "created_at", "screenshot_path", "metadata"])
-        for ai in ai_items:
-            writer.writerow([
-                ai.get("event_id", ""),
-                ai.get("camera_id", ""),
-                ai.get("detection_type", ""),
-                ai.get("severity", ""),
-                ai.get("confidence", ""),
-                ai.get("created_at", ""),
-                ai.get("screenshot_path", ""),
-                json.dumps(ai.get("metadata", {}), default=str),
-            ])
-    except Exception:
-        # Do not fail export if AI events retrieval errors
-        pass
+        ed = (
+            datetime.fromisoformat(str(f["end_date"])).date()
+            if f.get("end_date")
+            else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid report date filter") from exc
+
+    _, ai_items = ai_repo.query_events_for_report(
+        camera_id=f.get("camera_id"),
+        customer_profile_id=current_user.get("customer_profile_id"),
+        detection_type=f.get("detection_type"),
+        severity=f.get("severity"),
+        start_date=sd,
+        end_date=ed,
+        limit=10000,
+        offset=0,
+    )
+    writer.writerow([""])
+    writer.writerow(["AI Events"])
+    writer.writerow(
+        [
+            "event_id",
+            "camera_id",
+            "detection_type",
+            "severity",
+            "confidence",
+            "created_at",
+            "screenshot_path",
+            "metadata",
+        ]
+    )
+    for ai in ai_items:
+        writer.writerow([
+            ai.get("event_id", ""),
+            ai.get("camera_id", ""),
+            ai.get("detection_type", ""),
+            ai.get("severity", ""),
+            ai.get("confidence", ""),
+            ai.get("created_at", ""),
+            ai.get("screenshot_path", ""),
+            json.dumps(ai.get("metadata", {}), default=str),
+        ])
 
     buf.seek(0)
     headers = {
@@ -278,7 +303,7 @@ async def export_report_csv(report_id: str = Query(...), db: Session = Depends(g
 
 
 @router.get("/export/excel")
-async def export_report_excel(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def export_report_excel(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     # For now, fallback to CSV if Excel libraries unavailable
     try:
         import openpyxl
@@ -286,9 +311,12 @@ async def export_report_excel(report_id: str = Query(...), db: Session = Depends
         raise HTTPException(status_code=501, detail="Excel export not supported on server (missing openpyxl)")
 
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    report = repo.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    report = repo.get_report(
+        report_id,
+        owner_id=owner_id,
+        customer_profile_id=current_user.get("customer_profile_id"),
+    )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found or access denied")
 
@@ -332,7 +360,7 @@ async def export_report_excel(report_id: str = Query(...), db: Session = Depends
 
         _, ai_items = ai_repo.query_events_for_report(
             camera_id=f.get("camera_id"),
-            owner_id=owner_id if not is_admin else None,
+            customer_profile_id=current_user.get("customer_profile_id"),
             detection_type=f.get("detection_type"),
             severity=f.get("severity"),
             start_date=sd,
@@ -368,11 +396,14 @@ async def export_report_excel(report_id: str = Query(...), db: Session = Depends
 
 
 @router.get("/export/pdf")
-async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    report = repo.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    report = repo.get_report(
+        report_id,
+        owner_id=owner_id,
+        customer_profile_id=current_user.get("customer_profile_id"),
+    )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found or access denied")
 
@@ -382,9 +413,19 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
     camera_scope = None
     report_filters = report.filters or {}
     if report_filters.get("camera_id"):
-        camera = db.query(Camera).filter(
+        camera_query = db.query(Camera).filter(
             Camera.camera_id == report_filters["camera_id"]
-        ).first()
+        )
+        if current_user.get("customer_profile_id") != PLATFORM_TENANT_SCOPE:
+            camera_query = camera_query.filter(
+                tenant_owner_filter(
+                    Camera,
+                    db,
+                    current_user.get("customer_profile_id"),
+                    Camera.owner_id,
+                )
+            )
+        camera = camera_query.first()
         if camera:
             camera_scope = {
                 "camera_id": str(camera.camera_id),
@@ -421,7 +462,7 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
         ai_repo = AIRepository(db)
         _, ai_items = ai_repo.query_events_for_report(
             camera_id=f.get("camera_id"),
-            owner_id=owner_id if not is_admin else None,
+            customer_profile_id=current_user.get("customer_profile_id"),
             detection_type=f.get("detection_type"),
             severity=f.get("severity"),
             start_date=sd,
@@ -457,11 +498,14 @@ async def export_report_pdf(report_id: str = Query(...), db: Session = Depends(g
 
 
 @router.delete("/{report_id}")
-async def delete_report(report_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def delete_report(report_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     owner_id = current_user.get("user_id")
-    is_admin = (current_user.get("role") == "Administrator")
     repo = ReportRepository(db)
-    ok = repo.delete_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    ok = repo.delete_report(
+        report_id,
+        owner_id=owner_id,
+        customer_profile_id=current_user.get("customer_profile_id"),
+    )
     if not ok:
         raise HTTPException(status_code=404, detail="Report not found or access denied")
     return JSONResponse({"ok": True})

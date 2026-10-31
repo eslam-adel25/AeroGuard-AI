@@ -1,13 +1,22 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import date, datetime
+
+
+class ORMBaseModel(BaseModel):
+    if hasattr(BaseModel, "model_validate"):
+        model_config = {"from_attributes": True}
+    else:
+        class Config:
+            orm_mode = True
+
 
 # ==========================================
 # 1. قوالب الكاميرات (Section 5)
 # ==========================================
 
-class CameraCreate(BaseModel):
+class CameraCreate(ORMBaseModel):
     camera_name: str
     location: str
     stream_url: str
@@ -17,8 +26,6 @@ class CameraResponse(CameraCreate):
     camera_id: UUID
     status: str
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 # ==========================================
@@ -37,6 +44,7 @@ class UserRegister(BaseModel):
 # يستخدم بواسطة الأدمن لإنشاء موظفين وتحديد رتبهم (حل مشكلة ImportError)
 class UserCreate(UserRegister):
     role_id: UUID
+    customer_profile_id: Optional[UUID] = None
 
 class UserLogin(BaseModel):
     username: str
@@ -56,13 +64,11 @@ class RefreshRequest(BaseModel):
 class ResendVerificationRequest(BaseModel):
     email: str
 
-class RoleResponse(BaseModel):
+class RoleResponse(ORMBaseModel):
     role_id: UUID
     role_name: str
 
-    model_config = {"from_attributes": True}
-
-class UserResponse(BaseModel):
+class UserResponse(ORMBaseModel):
     user_id: UUID
     full_name: str
     username: str
@@ -75,8 +81,6 @@ class UserResponse(BaseModel):
     role: Optional[RoleResponse] = None
     creator_name: Optional[str] = None
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class UserProfileUpdate(BaseModel):
@@ -91,11 +95,59 @@ class PasswordChangeRequest(BaseModel):
     new_password: str
 
 
+class OwnerFeatureOption(BaseModel):
+    feature_key: str
+    label: str
+
+
+class OwnerCustomerSummary(BaseModel):
+    customer_profile_id: UUID
+    user_id: UUID
+    full_name: str
+    phone: Optional[str] = None
+    organization: Optional[str] = None
+    registration_date: Optional[datetime] = None
+    last_updated: Optional[datetime] = None
+    is_verified: bool
+    workflow_status: str
+    account_status: str
+
+
+class OwnerCustomerList(BaseModel):
+    items: List[OwnerCustomerSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class OwnerCustomerDetails(OwnerCustomerSummary):
+    username: str
+    email: EmailStr
+    password: str
+    max_camera_count: Optional[int] = None
+    owner_notes: Optional[str] = None
+
+
+class OwnerCustomerConfigurationUpdate(BaseModel):
+    max_camera_count: Optional[int] = Field(ge=0)
+    owner_notes: Optional[str] = Field(default=None, max_length=4000)
+
+    class Config:
+        extra = "forbid"
+
+
+class OwnerCustomerActivation(BaseModel):
+    max_camera_count: Optional[int] = Field(ge=0)
+
+    class Config:
+        extra = "forbid"
+
+
 # ==========================================
 # 3. قوالب الإعدادات والمناطق (Section 2 & 7)
 # ==========================================
 
-class SettingsUpdate(BaseModel):
+class SettingsUpdate(ORMBaseModel):
     # General Settings
     organization_name: Optional[str] = None
     airport_name: Optional[str] = None
@@ -153,8 +205,6 @@ class SettingsResponse(SettingsUpdate):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
-
 class ZoneCreate(BaseModel):
     zone_name: str = Field(min_length=1, max_length=100)
     zone_type: str
@@ -164,8 +214,6 @@ class ZoneCreate(BaseModel):
     tripwire_allowed_group_size: Optional[int] = Field(default=None, gt=0)
     tripwire_initial_occupancy: Optional[int] = Field(default=None, ge=0)
     tripwire_entry_direction: Optional[str] = None
-
-    model_config = {"from_attributes": True}
 
 class ZoneResponse(BaseModel):
     zone_id: UUID
@@ -179,8 +227,6 @@ class ZoneResponse(BaseModel):
     tripwire_current_occupancy: Optional[int] = None
     tripwire_entry_direction: Optional[str] = None
     tripwire_requires_confirmation: bool = False
-
-    model_config = {"from_attributes": True}
 
 
 class TripwireOccupancyConfirmation(BaseModel):

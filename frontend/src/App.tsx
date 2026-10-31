@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { Bell, X, CheckCircle2 } from "lucide-react";
@@ -18,6 +18,11 @@ import TermsOfService from "./pages/public/TermsOfService";
 import Documentation from "./pages/public/Documentation";
 import Support from "./pages/public/Support";
 import Contact from "./pages/public/Contact";
+import ActivationPending from "./pages/auth/ActivationPending";
+import InactiveAccount from "./pages/auth/InactiveAccount";
+import OwnerLanding from "./pages/auth/OwnerLanding";
+import CustomerList from "./pages/owner/CustomerList";
+import CustomerDetails from "./pages/owner/CustomerDetails";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import AlertHistory from "./pages/AlertHistory";
 import ScreenshotModal from "./components/ScreenshotModal";
@@ -28,6 +33,10 @@ import {
   formatScreenshotFilename,
   getFilenameFromContentDisposition,
   getStoredAuthToken,
+  authService,
+  clearAuthState,
+  persistAuthState,
+  type AuthState,
 } from "./services/api";
 import { closeActiveSocket } from "./services/socket";
 import {
@@ -44,6 +53,13 @@ const ACTIVE_PAGE_IDS = [
   "users",
   "settings",
 ] as const satisfies readonly ActivePage[];
+const PAGE_FEATURES: Partial<Record<ActivePage, string[]>> = {
+  dashboard: ["dashboard", "cameras"],
+  cameras: ["cameras"],
+  reports: ["analytics"],
+  alerts: ["alerts"],
+  settings: ["settings"],
+};
 
 const isActivePage = (page: string): page is ActivePage =>
   ACTIVE_PAGE_IDS.some((validPage) => validPage === page);
@@ -67,8 +83,29 @@ function App() {
 
     return getStoredActivePage() ?? "reports";
   });
-  const [isAuthenticated, setIsAuthenticated] =
-    useState(!!getStoredAuthToken());
+  const [authState, setAuthState] = useState<AuthState | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  currentUserIdRef.current = authState?.user_id ?? null;
+  const [isResolvingAuth, setIsResolvingAuth] = useState(
+    () => !!getStoredAuthToken(),
+  );
+  const isAuthenticated = !!authState && !!getStoredAuthToken();
+  const isActiveCustomer =
+    isAuthenticated &&
+    authState?.account_status === "ACTIVE" &&
+    authState.workflow_status === "PLATFORM_CUSTOMER" &&
+    !authState.is_owner;
+  const isPendingCustomer =
+    isAuthenticated &&
+    !authState?.is_owner &&
+    (authState?.account_status === "PENDING" ||
+      authState?.workflow_status !== "PLATFORM_CUSTOMER");
+  const canAccessCameras =
+    authState?.enabled_features?.includes("cameras") ?? true;
+  const canAccessAlerts =
+    authState?.enabled_features?.includes("alerts") ?? true;
+  const canAccessSettings =
+    authState?.enabled_features?.includes("settings") ?? true;
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const knownNotificationIdsRef = useRef(new Set<string>());
@@ -107,11 +144,70 @@ function App() {
     }
   }, [activePage, t]);
 
-  const handleLogin = (token: string) => {
+  const clearCustomerPresentationState = useCallback(() => {
+    setNotifications([]);
+    setUnreadNotificationCount(0);
+    knownNotificationIdsRef.current.clear();
+    liveNotificationIdsRef.current.clear();
+    setCameraMap({});
+    setScreenshotModalEventId(null);
+    setIsNotificationsOpen(false);
+    screenshotCache.forEach((url) => {
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    });
+    screenshotCache.clear();
+  }, [screenshotCache]);
+
+  const handleLogin = (token: string, user: AuthState) => {
+    closeActiveSocket();
+    clearCustomerPresentationState();
     localStorage.setItem("ag_token", token);
+    persistAuthState(user);
     localStorage.removeItem("ag_active_page");
-    setIsAuthenticated(true);
+    setAuthState(user);
+    setIsResolvingAuth(false);
     setActivePage("reports");
+  };
+
+  useEffect(() => {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setIsResolvingAuth(false);
+      setAuthState(null);
+      return;
+    }
+
+    let active = true;
+    authService
+      .getMe()
+      .then(({ data }) => {
+        if (active) {
+          setAuthState(data);
+          persistAuthState(data);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          closeActiveSocket();
+          clearAuthState();
+          clearCustomerPresentationState();
+          setAuthState(null);
+        }
+      })
+      .finally(() => {
+        if (active) setIsResolvingAuth(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [clearCustomerPresentationState]);
+
+  const authenticatedDestination = () => {
+    if (authState?.is_owner || authState?.role === "Owner") return "/owner";
+    if (authState?.account_status === "INACTIVE") return "/account-inactive";
+    if (isPendingCustomer) return "/activation-pending";
+    return "/";
   };
 
   useEffect(() => {
@@ -123,13 +219,27 @@ function App() {
     localStorage.setItem("ag_active_page", activePage);
   }, [activePage, isAuthenticated]);
 
+  useEffect(() => {
+    if (!isActiveCustomer || !authState?.enabled_features) return;
+    const requiredFeatures = PAGE_FEATURES[activePage];
+    if (
+      requiredFeatures &&
+      requiredFeatures.some(
+        (feature) => !authState.enabled_features?.includes(feature),
+      )
+    ) {
+      setActivePage("users");
+    }
+  }, [activePage, authState?.enabled_features, isActiveCustomer]);
+
   // Load user-specific settings after login
   useEffect(() => {
+    let active = true;
     const loadSettings = async () => {
       try {
         const mod = await import("./services/api");
         const res = await mod.settingsService.get();
-        if (res?.data) {
+        if (active && res?.data) {
           localStorage.setItem("ag_settings", JSON.stringify(res.data));
         }
       } catch (err) {
@@ -137,36 +247,38 @@ function App() {
       }
     };
 
-    if (isAuthenticated) {
+    if (isActiveCustomer && canAccessSettings) {
       loadSettings();
     }
-  }, [isAuthenticated]);
+    return () => {
+      active = false;
+    };
+  }, [isActiveCustomer, canAccessSettings, authState?.user_id]);
 
   const handleLogout = async () => {
     closeActiveSocket();
-    try {
-      const response = await cameraService.getAll();
-      if (Array.isArray(response.data)) {
-        const activeCameras = (
-          response.data as Array<{ camera_id: string; status?: string }>
-        ).filter((camera) =>
-          ["Processing", "Running"].includes(camera.status ?? ""),
-        );
-        await Promise.allSettled(
-          activeCameras.map((camera) => cameraService.stop(camera.camera_id)),
-        );
+    if (isActiveCustomer) {
+      try {
+        const response = await cameraService.getAll();
+        if (Array.isArray(response.data)) {
+          const activeCameras = (
+            response.data as Array<{ camera_id: string; status?: string }>
+          ).filter((camera) =>
+            ["Processing", "Running"].includes(camera.status ?? ""),
+          );
+          await Promise.allSettled(
+            activeCameras.map((camera) => cameraService.stop(camera.camera_id)),
+          );
+        }
+      } catch (error) {
+        console.warn("Failed to stop active cameras during logout", error);
       }
-    } catch (error) {
-      console.warn("Failed to stop active cameras during logout", error);
     }
 
-    localStorage.removeItem("ag_token");
-    localStorage.removeItem("ag_active_page");
-    setNotifications([]);
-    setUnreadNotificationCount(0);
-    knownNotificationIdsRef.current.clear();
-    liveNotificationIdsRef.current.clear();
-    setIsAuthenticated(false);
+    clearAuthState();
+    clearCustomerPresentationState();
+    setAuthState(null);
+    setIsResolvingAuth(false);
     setActivePage("dashboard");
   };
 
@@ -199,7 +311,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    setNotifications([]);
+    setUnreadNotificationCount(0);
+    knownNotificationIdsRef.current.clear();
+    liveNotificationIdsRef.current.clear();
+    setCameraMap({});
+    setScreenshotModalEventId(null);
+    setIsNotificationsOpen(false);
+    screenshotCache.forEach((url) => {
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    });
+    screenshotCache.clear();
+  }, [authState?.user_id, screenshotCache]);
+
+  useEffect(() => {
+    if (!isActiveCustomer || !canAccessAlerts) {
+      setNotifications([]);
+      setUnreadNotificationCount(0);
+      knownNotificationIdsRef.current.clear();
+      liveNotificationIdsRef.current.clear();
       return;
     }
 
@@ -209,6 +339,7 @@ function App() {
     }
 
     let socketHandle: { close: () => void } | null = null;
+    let active = true;
 
     const hydrateNotification = (notification: NotificationItem) => {
       const resolvedCameraName =
@@ -240,35 +371,41 @@ function App() {
     });
 
     const loadNotifications = async () => {
-      const fetched = await notificationService.fetchNotifications();
-      const hydrated = fetched.items.map(hydrateNotification);
-      const fetchedIds = new Set(hydrated.map((item) => item.id));
-      hydrated.forEach((item) => knownNotificationIdsRef.current.add(item.id));
-      const liveOnlyCount = [...liveNotificationIdsRef.current].filter(
-        (id) => !fetchedIds.has(id),
-      ).length;
-      setUnreadNotificationCount(fetched.unreadCount + liveOnlyCount);
-      const sorted = [...hydrated].sort(
-        (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
-      );
-      setNotifications((prev) => {
-        const byId = new Map(prev.map((item) => [item.id, item]));
-        sorted.forEach((item) => {
-          const existing = byId.get(item.id);
-          byId.set(
-            item.id,
-            existing ? mergeNotification(existing, item) : item,
-          );
-        });
-        return [...byId.values()].sort(
+      try {
+        const fetched = await notificationService.fetchNotifications();
+        if (!active) return;
+        const hydrated = fetched.items.map(hydrateNotification);
+        const fetchedIds = new Set(hydrated.map((item) => item.id));
+        hydrated.forEach((item) => knownNotificationIdsRef.current.add(item.id));
+        const liveOnlyCount = [...liveNotificationIdsRef.current].filter(
+          (id) => !fetchedIds.has(id),
+        ).length;
+        setUnreadNotificationCount(fetched.unreadCount + liveOnlyCount);
+        const sorted = [...hydrated].sort(
           (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
         );
-      });
+        setNotifications((prev) => {
+          const byId = new Map(prev.map((item) => [item.id, item]));
+          sorted.forEach((item) => {
+            const existing = byId.get(item.id);
+            byId.set(
+              item.id,
+              existing ? mergeNotification(existing, item) : item,
+            );
+          });
+          return [...byId.values()].sort(
+            (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
+          );
+        });
+      } catch (error) {
+        if (active) console.error("Could not load customer notifications", error);
+      }
     };
 
     loadNotifications();
 
     socketHandle = notificationService.subscribeToLiveAlerts((notification) => {
+      if (!active) return;
       const hydrated = hydrateNotification(notification);
       const alreadyTracked =
         knownNotificationIdsRef.current.has(hydrated.id) ||
@@ -288,18 +425,24 @@ function App() {
     });
 
     return () => {
+      active = false;
       socketHandle?.close();
     };
-  }, [isAuthenticated, cameraMap]);
+  }, [isActiveCustomer, canAccessAlerts, cameraMap, authState?.user_id]);
 
   const fetchAndCacheScreenshot = async (eventId?: string | null) => {
     if (!eventId) return null;
     if (screenshotCache.has(eventId))
       return screenshotCache.get(eventId) as string;
+    const requestingUserId = currentUserIdRef.current;
     try {
       const resp = await aiService.downloadScreenshot(eventId);
       const blob = resp.data as Blob;
       const url = URL.createObjectURL(blob);
+      if (!requestingUserId || currentUserIdRef.current !== requestingUserId) {
+        URL.revokeObjectURL(url);
+        return null;
+      }
       screenshotCache.set(eventId, url);
       return url;
     } catch (err) {
@@ -309,12 +452,18 @@ function App() {
   };
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    let active = true;
+    setCameraMap({});
+    if (!isActiveCustomer || !canAccessCameras) {
+      return () => {
+        active = false;
+      };
+    }
 
     const loadCameras = async () => {
       try {
         const res = await cameraService.getAll();
-        if (Array.isArray(res.data)) {
+        if (active && Array.isArray(res.data)) {
           const map = (res.data as Array<Record<string, unknown>>).reduce(
             (acc: Record<string, string>, item) => {
               const cameraId = String(item.camera_id ?? "");
@@ -334,7 +483,10 @@ function App() {
     };
 
     loadCameras();
-  }, [isAuthenticated]);
+    return () => {
+      active = false;
+    };
+  }, [isActiveCustomer, canAccessCameras, authState?.user_id]);
 
   useEffect(() => {
     if (!isNotificationsOpen || !bellRef.current) {
@@ -468,6 +620,7 @@ function App() {
         activePage={activePage}
         setActivePage={setActivePage}
         onLogout={handleLogout}
+        enabledFeatures={authState?.enabled_features}
       />
 
       <div className="flex flex-1 flex-col">
@@ -482,7 +635,8 @@ function App() {
           <div className="relative flex items-center gap-3">
             <LanguageSwitcher />
 
-            <div className="relative">
+            {canAccessAlerts && (
+              <div className="relative">
               <button
                 ref={bellRef}
                 type="button"
@@ -549,7 +703,7 @@ function App() {
                           >
                             <X size={16} />
                           </button>
-                        </div>
+                          </div>
                       </div>
 
                       <div
@@ -736,13 +890,20 @@ function App() {
                     document.body,
                   )
                 : null}
-            </div>
+              </div>
+            )}
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto">
           {activePage === "dashboard" && (
-            <Dashboard onAlertBadgeClick={() => setIsNotificationsOpen(true)} />
+            <Dashboard
+              onAlertBadgeClick={
+                canAccessAlerts
+                  ? () => setIsNotificationsOpen(true)
+                  : undefined
+              }
+            />
           )}
           {activePage === "cameras" && <Cameras />}
           {activePage === "reports" && <Analytics />}
@@ -762,6 +923,11 @@ function App() {
   const authenticatedShell = (
     <AlertAudioProvider>{authenticatedShellContent}</AlertAudioProvider>
   );
+  const authLoading = (
+    <main className="flex min-h-screen items-center justify-center bg-[#0c0e12] text-sm text-gray-300">
+      Checking account access…
+    </main>
+  );
 
   return (
     <BrowserRouter>
@@ -769,8 +935,10 @@ function App() {
         <Route
           path="/login"
           element={
-            isAuthenticated ? (
-              <Navigate to="/" replace />
+            isResolvingAuth ? (
+              authLoading
+            ) : isAuthenticated ? (
+              <Navigate to={authenticatedDestination()} replace />
             ) : (
               <Login onLoginSuccess={handleLogin} />
             )
@@ -778,9 +946,70 @@ function App() {
         />
         <Route
           path="/register"
-          element={isAuthenticated ? <Navigate to="/" replace /> : <Register />}
+          element={
+            isResolvingAuth ? (
+              authLoading
+            ) : isAuthenticated ? (
+              <Navigate to={authenticatedDestination()} replace />
+            ) : (
+              <Register />
+            )
+          }
         />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route
+          path="/activation-pending"
+          element={
+            isResolvingAuth ? (
+              authLoading
+            ) : isPendingCustomer ? (
+              <ActivationPending onLogout={handleLogout} />
+            ) : (
+              <Navigate to={isAuthenticated ? authenticatedDestination() : "/login"} replace />
+            )
+          }
+        />
+        <Route
+          path="/account-inactive"
+          element={
+            isResolvingAuth ? (
+              authLoading
+            ) : isAuthenticated &&
+              authState?.account_status === "INACTIVE" ? (
+              <InactiveAccount onLogout={handleLogout} />
+            ) : (
+              <Navigate to={isAuthenticated ? authenticatedDestination() : "/login"} replace />
+            )
+          }
+        />
+        <Route
+          path="/owner"
+          element={
+            isResolvingAuth ? (
+              authLoading
+            ) : isAuthenticated &&
+              (authState?.is_owner || authState?.role === "Owner") ? (
+              <OwnerLanding onLogout={handleLogout} />
+            ) : (
+              <Navigate to={isAuthenticated ? authenticatedDestination() : "/login"} replace />
+            )
+          }
+        >
+          <Route index element={<Navigate to="requests/unread" replace />} />
+          <Route
+            path="requests/unread"
+            element={<CustomerList queue="unread" />}
+          />
+          <Route
+            path="requests/under-review"
+            element={<CustomerList queue="under-review" />}
+          />
+          <Route path="customers" element={<CustomerList queue="customers" />} />
+          <Route
+            path="customers/:customerProfileId"
+            element={<CustomerDetails />}
+          />
+        </Route>
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms-of-service" element={<TermsOfService />} />
         <Route path="/docs" element={<Documentation />} />
@@ -789,8 +1018,12 @@ function App() {
         <Route
           path="/"
           element={
-            isAuthenticated ? (
+            isResolvingAuth ? (
+              authLoading
+            ) : isActiveCustomer ? (
               authenticatedShell
+            ) : isAuthenticated ? (
+              <Navigate to={authenticatedDestination()} replace />
             ) : (
               <Navigate to="/login" replace />
             )
@@ -798,7 +1031,16 @@ function App() {
         />
         <Route
           path="*"
-          element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />}
+          element={
+            isResolvingAuth ? (
+              authLoading
+            ) : (
+              <Navigate
+                to={isAuthenticated ? authenticatedDestination() : "/login"}
+                replace
+              />
+            )
+          }
         />
       </Routes>
     </BrowserRouter>

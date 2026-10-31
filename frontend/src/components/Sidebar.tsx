@@ -24,9 +24,15 @@ interface SidebarProps {
   activePage: ActivePage;
   setActivePage: Dispatch<SetStateAction<ActivePage>>;
   onLogout: () => void;
+  enabledFeatures?: string[];
 }
 
-const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
+const Sidebar = ({
+  activePage,
+  setActivePage,
+  onLogout,
+  enabledFeatures,
+}: SidebarProps) => {
   const { t } = useTranslation();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem("sidebar_state") === "collapsed";
@@ -40,12 +46,18 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
   }, [isCollapsed]);
 
   const menuItems = [
-    { id: "dashboard", label: t("sidebar.monitoring"), icon: LayoutDashboard },
-    { id: "cameras", label: t("sidebar.cameras"), icon: Video },
-    { id: "reports", label: t("sidebar.analytics"), icon: FileText },
-    { id: "users", label: t("sidebar.profile"), icon: User },
-    { id: "settings", label: t("sidebar.control"), icon: Settings },
+    { id: "dashboard", features: ["dashboard", "cameras"], label: t("sidebar.monitoring"), icon: LayoutDashboard },
+    { id: "cameras", features: ["cameras"], label: t("sidebar.cameras"), icon: Video },
+    { id: "reports", features: ["analytics"], label: t("sidebar.analytics"), icon: FileText },
+    { id: "users", features: ["profile"], label: t("sidebar.profile"), icon: User },
+    { id: "settings", features: ["settings"], label: t("sidebar.control"), icon: Settings },
   ] as const;
+  const visibleMenuItems = menuItems.filter(
+    (item) =>
+      item.id === "users" ||
+      !enabledFeatures ||
+      item.features.every((feature) => enabledFeatures.includes(feature)),
+  );
 
   return (
     <aside
@@ -75,7 +87,7 @@ const Sidebar = ({ activePage, setActivePage, onLogout }: SidebarProps) => {
       </div>
 
       <nav className="flex-1 px-2 py-2 space-y-2">
-        {menuItems.map((item) => (
+        {visibleMenuItems.map((item) => (
           <button
             key={item.id}
             onClick={() => setActivePage(item.id)}

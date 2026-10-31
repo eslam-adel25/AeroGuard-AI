@@ -35,6 +35,18 @@ export const getStoredAuthToken = () => {
   return token;
 };
 
+export const clearCustomerScopedState = () => {
+  localStorage.removeItem("ag_settings");
+  localStorage.removeItem("ag_selected_camera");
+  localStorage.removeItem("ag_active_page");
+};
+
+export const clearAuthState = () => {
+  localStorage.removeItem("ag_token");
+  localStorage.removeItem("user");
+  clearCustomerScopedState();
+};
+
 export const sanitizeFileNameComponent = (value: string) => {
   return (
     value
@@ -160,6 +172,34 @@ export interface LoginData {
   password: string;
 }
 
+export interface AuthState {
+  user_id: string;
+  username: string;
+  role: string | null;
+  is_verified: boolean;
+  workflow_status: string | null;
+  account_status: "PENDING" | "ACTIVE" | "INACTIVE" | null;
+  is_owner: boolean;
+  enabled_features?: string[];
+}
+
+export const persistAuthState = (user: AuthState) => {
+  try {
+    const previousUser = JSON.parse(localStorage.getItem("user") || "null") as
+      | { user_id?: string }
+      | null;
+    if (previousUser?.user_id && previousUser.user_id !== user.user_id) {
+      clearCustomerScopedState();
+    }
+  } catch (error) {
+    console.warn("Could not compare the previously stored user identity", error);
+    clearCustomerScopedState();
+  }
+  const persistedUser = { ...user };
+  delete persistedUser.enabled_features;
+  localStorage.setItem("user", JSON.stringify(persistedUser));
+};
+
 export const authService = {
   register: (data: RegisterData) =>
     api.post("/auth/register", {
@@ -172,6 +212,7 @@ export const authService = {
     }),
 
   login: (data: LoginData) => api.post("/auth/login", data),
+  getMe: () => api.get<AuthState>("/auth/me"),
 
   verifyEmail: (token: string) =>
     api.get("/auth/verify", { params: { token } }),
@@ -183,8 +224,7 @@ export const authService = {
     api.post("/auth/resend-verification", { email }),
 
   logout: () => {
-    localStorage.removeItem("ag_token");
-    localStorage.removeItem("user");
+    clearAuthState();
   },
 };
 
@@ -194,6 +234,8 @@ export const authService = {
 export const userService = {
   // ... الدوال السابقة ...
   getProfile: () => api.get("/users/profile"),
+  getAvatar: () =>
+    api.get<Blob>("/users/profile/avatar", { responseType: "blob" }),
   updateProfile: (data: IUserProfile) => api.put("/users/profile", data),
   updatePassword: (data: Record<string, unknown>) =>
     api.post("/users/profile/password", data),

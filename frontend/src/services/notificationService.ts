@@ -1,4 +1,4 @@
-import api, { aiService, getStoredAuthToken } from "./api";
+import { aiService, getStoredAuthToken } from "./api";
 import { createSocket, type AIEventWSData } from "./socket";
 
 export type NotificationSeverity =
@@ -90,36 +90,9 @@ export const notificationService = {
             items.filter((item) => item.status === "Unread").length,
         ),
       };
-    } catch (err) {
-      console.error("fetchNotifications failed", err);
-      try {
-        // fallback to legacy notifications endpoint
-        const response = await api.get("/notifications/");
-        const payload = response.data as Array<Record<string, unknown>>;
-        const items = payload.map(
-          (item): NotificationItem => ({
-            id: String(
-              item.id ??
-                `${item.camera_id ?? "unknown"}-${item.type ?? "alert"}`,
-            ),
-            eventId: item.id ? String(item.id) : null,
-            detectionType: String(item.type ?? "Unknown Detection"),
-            cameraName: String(
-              item.camera_name ?? item.camera_id ?? "Unknown Camera",
-            ),
-            severity: (item.priority as NotificationSeverity) ?? "Normal",
-            time: String(item.time ?? new Date().toISOString()),
-            status: item.status === "Read" ? "Read" : "Unread",
-            screenshot: null,
-          }),
-        );
-        return {
-          items,
-          unreadCount: items.filter((item) => item.status === "Unread").length,
-        };
-      } catch {
-        return { items: [], unreadCount: 0 };
-      }
+    } catch (error) {
+      console.error("fetchNotifications failed", error);
+      throw error;
     }
   },
 

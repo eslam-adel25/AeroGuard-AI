@@ -56,7 +56,7 @@ def test_get_report_stats_returns_dashboard_payload():
             db,
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 31),
-            is_admin=True,
+            owner_id="00000000-0000-0000-0000-000000000002",
         )
 
         assert payload["summary"]["weapons"] == 1
@@ -106,7 +106,7 @@ def test_get_report_stats_counts_fire_and_smoke_detections():
             db,
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 31),
-            is_admin=True,
+            owner_id="00000000-0000-0000-0000-000000000022",
         )
 
         assert payload["summary"]["fire"] == 2
@@ -217,7 +217,7 @@ def test_unknown_priority_is_excluded_from_severity_distribution():
             db,
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 31),
-            is_admin=True,
+            owner_id="00000000-0000-0000-0000-000000000012",
         )
 
         assert payload["summary"]["low_alerts"] == 0

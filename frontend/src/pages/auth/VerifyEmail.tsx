@@ -145,9 +145,8 @@ const VerifyEmail = () => {
         .then(() => {
           setStatus("success");
           setMessage(
-            "Your email has been verified. Establishing secure connection...",
+            "سيتم التواصل معك من قبل خدمة العملاء خلال 24 ساعة لتفعيل حسابكم",
           );
-          setTimeout(() => navigate("/login"), 3000);
         })
         .catch((err: unknown) => {
           let detailMessage = "Verification failed. The link may have expired.";
@@ -201,8 +200,9 @@ const VerifyEmail = () => {
     try {
       await authService.verifyOtp(email, fullCode);
       setStatus("success");
-      setMessage("Identity verified successfully. Redirecting to dashboard...");
-      setTimeout(() => navigate("/login"), 2500);
+      setMessage(
+        "سيتم التواصل معك من قبل خدمة العملاء خلال 24 ساعة لتفعيل حسابكم",
+      );
     } catch (err: unknown) {
       let detailMessage = "Verification failed. Invalid authentication packet.";
 
@@ -316,7 +316,9 @@ const VerifyEmail = () => {
                 </p>
                 <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-green-500">
                   <span className="h-1 w-1 animate-pulse rounded-full bg-green-500" />
-                  Code Sent
+                  {status === "success"
+                    ? "Email verified; activation pending"
+                    : "Code Sent"}
                 </p>
               </div>
               <button
@@ -378,6 +380,20 @@ const VerifyEmail = () => {
                 >
                   <AlertCircle size={14} /> {message}
                 </motion.div>
+              )}
+              {status === "success" && (
+                <div className="mt-4 space-y-4">
+                  <p className="text-sm leading-7 text-white" dir="rtl" lang="ar">
+                    {message}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/login")}
+                    className="rounded-xl bg-blue-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-400"
+                  >
+                    Proceed to login
+                  </button>
+                </div>
               )}
             </div>
           </div>

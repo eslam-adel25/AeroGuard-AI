@@ -30,7 +30,25 @@ class SettingsRepository:
 
     def reset_to_defaults(self, owner_id: str):
         s = self.get_by_owner(owner_id)
-        if s:
-            self.db.delete(s)
-            self.db.commit()
-        return self.create_defaults_for(owner_id)
+        if s is None:
+            return self.create_defaults_for(owner_id)
+
+        preserved_abandoned_bag_seconds = s.abandoned_bag_seconds
+        excluded_fields = {
+            "settings_id",
+            "owner_id",
+            "created_at",
+            "updated_at",
+            "abandoned_bag_seconds",
+        }
+        for column in UserSettings.__table__.columns:
+            if column.name in excluded_fields:
+                continue
+            default = column.default.arg if column.default is not None else None
+            if callable(default):
+                default = default()
+            setattr(s, column.name, default)
+        s.abandoned_bag_seconds = preserved_abandoned_bag_seconds
+        self.db.commit()
+        self.db.refresh(s)
+        return s

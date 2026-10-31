@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, desc
 
 from ..models.models import AIEvent, Tracking, Camera
+from ..core.tenant import tenant_camera_child_filter
 
 
 class AIRepository:
@@ -35,8 +36,16 @@ class AIRepository:
         latest_bbox: Optional[Dict[str, Any]] = None,
         confidence: Optional[float] = None,
     ) -> Tracking:
+        camera = (
+            self.db.query(Camera)
+            .filter(Camera.camera_id == camera_id)
+            .first()
+        )
+        if camera is None:
+            raise ValueError("Camera not found")
         t = Tracking(
             camera_id=camera_id,
+            customer_profile_id=camera.customer_profile_id,
             track_type=track_type,
             track_label=track_label,
             latest_bbox=latest_bbox,
@@ -142,6 +151,7 @@ class AIRepository:
         end_date: Optional[date] = None,
         limit: int = 100,
         offset: int = 0,
+        customer_profile_id: Optional[str] = None,
     ) -> List[AIEvent]:
         q = self.db.query(AIEvent)
         filters = []
@@ -152,6 +162,17 @@ class AIRepository:
         if owner_id:
             q = q.join(Camera, Camera.camera_id == AIEvent.camera_id)
             filters.append(Camera.owner_id == owner_id)
+        if customer_profile_id:
+            filters.append(
+                tenant_camera_child_filter(
+                    AIEvent,
+                    self.db,
+                    customer_profile_id,
+                    actor_column=AIEvent.detected_by,
+                )
+            )
+        elif not owner_id:
+            filters.append(False)
         if exclude_pending_screenshots:
             q = self.exclude_pending_events(q)
         if detection_type:
@@ -172,6 +193,7 @@ class AIRepository:
         camera_id: Optional[str] = None,
         owner_id: Optional[str] = None,
         exclude_pending_screenshots: bool = False,
+        customer_profile_id: Optional[str] = None,
     ) -> int:
         q = self.db.query(func.count(AIEvent.event_id)).filter(
             AIEvent.is_read.is_(False)
@@ -182,6 +204,17 @@ class AIRepository:
             q = q.join(Camera, Camera.camera_id == AIEvent.camera_id).filter(
                 Camera.owner_id == owner_id
             )
+        if customer_profile_id:
+            q = q.filter(
+                tenant_camera_child_filter(
+                    AIEvent,
+                    self.db,
+                    customer_profile_id,
+                    actor_column=AIEvent.detected_by,
+                )
+            )
+        elif not owner_id:
+            q = q.filter(False)
         if exclude_pending_screenshots:
             q = self.exclude_pending_events(q)
         return int(q.scalar() or 0)
@@ -197,6 +230,7 @@ class AIRepository:
         end_date: Optional[date] = None,
         limit: int = 100,
         offset: int = 0,
+        customer_profile_id: Optional[str] = None,
     ) -> Tuple[int, List[Dict[str, Any]]]:
         q = self.db.query(
             AIEvent,
@@ -208,6 +242,17 @@ class AIRepository:
             filters.append(AIEvent.camera_id == camera_id)
         if owner_id:
             filters.append(Camera.owner_id == owner_id)
+        if customer_profile_id:
+            filters.append(
+                tenant_camera_child_filter(
+                    AIEvent,
+                    self.db,
+                    customer_profile_id,
+                    actor_column=AIEvent.detected_by,
+                )
+            )
+        elif not owner_id:
+            filters.append(False)
         if detection_type:
             filters.append(AIEvent.detection_type.ilike(f"%{detection_type}%"))
         if severity:

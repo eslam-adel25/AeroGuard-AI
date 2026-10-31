@@ -12,12 +12,48 @@ load_dotenv()
 
 DEFAULT_SECRET = "super_secret"
 DEFAULT_DEMO_ACCOUNT_PASSWORD = "admin123"
+WEAK_SECRET_VALUES = {
+    DEFAULT_SECRET,
+    "changeme",
+    "change-me",
+    "secret",
+    "your-secret-key",
+    "your_secret_key",
+}
+
+
+def _is_production() -> bool:
+    environment = (
+        os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or ""
+    ).strip().lower()
+    return environment in {"production", "prod"}
+
+
+def _is_strong_secret(secret: str | None) -> bool:
+    return bool(
+        secret
+        and len(secret.encode("utf-8")) >= 32
+        and secret.strip().lower() not in WEAK_SECRET_VALUES
+    )
+
+
+def validate_secret_configuration() -> None:
+    if _is_production() and not _is_strong_secret(
+        os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET")
+    ):
+        raise RuntimeError(
+            "Production requires a strong SECRET_KEY (at least 32 bytes). "
+            "No replacement secret was generated."
+        )
 
 
 def _get_secret_key() -> str:
     secret = os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET") or DEFAULT_SECRET
-    if secret == DEFAULT_SECRET:
-        return secret
+    if _is_production() and not _is_strong_secret(secret):
+        raise RuntimeError(
+            "Production requires a strong SECRET_KEY (at least 32 bytes). "
+            "No replacement secret was generated."
+        )
     return secret
 
 

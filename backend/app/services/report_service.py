@@ -2,6 +2,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from datetime import date, datetime, timedelta
 from ..models.models import Detection, Camera
+from ..core.tenant import (
+    PLATFORM_TENANT_SCOPE,
+    tenant_camera_ids,
+    tenant_owner_filter,
+)
 
 VEHICLE_DETECTION_LABELS = {
     "vehicle",
@@ -62,6 +67,7 @@ class ReportService:
         camera_id: str = None,
         owner_id: str = None,
         is_admin: bool = False,
+        customer_profile_id: str | None = None,
         detection_type: str | None = None,
         severity: str | None = None,
         confidence_min: float | None = None,
@@ -74,8 +80,24 @@ class ReportService:
         ]
         if camera_id:
             filters.append(Detection.camera_id == camera_id)
-        if owner_id and not is_admin:
+        if customer_profile_id:
+            filters.append(
+                Detection.camera_id.in_(
+                    tenant_camera_ids(db, customer_profile_id)
+                )
+            )
+            filters.append(
+                tenant_owner_filter(
+                    Detection,
+                    db,
+                    customer_profile_id,
+                    Detection.owner_id,
+                )
+            )
+        elif owner_id and not is_admin:
             filters.append(Detection.owner_id == owner_id)
+        else:
+            filters.append(False)
         if detection_type:
             filters.append(Detection.detection_type.ilike(f"%{detection_type}%"))
         if severity:
@@ -177,8 +199,19 @@ class ReportService:
         )
         if camera_id:
             camera_query = camera_query.filter(Camera.camera_id == camera_id)
-        if owner_id and not is_admin:
+        if customer_profile_id:
+            camera_query = camera_query.filter(
+                tenant_owner_filter(
+                    Camera,
+                    db,
+                    customer_profile_id,
+                    Camera.owner_id,
+                )
+            )
+        elif owner_id and not is_admin:
             camera_query = camera_query.filter(Camera.owner_id == owner_id)
+        else:
+            camera_query = camera_query.filter(False)
         camera_rows = camera_query.order_by(Camera.camera_name.asc()).all()
 
         cameras = [
@@ -203,7 +236,18 @@ class ReportService:
             Camera.camera_id == Detection.camera_id,
         ).filter(
             and_(*filters),
-            (Camera.owner_id == owner_id) if (owner_id and not is_admin) else True,
+            tenant_owner_filter(
+                Camera,
+                db,
+                customer_profile_id,
+                Camera.owner_id,
+            )
+            if customer_profile_id
+            else (
+                Camera.owner_id == owner_id
+                if owner_id and not is_admin
+                else False
+            ),
         ).group_by(
             Camera.camera_id,
             Camera.camera_name,
@@ -448,6 +492,7 @@ class ReportService:
         confidence_max: float | None = None,
         extra_filters: dict | None = None,
         is_admin: bool = False,
+        customer_profile_id: str | None = None,
     ):
         # reuse get_report_stats to produce payload
         payload = ReportService.get_report_stats(
@@ -457,6 +502,7 @@ class ReportService:
             camera_id=camera_id,
             owner_id=owner_id,
             is_admin=is_admin,
+            customer_profile_id=customer_profile_id,
             detection_type=detection_type,
             severity=severity,
             confidence_min=confidence_min,
@@ -479,5 +525,17 @@ class ReportService:
         if extra_filters:
             filters.update(extra_filters)
 
-        report = repo.create_report_record(owner_id=owner_id, generated_by=generated_by, title=title, report_type=report_type, filters=filters, payload=payload)
+        report = repo.create_report_record(
+            owner_id=owner_id,
+            generated_by=generated_by,
+            customer_profile_id=(
+                None
+                if customer_profile_id == PLATFORM_TENANT_SCOPE
+                else customer_profile_id
+            ),
+            title=title,
+            report_type=report_type,
+            filters=filters,
+            payload=payload,
+        )
         return report

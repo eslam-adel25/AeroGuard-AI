@@ -1,4 +1,5 @@
 import os
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -11,28 +12,66 @@ import asyncio
 from urllib.parse import urlparse
 
 from ...database.session import get_db
-from ...models.models import Camera, RestrictedZone, AIEvent, Detection, Tracking
+from ...models.models import (
+    Camera,
+    CustomerProfile,
+    RestrictedZone,
+    AIEvent,
+    Detection,
+    Tracking,
+)
 from ...schemas.schemas import (
     CameraResponse,
     TripwireOccupancyConfirmation,
     ZoneCreate,
     ZoneResponse,
 )
-from ...core.auth_middleware import get_current_user
+from ...core.auth_middleware import (
+    get_resource_user,
+    require_tenant_isolation,
+)
+from ...core.customer_features import (
+    check_camera_quota,
+    enforce_customer_camera_quota,
+    require_customer_feature,
+)
+from ...core.tenant import tenant_camera_child_filter, tenant_owner_filter
 from ...repositories.camera_repository import CameraRepository
 from ...services.camera_status import apply_camera_runtime_statuses
 from ...ai.processor import ai_engine 
 from ...websocket.manager import manager
 
-router = APIRouter(prefix="/cameras", tags=["Cameras"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/cameras",
+    tags=["Cameras"],
+    dependencies=[
+        Depends(require_customer_feature("cameras")),
+        Depends(require_tenant_isolation),
+    ],
+)
 
 
 def _get_camera_for_user(db: Session, camera_id: str, current_user: dict):
-    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    tenant_id = current_user.get("customer_profile_id")
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="Customer membership is not configured")
+    cam = (
+        db.query(Camera)
+        .filter(
+            Camera.camera_id == camera_id,
+            tenant_owner_filter(
+                Camera,
+                db,
+                tenant_id,
+                Camera.owner_id,
+            ),
+        )
+        .first()
+    )
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
-    if current_user.get("role") != "Administrator" and cam.owner_id != current_user.get("user_id"):
-        raise HTTPException(status_code=403, detail="Forbidden")
     return cam
 
 # المجلد الجذري لوحدة backend
@@ -101,9 +140,30 @@ async def add_camera(
     camera_type: str = Form(...), # LIVE or UPLOAD
     stream_url: str = Form(None), # لروابط RTSP/IP
     video_file: UploadFile = File(None), # لرفع ملفات الفيديو
+    customer_profile_id: uuid.UUID | None = Form(None),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_resource_user)
 ):
+    is_platform_owner = current_user.get("role") == "Owner"
+    if is_platform_owner:
+        if not customer_profile_id:
+            raise HTTPException(
+                status_code=422,
+                detail="A customer profile is required to create a camera",
+            )
+        profile_exists = (
+            db.query(CustomerProfile.customer_profile_id)
+            .filter(
+                CustomerProfile.customer_profile_id == customer_profile_id
+            )
+            .first()
+        )
+        if not profile_exists:
+            raise HTTPException(status_code=404, detail="Customer profile not found")
+        enforce_customer_camera_quota(db, customer_profile_id)
+    else:
+        customer_profile_id = current_user.get("customer_profile_id")
+        check_camera_quota(db, str(current_user.get("user_id")))
     final_url = stream_url
     if camera_type == "LIVE":
         final_url = _validate_live_rtsp_url(stream_url)
@@ -111,7 +171,8 @@ async def add_camera(
     # دعم كاميرا الجهاز (USB/Webcam)
     if camera_type == "USB":
         final_url = "0"
-    
+
+    uploaded_file_path = None
     if camera_type == "UPLOAD" and video_file:
         if not video_file.filename:
             raise HTTPException(status_code=400, detail="Invalid file name")
@@ -123,10 +184,10 @@ async def add_camera(
         if len(contents) > MAX_VIDEO_SIZE:
             raise HTTPException(status_code=400, detail="File too large")
         safe_name = f"{uuid.uuid4().hex}.{file_ext}"
-        file_path = UPLOAD_DIR / safe_name
-        with file_path.open("wb") as buffer:
+        uploaded_file_path = UPLOAD_DIR / safe_name
+        with uploaded_file_path.open("wb") as buffer:
             buffer.write(contents)
-        final_url = str(file_path)
+        final_url = str(uploaded_file_path)
 
     new_cam = Camera(
         camera_name=camera_name,
@@ -136,8 +197,22 @@ async def add_camera(
         status="Online" if camera_type in ["UPLOAD", "USB"] else "Offline"
     )
     repo = CameraRepository(db)
-    is_admin = current_user.get("role") == "Administrator"
-    created = repo.add_camera(new_cam, owner_id=current_user.get("user_id"))
+    try:
+        created = repo.add_camera(
+            new_cam,
+            owner_id=current_user.get("user_id"),
+            customer_profile_id=customer_profile_id,
+            platform_owner=is_platform_owner,
+        )
+    except Exception:
+        if uploaded_file_path is not None:
+            try:
+                uploaded_file_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.exception("Could not remove video upload after camera creation failed")
+        raise
     return created
 
 # 2. إدارة المناطق المحظورة (Restricted Zones) لكل كاميرا
@@ -174,7 +249,7 @@ def _build_zone_response(zone: RestrictedZone):
 
 
 @router.post("/{camera_id}/zones", response_model=ZoneResponse)
-def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     zone_name = zone.zone_name.strip()
     if not zone_name:
@@ -201,7 +276,8 @@ def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(
         zone_name=zone_name,
         zone_type=zone.zone_type,
         polygon_coords=stored_polygon,
-        owner_id=current_user.get("user_id"),
+        owner_id=cam.owner_id,
+        customer_profile_id=cam.customer_profile_id,
         tripwire_allowed_group_size=zone.tripwire_allowed_group_size if is_tripwire else None,
         tripwire_initial_occupancy=zone.tripwire_initial_occupancy if is_tripwire else None,
         tripwire_current_occupancy=zone.tripwire_initial_occupancy if is_tripwire else None,
@@ -215,18 +291,36 @@ def add_restricted_zone(camera_id: str, zone: ZoneCreate, db: Session = Depends(
 
 
 @router.get("/{camera_id}/zones", response_model=list[ZoneResponse])
-def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    cam = _get_camera_for_user(db, camera_id, current_user)
-    zones = db.query(RestrictedZone).filter(RestrictedZone.camera_id == camera_id).all()
+def list_restricted_zones(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
+    _get_camera_for_user(db, camera_id, current_user)
+    zones = (
+        db.query(RestrictedZone)
+        .filter(
+            RestrictedZone.camera_id == camera_id,
+            tenant_camera_child_filter(
+                RestrictedZone,
+                db,
+                current_user.get("customer_profile_id"),
+                owner_column=RestrictedZone.owner_id,
+            ),
+        )
+        .all()
+    )
     return [_build_zone_response(zone) for zone in zones]
 
 
 @router.delete("/{camera_id}/zones/{zone_id}")
-async def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     zone = db.query(RestrictedZone).filter(
         RestrictedZone.zone_id == zone_id,
         RestrictedZone.camera_id == camera_id,
+        tenant_camera_child_filter(
+            RestrictedZone,
+            db,
+            current_user.get("customer_profile_id"),
+            owner_column=RestrictedZone.owner_id,
+        ),
     ).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")
@@ -249,7 +343,7 @@ async def delete_restricted_zone(camera_id: str, zone_id: str, db: Session = Dep
                     "event_id": state.get("event_id") if state else None,
                 },
             },
-            audience_user_id=str(cam.owner_id),
+            audience_customer_profile_id=cam.customer_profile_id,
         )
     return {"message": "Zone deleted successfully"}
 
@@ -260,13 +354,19 @@ def confirm_tripwire_occupancy(
     zone_id: str,
     confirmation: TripwireOccupancyConfirmation,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_resource_user),
 ):
     _get_camera_for_user(db, camera_id, current_user)
     zone = db.query(RestrictedZone).filter(
         RestrictedZone.zone_id == zone_id,
         RestrictedZone.camera_id == camera_id,
         func.lower(RestrictedZone.zone_type) == "tripwire",
+        tenant_camera_child_filter(
+            RestrictedZone,
+            db,
+            current_user.get("customer_profile_id"),
+            owner_column=RestrictedZone.owner_id,
+        ),
     ).first()
     if not zone:
         raise HTTPException(status_code=404, detail="Tripwire not found")
@@ -285,7 +385,7 @@ def confirm_tripwire_occupancy(
 
 # 3. تشغيل الـ AI
 @router.post("/{camera_id}/start")
-async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
@@ -353,12 +453,14 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
                     "camera_id": str(cam.camera_id),
                     "status": "Offline",
                 },
-            })
+            }, audience_customer_profile_id=(
+                cam.customer_profile_id
+            ))
     return {"status": "started", "camera_id": str(cam.camera_id)}
 
 
 @router.post("/{camera_id}/stop")
-async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
@@ -376,24 +478,27 @@ async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_u
                 "camera_id": camera_key,
                 "status": "Offline",
             },
-        })
+        }, audience_customer_profile_id=(
+            cam.customer_profile_id
+        ))
     return {"status": "stopped", "camera_id": str(cam.camera_id)}
 
 # 4. جلب الكاميرات
 @router.get("/", response_model=list[CameraResponse])
-def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     repo = CameraRepository(db)
-    is_admin = current_user.get("role") == "Administrator"
     cameras = repo.get_all_cameras(
-        owner_id=current_user.get("user_id"), is_admin=is_admin
+        owner_id=current_user.get("user_id"),
+        customer_profile_id=current_user.get("customer_profile_id"),
+        platform_wide=current_user.get("role") == "Owner",
     )
-    responses = [CameraResponse.model_validate(camera) for camera in cameras]
+    responses = [CameraResponse.from_orm(camera) for camera in cameras]
     apply_camera_runtime_statuses(responses, ai_engine)
     return responses
 
 # 5. حذف كاميرا
 @router.delete("/{camera_id}")
-def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
 
     if cam.camera_type == "UPLOAD" and cam.stream_url:
@@ -408,13 +513,44 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: d
         ai_engine.stop_camera(cam.camera_id)
         ai_engine.last_frames.pop(str(cam.camera_id), None)
 
-    for related in db.query(AIEvent).filter(AIEvent.camera_id == cam.camera_id).all():
+    for related in db.query(AIEvent).filter(
+        AIEvent.camera_id == cam.camera_id,
+        tenant_camera_child_filter(
+            AIEvent,
+            db,
+            current_user.get("customer_profile_id"),
+            actor_column=AIEvent.detected_by,
+        ),
+    ).all():
         db.delete(related)
-    for related in db.query(Detection).filter(Detection.camera_id == cam.camera_id).all():
+    for related in db.query(Detection).filter(
+        Detection.camera_id == cam.camera_id,
+        tenant_camera_child_filter(
+            Detection,
+            db,
+            current_user.get("customer_profile_id"),
+            owner_column=Detection.owner_id,
+        ),
+    ).all():
         db.delete(related)
-    for related in db.query(Tracking).filter(Tracking.camera_id == cam.camera_id).all():
+    for related in db.query(Tracking).filter(
+        Tracking.camera_id == cam.camera_id,
+        tenant_camera_child_filter(
+            Tracking,
+            db,
+            current_user.get("customer_profile_id"),
+        ),
+    ).all():
         db.delete(related)
-    for related in db.query(RestrictedZone).filter(RestrictedZone.camera_id == cam.camera_id).all():
+    for related in db.query(RestrictedZone).filter(
+        RestrictedZone.camera_id == cam.camera_id,
+        tenant_camera_child_filter(
+            RestrictedZone,
+            db,
+            current_user.get("customer_profile_id"),
+            owner_column=RestrictedZone.owner_id,
+        ),
+    ).all():
         db.delete(related)
 
     db.delete(cam)
@@ -444,7 +580,7 @@ async def frame_generator(camera_id: str):
         await asyncio.sleep(0.05)
 
 @router.get("/{camera_id}/stream")
-async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")

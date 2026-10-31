@@ -9,20 +9,32 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import api from "../../services/api";
+import { Link, useLocation } from "react-router-dom";
+import axios from "axios";
+import api, {
+  authService,
+  clearAuthState,
+  persistAuthState,
+  type AuthState,
+} from "../../services/api";
 import surveillanceImg from "../../assets/images/auth/surveillance-control-room.png";
 
 interface LoginProps {
-  onLoginSuccess: (token: string) => void;
+  onLoginSuccess: (token: string, user: AuthState) => void;
 }
 
 const Login = ({ onLoginSuccess }: LoginProps) => {
   const { t } = useTranslation();
+  const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice] = useState(() =>
+    new URLSearchParams(location.search).get("registered") === "1"
+      ? "Registration complete. Sign in to check your account activation status."
+      : "",
+  );
   const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,14 +56,21 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
         token !== "undefined"
       ) {
         localStorage.setItem("ag_token", token);
-        localStorage.setItem("user", JSON.stringify(response.data.user ?? {}));
-        onLoginSuccess(token);
+        const identity = await authService.getMe();
+        persistAuthState(identity.data);
+        onLoginSuccess(token, identity.data);
         window.dispatchEvent(new Event("auth:login"));
       } else {
         setError(t("auth.invalidCredentials"));
       }
-    } catch {
-      setError(t("auth.invalidCredentials"));
+    } catch (requestError: unknown) {
+      clearAuthState();
+      const detail = axios.isAxiosError<{ detail?: string }>(requestError)
+        ? requestError.response?.data?.detail
+        : null;
+      setError(
+        typeof detail === "string" ? detail : t("auth.invalidCredentials"),
+      );
     } finally {
       setLoading(false);
     }
@@ -117,6 +136,11 @@ const Login = ({ onLoginSuccess }: LoginProps) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {notice && (
+              <div className="rounded-xl border border-blue-400/20 bg-blue-400/10 p-4 text-sm text-blue-200">
+                {notice}
+              </div>
+            )}
             {error && (
               <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm font-medium">
                 {error}

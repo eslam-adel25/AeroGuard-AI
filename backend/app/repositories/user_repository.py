@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from ..models.models import User, Role
+from ..models.models import CustomerProfile, User, Role
 
 class UserRepository:
     def __init__(self, db: Session):
@@ -40,7 +40,18 @@ class UserRepository:
         user = self.db.query(User).filter(User.user_id == user_id).first()
         if user:
             user.is_verified = True
-            user.status = "Active"
+            profile = (
+                self.db.query(CustomerProfile)
+                .filter(CustomerProfile.user_id == user.user_id)
+                .with_for_update()
+                .first()
+            )
+            if (
+                profile
+                and profile.workflow_status == "AWAITING_EMAIL_VERIFICATION"
+            ):
+                profile.workflow_status = "UNREAD"
+                profile.account_status = "PENDING"
             self.db.commit()
             return True
         return False

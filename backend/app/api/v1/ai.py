@@ -1,40 +1,56 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, cast
 from ...database.session import get_db
-from ...core.auth_middleware import get_current_user
+from ...core.auth_middleware import (
+    get_resource_user,
+    require_tenant_isolation,
+)
+from ...core.customer_features import (
+    require_any_customer_feature,
+    require_customer_feature,
+)
 from ...services.ai_service import AIService, build_screenshot_filename
 from ...repositories.ai_repository import AIRepository
 from ...models.models import AIEvent, Camera
+from ...core.tenant import tenant_camera_child_filter, tenant_owner_filter
 from fastapi.responses import FileResponse
 import os
 from datetime import datetime
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_tenant_isolation)])
 
 @router.get("/ai/events")
-def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[str] = None, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[str] = None, limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _feature_access: dict = Depends(require_any_customer_feature("alerts", "analytics"))):
     repo = AIRepository(db)
-    is_admin = current_user.get("role") == "Administrator"
-    if camera_id and not is_admin:
-        camera = db.query(Camera).filter(Camera.camera_id == camera_id).first()
-        if not camera or camera.owner_id != current_user.get("user_id"):
-            raise HTTPException(status_code=403, detail="Forbidden")
-    owner_id = None if is_admin else current_user.get("user_id")
+    tenant_id = current_user.get("customer_profile_id")
+    if camera_id:
+        camera = db.query(Camera).filter(
+            Camera.camera_id == camera_id,
+            tenant_owner_filter(
+                Camera,
+                db,
+                tenant_id,
+                Camera.owner_id,
+            ),
+        ).first()
+        if not camera:
+            raise HTTPException(status_code=404, detail="Camera not found")
     if event_id_prefix is not None:
         prefix = event_id_prefix.strip()
         if len(prefix) < 4 or any(char not in "0123456789abcdefABCDEF-" for char in prefix):
             raise HTTPException(status_code=422, detail="Invalid Event ID prefix")
 
         event_query = db.query(AIEvent)
-        if not is_admin:
-            event_query = event_query.join(Camera, Camera.camera_id == AIEvent.camera_id).filter(
-                or_(
-                    cast(AIEvent.detected_by, String) == str(current_user.get("user_id")),
-                    cast(Camera.owner_id, String) == str(current_user.get("user_id")),
-                )
+        event_query = event_query.filter(
+            tenant_camera_child_filter(
+                AIEvent,
+                db,
+                tenant_id,
+                actor_column=AIEvent.detected_by,
             )
+        )
         if camera_id:
             event_query = event_query.filter(AIEvent.camera_id == camera_id)
         event_query = repo.exclude_pending_events(event_query)
@@ -48,7 +64,7 @@ def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[st
     else:
         items = repo.list_events(
             camera_id=camera_id,
-            owner_id=owner_id,
+            customer_profile_id=tenant_id,
             exclude_pending_screenshots=True,
             limit=limit,
             offset=offset,
@@ -70,33 +86,45 @@ def list_ai_events(camera_id: Optional[str] = None, event_id_prefix: Optional[st
         ],
         "unread_count": repo.count_unread_events(
             camera_id=camera_id,
-            owner_id=owner_id,
+            customer_profile_id=tenant_id,
             exclude_pending_screenshots=True,
         ),
     }
 
 @router.patch("/ai/events/{event_id}/read")
-def mark_ai_event_read(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def mark_ai_event_read(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _alerts_feature: dict = Depends(require_customer_feature("alerts"))):
     repo = AIRepository(db)
+    tenant_id = current_user.get("customer_profile_id")
     event = repo.get_finalized_event(event_id)
+    if event and not db.query(AIEvent).filter(
+        AIEvent.event_id == event.event_id,
+        tenant_camera_child_filter(
+            AIEvent,
+            db,
+            tenant_id,
+            actor_column=AIEvent.detected_by,
+        ),
+    ).first():
+        event = None
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if current_user.get("role") != "Administrator":
-        camera = db.query(Camera).filter(Camera.camera_id == event.camera_id).first()
-        if not camera or str(camera.owner_id) != str(current_user.get("user_id")):
-            raise HTTPException(status_code=403, detail="Forbidden")
     event.is_read = True
     db.commit()
     return {"event_id": str(event.event_id), "status": "Read"}
 
 @router.post("/ai/events/read-all")
-def mark_all_ai_events_read(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def mark_all_ai_events_read(db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _alerts_feature: dict = Depends(require_customer_feature("alerts"))):
     repo = AIRepository(db)
-    owner_id = current_user.get("user_id")
+    tenant_id = current_user.get("customer_profile_id")
     query = db.query(AIEvent)
-    if current_user.get("role") != "Administrator":
-        camera_ids = select(Camera.camera_id).where(Camera.owner_id == owner_id)
-        query = query.filter(AIEvent.camera_id.in_(camera_ids))
+    query = query.filter(
+        tenant_camera_child_filter(
+            AIEvent,
+            db,
+            tenant_id,
+            actor_column=AIEvent.detected_by,
+        )
+    )
     query = repo.exclude_pending_events(query)
     updated = query.filter(AIEvent.is_read.is_(False)).update(
         {AIEvent.is_read: True}, synchronize_session=False
@@ -105,16 +133,21 @@ def mark_all_ai_events_read(db: Session = Depends(get_db), current_user: dict = 
     return {"updated": updated}
 
 @router.get("/ai/events/{event_id}")
-def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _feature_access: dict = Depends(require_any_customer_feature("alerts", "analytics"))):
     repo = AIRepository(db)
     ev = repo.get_finalized_event(event_id)
+    if ev and not db.query(AIEvent).filter(
+        AIEvent.event_id == ev.event_id,
+        tenant_camera_child_filter(
+            AIEvent,
+            db,
+            current_user.get("customer_profile_id"),
+            actor_column=AIEvent.detected_by,
+        ),
+    ).first():
+        ev = None
     if not ev:
         raise HTTPException(status_code=404, detail="Event not found")
-    if current_user.get("role") != "Administrator" and ev.camera_id and ev.detected_by != current_user.get("user_id"):
-        from ...models.models import Camera
-        camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
-        if not camera or camera.owner_id != current_user.get("user_id"):
-            raise HTTPException(status_code=403, detail="Forbidden")
     return {
         "event_id": str(ev.event_id),
         "camera_id": str(ev.camera_id),
@@ -128,13 +161,15 @@ def get_ai_event(event_id: str, db: Session = Depends(get_db), current_user: dic
     }
 
 @router.post("/ai/events/manual")
-async def create_ai_event_manual(camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, file: Optional[UploadFile] = File(None), db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def create_ai_event_manual(camera_id: str, detection_type: str, severity: str, confidence: Optional[float] = None, file: Optional[UploadFile] = File(None), db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _alerts_feature: dict = Depends(require_customer_feature("alerts")), _camera_feature: dict = Depends(require_customer_feature("cameras"))):
     from ...models.models import Camera
-    cam = db.query(Camera).filter(Camera.camera_id == camera_id).first()
+    tenant_id = current_user.get("customer_profile_id")
+    cam = db.query(Camera).filter(
+        Camera.camera_id == camera_id,
+        tenant_owner_filter(Camera, db, tenant_id, Camera.owner_id),
+    ).first()
     if not cam:
         raise HTTPException(status_code=404, detail="Camera not found")
-    if current_user.get("role") != "Administrator" and cam.owner_id != current_user.get("user_id"):
-        raise HTTPException(status_code=403, detail="Forbidden")
 
     svc = AIService(db)
     image_bytes = None
@@ -147,6 +182,7 @@ async def create_ai_event_manual(camera_id: str, detection_type: str, severity: 
         confidence=confidence,
         user_id=current_user.get("user_id"),
         owner_id=current_user.get("user_id"),
+        customer_profile_id=cam.customer_profile_id,
         screenshot_bytes=image_bytes,
     )
     return {"event_id": str(ev.event_id)}
@@ -154,16 +190,21 @@ async def create_ai_event_manual(camera_id: str, detection_type: str, severity: 
 
 
 @router.get("/ai/events/{event_id}/screenshot")
-def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_ai_event_screenshot(event_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user), _feature_access: dict = Depends(require_any_customer_feature("alerts", "analytics"))):
     repo = AIRepository(db)
     ev = repo.get_finalized_event(event_id)
+    if ev and not db.query(AIEvent).filter(
+        AIEvent.event_id == ev.event_id,
+        tenant_camera_child_filter(
+            AIEvent,
+            db,
+            current_user.get("customer_profile_id"),
+            actor_column=AIEvent.detected_by,
+        ),
+    ).first():
+        ev = None
     if not ev or not ev.screenshot_path:
         raise HTTPException(status_code=404, detail="Screenshot not found")
-    if current_user.get("role") != "Administrator" and ev.camera_id:
-        from ...models.models import Camera
-        camera = db.query(Camera).filter(Camera.camera_id == ev.camera_id).first()
-        if not camera or camera.owner_id != current_user.get("user_id"):
-            raise HTTPException(status_code=403, detail="Forbidden")
     path = ev.screenshot_path
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Screenshot file missing")

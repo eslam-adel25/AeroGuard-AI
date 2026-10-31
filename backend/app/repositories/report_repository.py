@@ -2,10 +2,19 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_, cast
 from sqlalchemy.types import String
 from datetime import date
+import logging
 
 from ..models.models import Detection, Camera, Report
 from ..models.models import AIEvent
 from .ai_repository import AIRepository
+from ..core.tenant import (
+    PLATFORM_TENANT_SCOPE,
+    tenant_camera_child_filter,
+    tenant_camera_ids,
+    tenant_member_user_ids,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class ReportRepository:
@@ -13,9 +22,19 @@ class ReportRepository:
         self.db = db
 
     # Persistent reports storage
-    def create_report_record(self, owner_id: str, generated_by: str, title: str | None, report_type: str, filters: dict, payload: dict):
+    def create_report_record(
+        self,
+        owner_id: str,
+        generated_by: str,
+        title: str | None,
+        report_type: str,
+        filters: dict,
+        payload: dict,
+        customer_profile_id: str | None = None,
+    ):
         report = Report(
             owner_id=owner_id,
+            customer_profile_id=customer_profile_id,
             generated_by=generated_by,
             title=title,
             report_type=report_type,
@@ -30,10 +49,42 @@ class ReportRepository:
         self.db.refresh(report)
         return report
 
-    def get_report(self, report_id: str, owner_id: str | None = None, is_admin: bool = False):
+    def get_report(
+        self,
+        report_id: str,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+        customer_profile_id: str | None = None,
+    ):
         q = self.db.query(Report).filter(Report.report_id == report_id)
-        if owner_id and not is_admin:
+        if customer_profile_id == PLATFORM_TENANT_SCOPE:
+            pass
+        elif customer_profile_id:
+            q = q.filter(Report.customer_profile_id == customer_profile_id)
+            if q.first() is None:
+                member_ids = tenant_member_user_ids(self.db, customer_profile_id)
+                unresolved = (
+                    self.db.query(Report.report_id)
+                    .filter(
+                        Report.report_id == report_id,
+                        Report.customer_profile_id.is_(None),
+                        or_(
+                            Report.owner_id.in_(member_ids),
+                            Report.generated_by.in_(member_ids),
+                        ),
+                    )
+                    .first()
+                )
+                if unresolved:
+                    logger.warning(
+                        "Denied access to report %s without verified tenant ownership",
+                        report_id,
+                    )
+                return None
+        elif owner_id and not is_admin:
             q = q.filter(Report.owner_id == owner_id)
+        else:
+            q = q.filter(False)
         return q.first()
 
     def list_reports(
@@ -46,10 +97,36 @@ class ReportRepository:
         camera_id: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        customer_profile_id: str | None = None,
     ):
         q = self.db.query(Report)
-        if owner_id and not is_admin:
+        if customer_profile_id == PLATFORM_TENANT_SCOPE:
+            pass
+        elif customer_profile_id:
+            q = q.filter(Report.customer_profile_id == customer_profile_id)
+            member_ids = tenant_member_user_ids(self.db, customer_profile_id)
+            unresolved_count = (
+                self.db.query(func.count(Report.report_id))
+                .filter(
+                    Report.customer_profile_id.is_(None),
+                    or_(
+                        Report.owner_id.in_(member_ids),
+                        Report.generated_by.in_(member_ids),
+                    ),
+                )
+                .scalar()
+                or 0
+            )
+            if unresolved_count:
+                logger.warning(
+                    "Customer %s has %s reports without verified tenant ownership",
+                    customer_profile_id,
+                    unresolved_count,
+                )
+        elif owner_id and not is_admin:
             q = q.filter(Report.owner_id == owner_id)
+        else:
+            q = q.filter(False)
         if query:
             q = q.filter(
                 or_(
@@ -71,8 +148,19 @@ class ReportRepository:
             "items": rows,
         }
 
-    def delete_report(self, report_id: str, owner_id: str | None = None, is_admin: bool = False):
-        report = self.get_report(report_id, owner_id=owner_id, is_admin=is_admin)
+    def delete_report(
+        self,
+        report_id: str,
+        owner_id: str | None = None,
+        is_admin: bool = False,
+        customer_profile_id: str | None = None,
+    ):
+        report = self.get_report(
+            report_id,
+            owner_id=owner_id,
+            is_admin=is_admin,
+            customer_profile_id=customer_profile_id,
+        )
         if not report:
             return False
         self.db.delete(report)
@@ -96,23 +184,33 @@ class ReportRepository:
         camera_id: str | None = None,
         owner_id: str | None = None,
         is_admin: bool = False,
+        customer_profile_id: str | None = None,
     ):
-        query = self.db.query(Detection)
-
-        query = query.filter(
+        filters = [
             func.date(Detection.detected_at) >= start_date,
             func.date(Detection.detected_at) <= end_date,
-        )
-
+        ]
         if camera_id:
-            query = query.filter(
-                Detection.camera_id == camera_id
+            filters.append(Detection.camera_id == camera_id)
+        if customer_profile_id:
+            filters.append(
+                Detection.camera_id.in_(
+                    tenant_camera_ids(self.db, customer_profile_id)
+                )
             )
-        if owner_id and not is_admin:
-            query = query.filter(Detection.owner_id == owner_id)
-
-        if owner_id and not is_admin:
-            query = query.join(Camera, Camera.camera_id == Detection.camera_id).filter(Camera.owner_id == owner_id)
+            filters.append(
+                tenant_owner_filter(
+                    Detection,
+                    self.db,
+                    customer_profile_id,
+                    Detection.owner_id,
+                )
+            )
+        elif owner_id and not is_admin:
+            filters.append(Detection.owner_id == owner_id)
+        else:
+            filters.append(False)
+        query = self.db.query(Detection).filter(*filters)
 
         total_detections = query.count()
 
@@ -146,6 +244,7 @@ class ReportRepository:
                     Detection.detection_id
                 ).label("count"),
             )
+            .filter(*filters)
             .group_by("hour")
             .order_by("hour")
             .all()
@@ -163,13 +262,23 @@ class ReportRepository:
                 Detection,
                 Camera.camera_id == Detection.camera_id,
             )
+            .filter(*filters)
             .group_by(Camera.camera_name)
         )
 
-        if owner_id and not is_admin:
+        if customer_profile_id:
+            camera_distribution = camera_distribution_query.filter(
+                tenant_owner_filter(
+                    Camera,
+                    self.db,
+                    customer_profile_id,
+                    Camera.owner_id,
+                )
+            ).all()
+        elif owner_id and not is_admin:
             camera_distribution = camera_distribution_query.filter(Camera.owner_id == owner_id).all()
         else:
-            camera_distribution = camera_distribution_query.all()
+            camera_distribution = camera_distribution_query.filter(False).all()
 
         # توزيع أنواع التهديد
         threat_distribution = (
@@ -179,6 +288,7 @@ class ReportRepository:
                     Detection.detection_id
                 ).label("count"),
             )
+            .filter(*filters)
             .group_by(
                 Detection.detection_type
             )
@@ -190,6 +300,20 @@ class ReportRepository:
             self.db.query(
                 AIEvent.detection_type,
                 func.count(AIEvent.event_id).label("count"),
+            )
+            .filter(
+                tenant_camera_child_filter(
+                    AIEvent,
+                    self.db,
+                    customer_profile_id,
+                    actor_column=AIEvent.detected_by,
+                )
+                if customer_profile_id
+                else (
+                    AIEvent.detected_by == owner_id
+                    if owner_id and not is_admin
+                    else False
+                )
             )
             .group_by(AIEvent.detection_type)
         )

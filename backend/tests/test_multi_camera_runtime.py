@@ -343,6 +343,7 @@ def test_camera_start_scheduling_failure_persists_offline(monkeypatch):
         camera_id="camera-a",
         camera_type="UPLOAD",
         stream_url="camera-a.mp4",
+        customer_profile_id="tenant-a",
         status="Offline",
     )
     monkeypatch.setattr(cameras_api, "ai_engine", processor)
@@ -396,6 +397,7 @@ def test_live_camera_stop_during_validation_cancels_start_without_affecting_othe
         camera_id="camera-a",
         camera_type="LIVE",
         stream_url="rtsp://camera-a/stream",
+        customer_profile_id="tenant-a",
         status="Offline",
     )
     monkeypatch.setattr(cameras_api, "ai_engine", processor)
@@ -420,7 +422,7 @@ def test_live_camera_stop_during_validation_cancels_start_without_affecting_othe
 
     class FakeCameraResponse:
         @classmethod
-        def model_validate(cls, camera_record):
+        def from_orm(cls, camera_record):
             return SimpleNamespace(
                 camera_id=camera_record.camera_id,
                 status=camera_record.status,
@@ -489,6 +491,7 @@ def test_live_camera_validation_failure_releases_startup_for_retry(monkeypatch):
         camera_id="camera-a",
         camera_type="LIVE",
         stream_url="rtsp://camera-a/stream",
+        customer_profile_id="tenant-a",
         status="Offline",
     )
     monkeypatch.setattr(cameras_api, "ai_engine", processor)
@@ -556,6 +559,7 @@ def test_cancelled_live_camera_start_releases_only_its_pending_reservation(monke
         camera_id="camera-a",
         camera_type="LIVE",
         stream_url="rtsp://camera-a/stream",
+        customer_profile_id="tenant-a",
         status="Offline",
     )
     monkeypatch.setattr(cameras_api, "ai_engine", processor)
@@ -630,8 +634,14 @@ def test_alarm_snapshot_contains_only_authorized_camera_state(monkeypatch):
         def __init__(self, db):
             assert isinstance(db, FakeDB)
 
-        def get_all_cameras(self, owner_id=None, is_admin=False):
-            requested_scope.update(owner_id=owner_id, is_admin=is_admin)
+        def get_all_cameras(
+            self, owner_id=None, customer_profile_id=None, platform_wide=False
+        ):
+            requested_scope.update(
+                owner_id=owner_id,
+                customer_profile_id=customer_profile_id,
+                platform_wide=platform_wide,
+            )
             return [camera_a]
 
     processor = SimpleNamespace(
@@ -650,16 +660,20 @@ def test_alarm_snapshot_contains_only_authorized_camera_state(monkeypatch):
         FakeCameraRepository,
     )
 
-    snapshot = websocket_api._build_alarm_state_snapshot("owner-a", "User")
+    snapshot = websocket_api._build_alarm_state_snapshot("owner-a", "tenant-a")
 
-    assert requested_scope == {"owner_id": "owner-a", "is_admin": False}
+    assert requested_scope == {
+        "owner_id": "owner-a",
+        "customer_profile_id": "tenant-a",
+        "platform_wide": False,
+    }
     assert snapshot == {
         "camera-a": {"active": True, "sources": ["fire"]},
     }
 
     tripwire_snapshot = websocket_api._build_tripwire_alarm_snapshot(
         "owner-a",
-        "User",
+        "tenant-a",
     )
 
     assert tripwire_snapshot == {

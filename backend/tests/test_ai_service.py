@@ -23,9 +23,28 @@ class FakeRepo:
         )
 
 
+class FakeCameraQuery:
+    def filter(self, *_args):
+        return self
+
+    def first(self):
+        return SimpleNamespace(
+            camera_id="cam-1",
+            camera_name="Test camera",
+            owner_id="owner-1",
+            customer_profile_id="tenant-a",
+        )
+
+
+class FakeDB:
+    def query(self, _model):
+        return FakeCameraQuery()
+
+
 def test_register_event_uses_none_for_invalid_track_id(monkeypatch):
-    service = ai_service.AIService(db_session=object())
+    service = ai_service.AIService(db_session=FakeDB())
     fake_repo = FakeRepo()
+    fake_repo.db = service.repo.db
     service.repo = fake_repo
 
     async def fake_broadcast(*args, **kwargs):
@@ -41,6 +60,7 @@ def test_register_event_uses_none_for_invalid_track_id(monkeypatch):
             confidence=0.8,
             track_id="not-a-uuid",
             user_id=None,
+            owner_id="owner-1",
             metadata={"bbox": [1, 2, 3, 4]},
             screenshot_bytes=None,
         )
@@ -62,8 +82,9 @@ def test_build_screenshot_filename_returns_human_readable_name():
 
 
 def test_event_broadcast_does_not_depend_on_screenshot_persistence(monkeypatch):
-    service = ai_service.AIService(db_session=object())
+    service = ai_service.AIService(db_session=FakeDB())
     fake_repo = FakeRepo()
+    fake_repo.db = service.repo.db
     service.repo = fake_repo
     messages = []
 
@@ -79,6 +100,7 @@ def test_event_broadcast_does_not_depend_on_screenshot_persistence(monkeypatch):
             severity="High",
             confidence=0.8,
             user_id=None,
+            owner_id="owner-1",
             metadata={},
             screenshot_bytes=None,
         )
