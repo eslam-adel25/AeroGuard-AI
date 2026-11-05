@@ -23,6 +23,13 @@ import directionLeftImage from "../assets/images/tripwire/direction-left.png";
 import directionRightImage from "../assets/images/tripwire/direction-right.png";
 import { useAlertAudio } from "../components/useAlertAudio";
 import { useTranslation } from "react-i18next";
+import { useGo2rtcLiveStream } from "../hooks/useGo2rtcLiveStream";
+import {
+  acceptDetectionOverlay,
+  calculateCoverLayout,
+  mapNormalizedPointToCover,
+  type DetectionOverlay,
+} from "../utils/detectionOverlay";
 import {
   Maximize,
   Minimize,
@@ -66,6 +73,7 @@ interface CameraData {
   camera_name: string;
   location: string;
   status?: string;
+  camera_type?: string;
 }
 
 const EMPTY_ALARM_SOURCES: string[] = [];
@@ -152,6 +160,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const [peopleCount, setPeopleCount] = useState(0);
   const [carCount, setCarCount] = useState(0);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
+  const [detectionOverlay, setDetectionOverlay] =
+    useState<DetectionOverlay | null>(null);
   const {
     alarmStateByCamera,
     mutedCameraIds,
@@ -167,6 +177,12 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   >("Offline");
   const selectedCameraName =
     cameras.find((c) => c.camera_id === selectedCamera)?.camera_name || "";
+  const selectedCameraType = cameras.find(
+    (camera) => camera.camera_id === selectedCamera,
+  )?.camera_type;
+  const isSelectedLiveCamera = ["LIVE", "NVR"].includes(
+    selectedCameraType?.toUpperCase() ?? "",
+  );
   const selectedAlarmState = selectedCamera
     ? alarmStateByCamera[selectedCamera]
     : undefined;
@@ -175,8 +191,42 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
 
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLImageElement>(null);
+  const videoRef = useRef<HTMLImageElement | HTMLVideoElement | null>(null);
+  const drawOverlayRef = useRef<() => void>(() => {});
+  const detectionOverlayRef = useRef<DetectionOverlay | null>(null);
+  const latestVideoFrameMetadataRef = useRef<
+    VideoFrameCallbackMetadata | null
+  >(null);
+  const [liveVideoElement, setLiveVideoElement] =
+    useState<HTMLVideoElement | null>(null);
+  const attachLiveVideo = useCallback((element: HTMLVideoElement | null) => {
+    videoRef.current = element;
+    setLiveVideoElement(element);
+  }, []);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const legacyVideoSource = selectedCamera
+    ? (() => {
+        const token = getStoredAuthToken();
+        return token
+          ? `/api/v1/cameras/${selectedCamera}/stream?token=${encodeURIComponent(token)}`
+          : `/api/v1/cameras/${selectedCamera}/stream`;
+      })()
+    : "";
+  const liveStreamStatus = useGo2rtcLiveStream(
+    liveVideoElement,
+    isSelectedLiveCamera ? selectedCamera : null,
+  );
+
+  const getVideoElementSize = (element: HTMLElement | null) => {
+    if (!element) return null;
+    const videoElement = element as HTMLImageElement | HTMLVideoElement;
+    const naturalWidth = "naturalWidth" in videoElement ? videoElement.naturalWidth : videoElement.videoWidth;
+    const naturalHeight = "naturalHeight" in videoElement ? videoElement.naturalHeight : videoElement.videoHeight;
+    if (!naturalWidth || !naturalHeight || naturalWidth <= 0 || naturalHeight <= 0) {
+      return null;
+    }
+    return { naturalWidth, naturalHeight };
+  };
   const selectedCameraRef = useRef<string | null>(null);
   const [frozenFrames, setFrozenFrames] = useState<Record<string, string>>({});
   const frozenFramesRef = useRef<Record<string, string>>({});
@@ -185,7 +235,6 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const freezeGenerationByCameraRef = useRef(new Map<string, number>());
   const startAcceptedCameraIdsRef = useRef(new Set<string>());
   const frozenUrlCleanupTimerRef = useRef<number | null>(null);
-  const streamToken = getStoredAuthToken();
   const [isDrawing, setIsDrawing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [drawingPointsByType, setDrawingPointsByType] =
@@ -263,13 +312,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   const captureFrozenFrame = useCallback((cameraId: string) => {
     const image = videoRef.current;
     const overlay = overlayCanvasRef.current;
+    const imageSize = getVideoElementSize(image);
     if (
       frozenFramesRef.current[cameraId] ||
       selectedCameraRef.current !== cameraId ||
       !image ||
       !overlay ||
-      image.naturalWidth === 0 ||
-      image.naturalHeight === 0 ||
+      !imageSize ||
       overlay.width === 0 ||
       overlay.height === 0
     ) {
@@ -291,13 +340,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       if (!context) return;
 
       const scale = Math.max(
-        width / image.naturalWidth,
-        height / image.naturalHeight,
+        width / imageSize.naturalWidth,
+        height / imageSize.naturalHeight,
       );
       const sourceWidth = width / scale;
       const sourceHeight = height / scale;
-      const sourceX = (image.naturalWidth - sourceWidth) / 2;
-      const sourceY = (image.naturalHeight - sourceHeight) / 2;
+      const sourceX = (imageSize.naturalWidth - sourceWidth) / 2;
+      const sourceY = (imageSize.naturalHeight - sourceHeight) / 2;
       context.drawImage(
         image,
         sourceX,
@@ -452,6 +501,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     (id: string, status?: string) => {
       setSelectedCamera(id);
       selectedCameraRef.current = id;
+      setDetectionOverlay(null);
       cameraStatusesRef.current[id] = status;
       localStorage.setItem("ag_selected_camera", id);
       const running = isCameraRunning(status);
@@ -460,6 +510,20 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!detectionOverlay) return;
+    const expiresIn = Math.max(
+      0,
+      1500 - (performance.now() - detectionOverlay.receivedAt),
+    );
+    const timeout = window.setTimeout(() => {
+      setDetectionOverlay((current) =>
+        current === detectionOverlay ? null : current,
+      );
+    }, expiresIn);
+    return () => window.clearTimeout(timeout);
+  }, [detectionOverlay]);
 
   useEffect(() => {
     selectedCameraRef.current = selectedCamera;
@@ -558,10 +622,54 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
         ) {
           return;
         }
+        const statusReceivedAt = performance.now();
+        const diagnosticsEnabled =
+          new URLSearchParams(window.location.search).get(
+            "overlayDiagnostics",
+          ) === "1";
+        const overlay = message.data.detection_overlay;
+        if (diagnosticsEnabled) {
+          console.debug("[AeroGuard ai_status received]", {
+            receivedAt: statusReceivedAt,
+            cameraId: message.data.camera_id,
+            fps: message.data.fps,
+            hasDetectionOverlay: Boolean(overlay),
+            videoCurrentTime: videoRef.current instanceof HTMLVideoElement
+              ? videoRef.current.currentTime
+              : null,
+            latestVideoMediaTime:
+              latestVideoFrameMetadataRef.current?.mediaTime ?? null,
+            backendPipelineTiming: overlay?.pipeline_timing ?? null,
+          });
+        }
         setFps(message.data.fps ?? 0);
         setBagCount(message.data.bags ?? 0);
         setPeopleCount(message.data.persons ?? 0);
-        setCarCount(message.data.cars ?? 0);
+        setCarCount(message.data.cars ?? 0        );
+        if (overlay) {
+          if (diagnosticsEnabled) {
+            console.debug("[AeroGuard overlay received]", {
+              receivedAt: statusReceivedAt,
+              frameSequence: overlay.frame_sequence,
+              cameraId: overlay.camera_id,
+              videoCurrentTime:
+                videoRef.current instanceof HTMLVideoElement
+                  ? videoRef.current.currentTime
+                  : null,
+              latestVideoMediaTime:
+                latestVideoFrameMetadataRef.current?.mediaTime ?? null,
+              backendPipelineTiming: overlay.pipeline_timing ?? null,
+            });
+          }
+          setDetectionOverlay((current) => {
+            return acceptDetectionOverlay(
+              current,
+              overlay,
+              selectedCameraRef.current,
+              statusReceivedAt,
+            );
+          });
+        }
         setUnknownObjectCount(
           Math.max(
             0,
@@ -611,6 +719,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
           );
         }
         if (cameraId === selectedCameraRef.current) {
+          if (status === "Offline") setDetectionOverlay(null);
           const startAccepted =
             startAcceptedCameraIdsRef.current.has(cameraId);
           if (status === "Offline" && !startAccepted) {
@@ -763,11 +872,13 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
   };
 
   const takeSnapshot = () => {
-    if (videoRef.current) {
+    const video = videoRef.current;
+    const size = getVideoElementSize(video);
+    if (video && size) {
       const canvas = document.createElement("canvas");
-      canvas.width = videoRef.current.naturalWidth;
-      canvas.height = videoRef.current.naturalHeight;
-      canvas.getContext("2d")?.drawImage(videoRef.current, 0, 0);
+      canvas.width = size.naturalWidth;
+      canvas.height = size.naturalHeight;
+      canvas.getContext("2d")?.drawImage(video as CanvasImageSource, 0, 0);
       const link = document.createElement("a");
       link.download = `AG_SNAPSHOT_${new Date().getTime()}.jpg`;
       link.href = canvas.toDataURL("image/jpeg");
@@ -780,25 +891,24 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     if (!video) return null;
 
     const rect = video.getBoundingClientRect();
-    const naturalW = (video as HTMLImageElement).naturalWidth || rect.width;
-    const naturalH = (video as HTMLImageElement).naturalHeight || rect.height;
+    const size = getVideoElementSize(video);
+    const naturalW = size?.naturalWidth ?? rect.width;
+    const naturalH = size?.naturalHeight ?? rect.height;
     if (naturalW === 0 || naturalH === 0) return null;
 
-    const scaleX = rect.width / naturalW;
-    const scaleY = rect.height / naturalH;
-    const scale = Math.max(scaleX, scaleY);
-    const renderedW = naturalW * scale;
-    const renderedH = naturalH * scale;
-    const offsetX = Math.max(0, (renderedW - rect.width) / 2);
-    const offsetY = Math.max(0, (renderedH - rect.height) / 2);
+    const layout = calculateCoverLayout(
+      naturalW,
+      naturalH,
+      rect.width,
+      rect.height,
+    );
+    if (!layout) return null;
 
     return {
       rect,
       naturalW,
       naturalH,
-      scale,
-      offsetX,
-      offsetY,
+      ...layout,
     };
   }, []);
 
@@ -826,10 +936,11 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       if (!details) return null;
 
       const { scale, offsetX, offsetY, naturalW, naturalH } = details;
-      return [
-        normalized[0] * naturalW * scale - offsetX,
-        normalized[1] * naturalH * scale - offsetY,
-      ] as [number, number];
+      return mapNormalizedPointToCover(normalized, naturalW, naturalH, {
+        scale,
+        offsetX,
+        offsetY,
+      });
     },
     [getVideoRenderDetails],
   );
@@ -1028,6 +1139,89 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       drawZone(zone, zone.zone_type.toLowerCase().includes("restricted")),
     );
 
+    const currentOverlay =
+      detectionOverlay?.camera_id === selectedCamera ? detectionOverlay : null;
+    const videoRenderDetails = getVideoRenderDetails();
+    if (
+      currentOverlay &&
+      currentOverlay.frame_width > 0 &&
+      currentOverlay.frame_height > 0 &&
+      videoRenderDetails
+    ) {
+      currentOverlay.detections.forEach((detection) => {
+        const [x1, y1, x2, y2] = detection.bbox;
+        const topLeft = mapNormalizedToCanvasCoords([
+          Math.max(0, Math.min(1, x1 / currentOverlay.frame_width)),
+          Math.max(0, Math.min(1, y1 / currentOverlay.frame_height)),
+        ]);
+        const bottomRight = mapNormalizedToCanvasCoords([
+          Math.max(0, Math.min(1, x2 / currentOverlay.frame_width)),
+          Math.max(0, Math.min(1, y2 / currentOverlay.frame_height)),
+        ]);
+        if (!topLeft || !bottomRight) return;
+        const color = `rgb(${detection.box_color_rgb.join(",")})`;
+        const scale = videoRenderDetails.scale;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(
+          1,
+          currentOverlay.draw_settings.line_thickness * scale,
+        );
+        ctx.strokeRect(
+          topLeft[0],
+          topLeft[1],
+          bottomRight[0] - topLeft[0],
+          bottomRight[1] - topLeft[1],
+        );
+        const fontSize = Math.max(
+          1,
+          currentOverlay.draw_settings.font_scale * 30 * scale,
+        );
+        const padding = Math.max(
+          1,
+          (currentOverlay.draw_settings.padding * scale) / 2,
+        );
+        const lineSpacing = Math.max(1, padding / 2);
+        const lines = detection.label.split("\n");
+        const lineHeight = fontSize * 1.15;
+        ctx.font = `${fontSize}px Arial, sans-serif`;
+        const textWidth = Math.max(
+          ...lines.map((line) => ctx.measureText(line).width),
+        );
+        const textHeight =
+          lineHeight * lines.length +
+          lineSpacing * Math.max(0, lines.length - 1);
+        const labelX = Math.max(0, topLeft[0] + padding);
+        const labelBaseline = Math.max(
+          textHeight + padding,
+          topLeft[1] - padding,
+        );
+        ctx.fillStyle = color;
+        ctx.fillRect(
+          Math.max(0, labelX - padding),
+          Math.max(0, labelBaseline - textHeight - padding),
+          Math.min(
+            textWidth + padding * 2,
+            canvas.width / ratio - Math.max(0, labelX - padding),
+          ),
+          Math.min(
+            textHeight + padding * 2,
+            canvas.height / ratio -
+              Math.max(0, labelBaseline - textHeight - padding),
+          ),
+        );
+        ctx.fillStyle = `rgb(${detection.text_color_rgb.join(",")})`;
+        lines.forEach((line, index) => {
+          ctx.fillText(
+            line,
+            labelX,
+            labelBaseline - textHeight + fontSize + index * (lineHeight + lineSpacing),
+          );
+        });
+        ctx.restore();
+      });
+    }
+
     if (drawingPoints.length === 0) return;
 
     const path = new Path2D();
@@ -1096,14 +1290,110 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
     canvasZones,
     getSavedZoneCanvasCoords,
     mapNormalizedToCanvasCoords,
+    detectionOverlay,
+    getVideoRenderDetails,
+    selectedCamera,
     t,
     tripwireStates,
   ]);
 
   useLayoutEffect(() => {
+    drawOverlayRef.current = drawOverlay;
+    detectionOverlayRef.current = detectionOverlay;
+  }, [drawOverlay, detectionOverlay]);
+
+  useLayoutEffect(() => {
     updateOverlayCanvas();
-    drawOverlay();
-  }, [updateOverlayCanvas, drawOverlay]);
+    const video = videoRef.current as HTMLVideoElement | null;
+    if (
+      !isSelectedLiveCamera ||
+      !video ||
+      video.paused ||
+      typeof video.requestVideoFrameCallback !== "function"
+    ) {
+      drawOverlay();
+    }
+  }, [
+    updateOverlayCanvas,
+    drawOverlay,
+    isSelectedLiveCamera,
+    liveVideoElement,
+  ]);
+
+  useEffect(() => {
+    const video = liveVideoElement;
+    if (!isSelectedLiveCamera || !video) return;
+
+    let active = true;
+    let frameCallbackId: number | null = null;
+    let animationFrameId: number | null = null;
+    const diagnosticsEnabled =
+      new URLSearchParams(window.location.search).get("overlayDiagnostics") ===
+      "1";
+    const drawForPresentedFrame = (
+      callbackTime: number,
+      metadata?: VideoFrameCallbackMetadata,
+    ) => {
+      if (!active) return;
+      if (metadata) latestVideoFrameMetadataRef.current = metadata;
+      const renderStartedAt = performance.now();
+      drawOverlayRef.current();
+      const renderCompletedAt = performance.now();
+      if (diagnosticsEnabled) {
+        const overlay = detectionOverlayRef.current;
+        console.debug("[AeroGuard overlay frame]", {
+          callbackTime,
+          receivedAt: overlay?.receivedAt ?? null,
+          acceptedAt: overlay?.acceptedAt ?? null,
+          overlayFrameSequence: overlay?.frame_sequence ?? null,
+          videoCurrentTime: video.currentTime,
+          mediaTime: metadata?.mediaTime ?? null,
+          expectedDisplayTime: metadata?.expectedDisplayTime ?? null,
+          presentationTime: metadata?.presentationTime ?? null,
+          presentedFrames: metadata?.presentedFrames ?? null,
+          processingDuration: metadata?.processingDuration ?? null,
+          overlayAgeAtRenderMs: overlay
+            ? renderStartedAt - overlay.acceptedAt
+            : null,
+          renderDurationMs: renderCompletedAt - renderStartedAt,
+        });
+      }
+
+      if (typeof video.requestVideoFrameCallback === "function") {
+        frameCallbackId = video.requestVideoFrameCallback(
+          drawForPresentedFrame,
+        );
+      } else {
+        animationFrameId = window.requestAnimationFrame((time) =>
+          drawForPresentedFrame(time),
+        );
+      }
+    };
+
+    drawOverlayRef.current();
+    if (typeof video.requestVideoFrameCallback === "function") {
+      frameCallbackId = video.requestVideoFrameCallback(
+        drawForPresentedFrame,
+      );
+    } else {
+      animationFrameId = window.requestAnimationFrame((time) =>
+        drawForPresentedFrame(time),
+      );
+    }
+
+    return () => {
+      active = false;
+      if (
+        frameCallbackId !== null &&
+        typeof video.cancelVideoFrameCallback === "function"
+      ) {
+        video.cancelVideoFrameCallback(frameCallbackId);
+      }
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [isSelectedLiveCamera, liveVideoElement]);
 
   useEffect(() => {
     const handleLayoutChange = () => {
@@ -1369,6 +1659,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
       if (points.length === 0 || !selectedCamera) return;
       const vid = videoRef.current;
       if (!vid) return;
+      const size = getVideoElementSize(vid);
       const zoneType = zoneTypeForDrawingMode(drawingMode);
       const pointRequirement = isRestrictedMode ? 3 : 2;
       if (
@@ -1410,8 +1701,8 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             polygon_coords: points,
           },
         ])[0].polygon_coords,
-        video_width: vid.naturalWidth || undefined,
-        video_height: vid.naturalHeight || undefined,
+        video_width: size?.naturalWidth || undefined,
+        video_height: size?.naturalHeight || undefined,
         ...(drawingMode === "tripwire"
           ? {
               tripwire_allowed_group_size: Number(
@@ -1896,32 +2187,72 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
             {/* Video Stream Implementation */}
             {selectedCamera ? (
               <>
-                <img
-                  ref={videoRef}
-                  src={
-                    isPaused || !selectedCamera
-                      ? ""
-                      : streamToken
-                        ? `/api/v1/cameras/${selectedCamera}/stream?token=${encodeURIComponent(streamToken)}`
-                        : `/api/v1/cameras/${selectedCamera}/stream`
-                  }
-                  alt="AeroGuard Engine"
-                  onLoad={() => {
-                    updateOverlayCanvas();
-                    drawOverlay();
-                    if (
-                      selectedCamera &&
-                      selectedCameraRef.current === selectedCamera &&
-                      startAcceptedCameraIdsRef.current.has(selectedCamera)
-                    ) {
-                      startAcceptedCameraIdsRef.current.delete(selectedCamera);
-                      if (frozenFramesRef.current[selectedCamera]) {
-                        clearFrozenFrame(selectedCamera);
+                {isSelectedLiveCamera ? (
+                  <>
+                    <video
+                      ref={attachLiveVideo}
+                      autoPlay
+                      muted
+                      playsInline
+                      onLoadedMetadata={() => {
+                        updateOverlayCanvas();
+                        drawOverlay();
+                      }}
+                      onPlaying={() => {
+                        updateOverlayCanvas();
+                        drawOverlay();
+                        if (
+                          selectedCamera &&
+                          selectedCameraRef.current === selectedCamera &&
+                          startAcceptedCameraIdsRef.current.has(selectedCamera)
+                        ) {
+                          startAcceptedCameraIdsRef.current.delete(selectedCamera);
+                          if (frozenFramesRef.current[selectedCamera]) {
+                            clearFrozenFrame(selectedCamera);
+                          }
+                        }
+                      }}
+                      className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
+                    />
+                    <div
+                      aria-live="polite"
+                      className="absolute bottom-3 left-3 z-40 rounded bg-black/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white"
+                    >
+                      {liveStreamStatus === "playing"
+                        ? "Live video playing"
+                        : `Live video: ${liveStreamStatus}`}
+                    </div>
+                  </>
+                ) : (
+                  <img
+                    ref={(element) => {
+                      videoRef.current = element;
+                    }}
+                    src={legacyVideoSource}
+                    alt="AeroGuard Engine"
+                    onLoad={() => {
+                      updateOverlayCanvas();
+                      drawOverlay();
+                      if (
+                        selectedCamera &&
+                        selectedCameraRef.current === selectedCamera &&
+                        startAcceptedCameraIdsRef.current.has(selectedCamera)
+                      ) {
+                        startAcceptedCameraIdsRef.current.delete(selectedCamera);
+                        if (frozenFramesRef.current[selectedCamera]) {
+                          clearFrozenFrame(selectedCamera);
+                        }
                       }
-                    }
-                  }}
-                  className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
-                />
+                    }}
+                    onError={() => {
+                      console.warn(
+                        "Dashboard MJPEG frame failed to render",
+                        selectedCamera,
+                      );
+                    }}
+                    className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 ${isPaused ? "scale-[1.02] blur-sm opacity-30" : "scale-100 opacity-100"}`}
+                  />
+                )}
                 {frozenFrames[selectedCamera] ? (
                   <img
                     src={frozenFrames[selectedCamera]}
@@ -1965,6 +2296,7 @@ const Dashboard = ({ onAlertBadgeClick }: DashboardProps) => {
                       startAcceptedCameraIdsRef.current.delete(selectedCamera);
                     }
                     setIsPaused(true);
+                    setDetectionOverlay(null);
                     if (selectedCamera) {
                       await stopCameraSession(selectedCamera);
                     }

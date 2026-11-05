@@ -325,6 +325,8 @@ def test_ownerless_process_camera_publishes_red_frame_and_alarm_on_persistence_f
     processor._active_tripwire_alarm_states = {}
     processor._deleted_tripwire_zones = set()
     processor.last_frames = {}
+    processor._frame_states = {}
+    processor._frame_states_lock = threading.Lock()
     processor.alert_persistence = {}
     processor.last_alert_time = {}
     processor._detection_persist_cooldown = {}
@@ -382,6 +384,8 @@ def test_ownerless_process_camera_publishes_red_frame_and_alarm_on_persistence_f
             return False, None
 
         def get(self, property_id):
+            if property_id == processor_module.cv2.CAP_PROP_FPS:
+                return 1
             if property_id == processor_module.cv2.CAP_PROP_FRAME_COUNT:
                 return 3
             if property_id == processor_module.cv2.CAP_PROP_POS_FRAMES:

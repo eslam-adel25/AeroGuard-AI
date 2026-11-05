@@ -23,6 +23,8 @@ class CameraCreate(ORMBaseModel):
     camera_type: str  # LIVE, UPLOAD, USB
 
 class CameraResponse(CameraCreate):
+    """Camera response; embedded stream credentials are redacted by the API."""
+
     camera_id: UUID
     status: str
     created_at: datetime

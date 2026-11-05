@@ -21,12 +21,43 @@ export type AlertWSData = {
 
 export type DashboardStats = {
   fps: number;
+  capture_fps?: number;
+  processing_fps?: number;
+  output_fps?: number;
   objects: number;
   persons: number;
   bags: number;
   cars: number;
   critical_alerts?: number;
   camera_id?: string;
+  detection_overlay?: DetectionOverlayWSData;
+};
+
+export type DetectionOverlayWSData = {
+  camera_id: string;
+  frame_sequence: number;
+  capture_timestamp_ns: number;
+  frame_width: number;
+  frame_height: number;
+  pipeline_timing?: Record<string, number | string | null>;
+  draw_settings: {
+    font_scale: number;
+    line_thickness: number;
+    padding: number;
+  };
+  detections: Array<{
+    track_id: string | null;
+    identity_id: number | null;
+    class_name: string;
+    confidence: number;
+    bbox: [number, number, number, number];
+    label: string;
+    status: string;
+    display_label: string;
+    box_color_bgr: [number, number, number];
+    box_color_rgb: [number, number, number];
+    text_color_rgb: [number, number, number];
+  }>;
 };
 
 export type AIEventWSData = {

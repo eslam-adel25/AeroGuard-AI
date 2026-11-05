@@ -74,6 +74,7 @@ Thumbs.db
 # ==========================
 logs/
 *.log
+backend/tools/go2rtc.exe
 
 # ==========================
 # Temporary Files

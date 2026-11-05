@@ -1,7 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Lock, Event, Thread
-from time import sleep
+from time import monotonic, sleep
 from types import SimpleNamespace
 
 import pytest
@@ -44,6 +44,8 @@ def _processor_state():
     processor._active_tripwire_alarm_states = {}
     processor._deleted_tripwire_zones = set()
     processor.last_frames = {}
+    processor._frame_states = {}
+    processor._frame_states_lock = Lock()
     processor.alert_persistence = {}
     return processor
 
@@ -104,6 +106,154 @@ def test_camera_start_reservation_and_stop_are_scoped_per_camera():
 
     processor.release_camera_start("camera-b")
     assert processor.reserve_camera_start("camera-b") == "reserved"
+
+
+def test_live_capture_open_is_isolated_per_camera():
+    processor = _processor_state()
+    processor.reserve_camera_start("camera-a")
+    processor.reserve_camera_start("camera-b")
+
+    class Capture:
+        def __init__(self):
+            self.opened = False
+            self.open_args = None
+
+        def open(self, *args):
+            self.open_args = args
+            self.opened = True
+            return True
+
+        def isOpened(self):
+            return self.opened
+
+        def release(self):
+            self.opened = False
+
+    captures = {"camera-a": Capture(), "camera-b": Capture()}
+
+    async def open_both():
+        return await asyncio.gather(
+            processor._open_live_capture(
+                captures["camera-a"],
+                "rtsp://camera-a/live",
+                "camera-a",
+                monotonic() + 1,
+            ),
+            processor._open_live_capture(
+                captures["camera-b"],
+                "rtsps://camera-b/live",
+                "camera-b",
+                monotonic() + 1,
+            ),
+        )
+
+    assert asyncio.run(open_both()) == [True, True]
+    assert captures["camera-a"].open_args[0] == "rtsp://camera-a/live"
+    assert captures["camera-b"].open_args[0] == "rtsps://camera-b/live"
+    for capture in captures.values():
+        assert capture.open_args[1] == processor_module.cv2.CAP_FFMPEG
+        assert capture.open_args[2] == [
+            processor_module.cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+            10_000,
+            processor_module.cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+            10_000,
+        ]
+
+
+def test_local_camera_capture_still_uses_directshow(monkeypatch):
+    processor = _processor_state()
+    processor.reserve_camera_start("usb-camera")
+
+    class Capture:
+        opened_with = None
+
+        def open(self, source, backend):
+            self.opened_with = (source, backend)
+            return True
+
+        def isOpened(self):
+            return True
+
+    capture = Capture()
+    assert asyncio.run(
+        processor._open_live_capture(
+            capture,
+            0,
+            "usb-camera",
+            monotonic() + 1,
+        )
+    )
+    assert capture.opened_with == (0, processor_module.cv2.CAP_DSHOW)
+
+
+def test_live_capture_reconnect_uses_a_fresh_camera_owned_capture(monkeypatch):
+    processor = _processor_state()
+
+    class Capture:
+        def __init__(self):
+            self.opened = False
+            self.open_args = None
+            self.released = False
+
+        def open(self, *args):
+            self.open_args = args
+            self.opened = True
+            return True
+
+        def isOpened(self):
+            return self.opened
+
+        def release(self):
+            self.released = True
+            self.opened = False
+
+    capture = Capture()
+    monkeypatch.setattr(
+        processor_module.cv2,
+        "VideoCapture",
+        lambda: capture,
+    )
+
+    reopened_capture, opened = asyncio.run(
+        processor._reopen_live_capture(
+            "rtsp://camera-a/live",
+            "camera-a",
+            monotonic() + 1,
+        )
+    )
+
+    assert opened is True
+    assert reopened_capture is capture
+    assert capture.open_args[0] == "rtsp://camera-a/live"
+    assert capture.open_args[1] == processor_module.cv2.CAP_FFMPEG
+    assert not capture.released
+
+
+def test_live_frame_read_failure_releases_only_its_capture():
+    processor = _processor_state()
+    processor.reserve_camera_start("camera-a")
+
+    class Capture:
+        released = False
+
+        def read(self):
+            return False, None
+
+        def release(self):
+            self.released = True
+
+    capture = Capture()
+    frame = asyncio.run(
+        processor._read_live_frame(
+            capture,
+            "camera-a",
+            monotonic() + 0.03,
+        )
+    )
+
+    assert frame is None
+    assert capture.released
+    assert "camera-b" not in processor._stop_flags
 
 
 def test_concurrent_start_reservations_create_one_owner():
@@ -426,6 +576,7 @@ def test_live_camera_stop_during_validation_cancels_start_without_affecting_othe
             return SimpleNamespace(
                 camera_id=camera_record.camera_id,
                 status=camera_record.status,
+                stream_url=camera_record.stream_url,
             )
 
     monkeypatch.setattr(cameras_api, "CameraRepository", FakeCameraRepository)

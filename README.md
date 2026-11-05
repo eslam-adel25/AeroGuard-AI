@@ -315,8 +315,8 @@ The backend entry point in `backend/app/main.py` coordinates initialization thro
 
 | Ingestion Type | Provisioning Verification | Runtime Execution Mechanics |
 | :--- | :--- | :--- |
-| `LIVE` | Validates `rtsp://` or `rtsps://` scheme and probes endpoint for decodable frames. | Opens persistent RTSP network stream via OpenCV `VideoCapture`. |
-| `UPLOAD` | Validates extensions (`.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`) and 200 MiB file ceiling. | Saves file to `backend/uploads/videos/` and reads as local file input. |
+| `LIVE` / `NVR` | Validates `rtsp://` or `rtsps://` scheme and probes endpoint for decodable frames. | go2rtc ingests the source once; the browser receives WebRTC (MSE fallback) and the camera-owned reader reads the RTSP restream. |
+| `UPLOAD` | Validates extensions (`.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`) and 200 MiB file ceiling. | Saves file to `backend/uploads/videos/`; a paced source reader publishes live frames and fills the bounded AI input buffer. |
 | `USB` | Overrides input string to `"0"`. | Binds to OpenCV device index `0` on the host operating system. |
 
 ### Start, Stop, and Worker Lifecycle
@@ -329,27 +329,31 @@ sequenceDiagram
     participant UI as Dashboard / Cameras UI
     participant API as POST /cameras/{id}/start
     participant Engine as AIProcessor Singleton
-    participant Worker as Camera Worker Thread
+    participant Source as Per-camera Source Reader
+    participant Worker as AI Processing Worker
     participant DB as PostgreSQL Database
 
     UI->>API: Start request (Authorization: Bearer <token>)
     API->>API: Validate JWT and verify camera ownership
     API->>Engine: Reserve camera startup slot
-    API->>API: Probe RTSP source if type is LIVE
+    API->>API: Probe and register RTSP source for LIVE / NVR
     API->>Engine: Activate startup reservation
     API->>DB: Persist Camera status as 'Processing'
     API->>Worker: Dispatch process_camera via BackgroundTasks
     API-->>UI: Return HTTP 200 (Scheduled)
     
-    Worker->>Worker: Open VideoCapture, allocate tracker state
+    Source->>Source: Open VideoCapture and publish live frames
+    Source->>Source: Replace prior frame in bounded AI input buffer
+    Worker->>Worker: Consume newest frame and allocate tracker state
     Worker->>DB: Record detections and alert events
     Worker-->>UI: Broadcast 'Running' & telemetry via WebSocket
     
     UI->>API: Stop request: POST /cameras/{id}/stop
-    API->>Engine: Set cooperative stop flag and set status 'Offline'
-    Worker->>Worker: Detect stop flag, exit frame loop
-    Worker-->>UI: Broadcast 'Offline' and clear active alarms
-    Worker->>Engine: Release VideoCapture and purge in-memory state
+    API->>Engine: Set AI-worker stop flag
+    Worker->>Worker: Exit inference loop and clear AI tracking state
+    Source-->>UI: Continue live frames; status remains 'Running'
+    UI->>API: Delete camera or application shutdown
+    API->>Engine: Stop source reader and clear camera frames
 ```
 
 #### Lifecycle Characteristics
@@ -358,13 +362,22 @@ sequenceDiagram
 2. **Cancellation Handling**: If a stop command is issued while a camera is still probing, the reservation is canceled and the background task exits before opening the stream.
 3. **Asynchronous Dispatch**: The HTTP response confirms that the worker was *scheduled* via FastAPI `BackgroundTasks`. The camera status initially transitions to `Processing`, followed by `Running` once the first frame decodes successfully.
 4. **State Reconciliation**: The `GET /cameras/` endpoint overlays the processor's in-memory status onto database records. If the database indicates `Processing` but no active worker exists, the API reports `Offline`.
-5. **Cooperative Teardown**: Stopping a camera does not forcefully abort threads. The API raises a flag that the frame-processing loop checks each cycle. When detected, the worker releases the capture handle, clears tracker memory, and dispatches an `Offline` status over the WebSocket.
+5. **Independent Lifecycles**: `POST /cameras/{id}/stop` stops AI inference only. The source reader and live-frame publication continue, and camera status remains `Running` while frames are recent. Camera deletion and application shutdown stop the source reader and release its capture handle.
 
 ### Camera Zones and Streams
 
 - **Polygonal Zone Definitions**: Spatial detection zones are stored in `RestrictedZone` records as normalized coordinate arrays. Coordinates are converted to pixel space by the processor during frame evaluation.
-- **MJPEG Streaming**: `GET /cameras/{camera_id}/stream` yields a multipart MJPEG stream generated on the fly from the latest annotated frame cached in memory. The endpoint validates camera ownership prior to streaming.
+- **Live Camera Playback**: `LIVE` and `NVR` sources are registered in go2rtc by camera ID. Dashboard playback uses go2rtc WebRTC signaling (`/api/ws?src=...`) with MSE over the same WebSocket API as a fallback. The React player reports playback state separately from AI camera status.
+- **AI Restream**: Starting a `LIVE` or `NVR` camera points its independent source reader at the go2rtc RTSP restream. Stopping AI processing does not remove the go2rtc source or stop browser live playback.
+- **Legacy MJPEG**: `GET /cameras/{camera_id}/stream` remains for USB/upload sources and compatibility; it is not the primary live RTSP player.
 - **Resource Deletion**: Deleting a camera stops the worker, deletes uploaded video files from `backend/uploads/videos/` (if within the uploads tree), and removes associated zones, detections, events, and tracking rows before deleting the camera record.
+
+### go2rtc Runtime
+
+- On Windows, install the official release for the host architecture with `powershell -ExecutionPolicy Bypass -File backend/scripts/install_go2rtc.ps1`. The executable is stored at `backend/tools/go2rtc.exe` and is intentionally ignored by Git.
+- Backend startup starts or reuses go2rtc and registers existing `LIVE` camera sources. New cameras are registered after source validation; camera deletion removes the stream. Runtime logs are written to `backend/logs/go2rtc.log`.
+- The checked-in configuration binds the API to loopback port `1984`, the go2rtc RTSP restream to loopback port `8556`, and WebRTC signaling/media to port `8555` (TCP/UDP). The RTSP port differs from the common `8554` default to reduce port conflicts.
+- The Vite development server proxies `/go2rtc` to the loopback API and rewrites the WebSocket origin. Production deployments must provide a same-origin WebSocket/API reverse proxy or set `VITE_GO2RTC_BASE_URL` to an externally reachable, correctly secured go2rtc endpoint and open the configured WebRTC media ports. Do not expose the RTSP source URL or credentials to the browser.
 
 ---
 
@@ -372,40 +385,42 @@ sequenceDiagram
 
 ### Frame Pipeline
 
-The inference loop executes sequentially for each decoded frame within a worker thread:
+Each camera has a source reader independent of its AI processing worker. `LIVE`/`NVR` readers consume that camera's go2rtc RTSP restream; USB and uploaded sources use their corresponding OpenCV device or file adapter. Each captured frame is published to the live-frame state immediately and replaces the prior frame in that camera's one-frame AI input buffer. The inference worker consumes the latest available frame; if YOLO is slower than capture, intermediate AI frames are dropped rather than delaying ingestion or playback. Stopping AI leaves the source reader active; deletion or application shutdown releases it. Reader, bounded buffers, and tracker state are isolated per camera.
 
 ```text
-[Camera Stream / File Source]
+[LIVE / NVR] go2rtc RTSP restream
             │
             ▼
-   1. Frame Decoding (OpenCV)
+   1. Camera-owned OpenCV source reader (USB / upload adapters also supported)
             │
             ▼
-   2. Frame Skipping Evaluation (per user settings)
+   2. Live-frame publication + one-frame AI input buffer
             │
             ▼
-   3. YOLO Inference (Protected by global threading lock)
+   3. AI worker consumes newest available frame
             │
             ▼
-   4. Bounding Box & Label Extraction (confidence filtered)
+   4. Frame skipping evaluation (per user settings)
             │
             ▼
-   5. Tracking & Identity Update (IoU tracking + session identity)
+   5. YOLO inference (protected by global threading lock)
             │
             ▼
-   6. Rule Evaluation (Restricted zones, tripwires, loitering, baggage)
+   6. Tracking and identity update (isolated per camera)
             │
             ▼
-   7. Visual Overlays & Persistence (Detections & AIEvent insertion)
+   7. Rule evaluation, visual overlays, and persistence
             │
             ▼
-   8. Telemetry & Alarm Broadcast (WebSocket notifications)
+   8. Telemetry and alarm broadcast (WebSocket notifications)
             │
             ▼
-   9. Frame Cache Update (Held in memory for MJPEG stream)
+   9. Annotated AI output frame cache
 ```
 
 The runtime relies on PyTorch, Ultralytics YOLO, OpenCV, and NumPy. Weights are loaded during application initialization. If weight loading fails, the error is logged and `ai_engine` is set to `None`, causing subsequent camera start calls to return a service-unavailable error.
+
+For live-overlay diagnosis, `ai_status.data.detection_overlay.pipeline_timing` reports backend monotonic timestamps and derived backend stage durations. Set `AEROGUARD_FRAME_DIAGNOSTICS=1`, `AEROGUARD_FRAME_DIAGNOSTICS_CAMERA_ID` to one camera ID, and `AEROGUARD_FRAME_DIAGNOSTICS_DIR` to an absolute directory outside the repository to write bounded image samples and per-inference timing rows. Add `?overlayDiagnostics=1` to the Dashboard URL to log WebSocket receive/accept and `requestVideoFrameCallback` presentation metadata (`mediaTime`, `expectedDisplayTime`, `presentationTime`, `presentedFrames`, and `processingDuration`) in browser developer tools. Browser performance timestamps and backend monotonic timestamps are separate clock domains and must not be subtracted. The current OpenCV capture path does not expose source PTS/RTP timestamps; those fields are reported as unavailable rather than treated as synchronized with browser media time.
 
 ### Tracking and Per-Camera State
 
@@ -523,7 +538,7 @@ Upon successful connection, the server validates the token and transmits an init
 | `alarm_state_snapshot` | `states` (dictionary of camera IDs containing `active` and `sources`) | Sent to newly connected clients to establish baseline alarm state. |
 | `alarm_state` | `camera_id`, `active`, `sources` | Emitted on alarm state transitions. Filtered by camera ownership. |
 | `camera_status` | `camera_id`, `status` (`Processing`, `Running`, `Offline`) | Emitted on worker lifecycle changes. Delivered to the camera's customer; Owner receives platform-wide broadcasts. |
-| `ai_status` | `camera_id`, `fps`, `objects_count`, `persons_count`, `bags_count`, `cars_count`, `critical_alerts` | Real-time processing telemetry. Delivered to the camera's customer; Owner receives platform-wide broadcasts. |
+| `ai_status` | `camera_id`, `fps`, object counts, `critical_alerts`, optional `detection_overlay` with frame sequence, backend capture timestamp, and `pipeline_timing` | Real-time processing telemetry and overlay positions. Delivered to the camera's customer; Owner receives platform-wide broadcasts. |
 | `ai_event` | `event_id`, `camera_id`, `detection_type`, `severity`, `confidence`, `timestamp`, `screenshot_path` | Dispatched when an alert is created or updated. Filtered by camera ownership. |
 
 > [!NOTE]
@@ -734,6 +749,11 @@ The backend reads configuration settings from `backend/.env` via `backend/app/da
 | `FRONTEND_BASE` | `http://localhost:5173` | Base client URL used when generating email verification links. |
 | `HOST` | `127.0.0.1` | Network bind address for `python -m app.main`. Blank/wildcard values resolve to loopback. |
 | `PORT` | `8000` | Port for `python -m app.main`. |
+| `GO2RTC_ENABLED` | `true` | Enables go2rtc source registration and live player URL generation. |
+| `GO2RTC_EXECUTABLE` | `backend/tools/go2rtc.exe` on Windows | Optional path override for the go2rtc executable. |
+| `GO2RTC_CONFIG_PATH` | `backend/config/go2rtc.yaml` | Optional path override for the go2rtc configuration. |
+| `GO2RTC_BASE_URL` | `http://127.0.0.1:1984` | go2rtc API base URL used by the backend. |
+| `GO2RTC_RTSP_URL` | `rtsp://127.0.0.1:8556` | Base URL used to build per-camera AI restream URLs. |
 
 ### Frontend Environment
 
@@ -744,6 +764,7 @@ Frontend settings are loaded by Vite during development and asset compilation.
 | `VITE_API_BASE_URL` | `/api/v1` | Base path used by the Axios client. |
 | `VITE_WS_BASE_URL` | `window.location.origin` | WebSocket server base URL (client appends `/ws/dashboard?token=...`). |
 | `VITE_API_PROXY_TARGET` | `http://127.0.0.1:8000` | Target URL used by the Vite dev server to proxy `/api`, `/ws`, and `/uploads`. |
+| `VITE_GO2RTC_BASE_URL` | `/go2rtc` | Same-origin base path for the go2rtc browser API; Vite proxies it to the local go2rtc service. |
 
 #### Example `frontend/.env.local`
 

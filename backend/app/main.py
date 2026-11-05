@@ -17,11 +17,13 @@ from .api.v1 import (
 )
 from .ai.processor import ai_engine
 from .services.camera_status import reconcile_orphaned_processing_statuses
+from .services.go2rtc import Go2RTCError, go2rtc_service
 from .core.security import validate_secret_configuration
 import logging
 import os
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 UPLOAD_ROOT = BACKEND_ROOT / "uploads"
@@ -48,8 +50,36 @@ def create_app() -> FastAPI:
                 synchronize_session=False,
             )
             db.commit()
+            try:
+                go2rtc_service.start()
+            except Go2RTCError as exc:
+                logger.error("go2rtc startup failed: %s", exc)
+            else:
+                from .models.models import Camera
+
+                rtsp_cameras = db.query(Camera).filter(
+                    Camera.camera_type.in_(("LIVE", "NVR"))
+                )
+                for camera in rtsp_cameras:
+                    try:
+                        go2rtc_service.register_stream(
+                            camera.camera_id,
+                            camera.stream_url,
+                        )
+                    except Go2RTCError as exc:
+                        logger.error(
+                            "Could not register camera with go2rtc camera_id=%s error=%s",
+                            camera.camera_id,
+                            exc,
+                        )
         # Register AI processor with settings API so it receives config updates
         settings.set_ai_processor(ai_engine)
+
+    @app.on_event("shutdown")
+    def shutdown_event() -> None:
+        if ai_engine is not None:
+            ai_engine.close()
+        go2rtc_service.stop()
 
     return app
 

@@ -27,6 +27,13 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        "/go2rtc": {
+          target: "http://127.0.0.1:1984",
+          changeOrigin: true,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/go2rtc/, ""),
+          rewriteWsOrigin: true,
+        },
       },
     },
   };

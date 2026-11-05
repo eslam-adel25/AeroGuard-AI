@@ -54,6 +54,13 @@ def _create_processor():
     processor.active_critical_alerts = {}
     processor.crowd_cooldown = {}
     processor.last_frames = {}
+    processor._frame_states = {}
+    processor._frame_states_lock = threading.Lock()
+    processor.camera_pipelines = {}
+    processor.live_frame_states = {}
+    processor.live_frame_lock = threading.Lock()
+    processor.ai_frame_buffers = {}
+    processor.ai_frame_lock = threading.Lock()
     processor.alert_persistence = {}
     return processor
 
@@ -672,6 +679,24 @@ def test_live_capture_no_frame_timeout_releases_capture(monkeypatch):
     assert cap.read_released.is_set()
 
 
+def test_live_capture_read_exception_releases_capture():
+    processor = _create_processor()
+    cap = _FakeCapture()
+    cap.read = lambda: (_ for _ in ()).throw(RuntimeError("read failed"))
+    processor.reserve_camera_start("read-error")
+
+    frame_result = asyncio.run(
+        processor._read_live_frame(
+            cap,
+            "read-error",
+            time.monotonic() + 1,
+        )
+    )
+
+    assert frame_result is None
+    assert cap.release_count == 1
+
+
 def test_delayed_live_read_does_not_affect_another_camera():
     processor = _create_processor()
     delayed_capture = _FakeCapture()
@@ -727,8 +752,15 @@ def test_no_frame_timeout_cleans_worker_and_persists_offline(monkeypatch):
     db = _FakeDB(camera)
     processor = _create_processor()
     cap = _FakeCapture(block_on_read=True)
+    reconnect_capture = _FakeCapture(opened=False)
     events = []
     _processor_camera(db, processor, monkeypatch, cap, events)
+    captures = iter((cap, reconnect_capture))
+    monkeypatch.setattr(
+        processor_module.cv2,
+        "VideoCapture",
+        lambda *_args: next(captures),
+    )
     processor.reserve_camera_start(camera.camera_id)
     monkeypatch.setattr(
         processor_module,
@@ -751,12 +783,13 @@ def test_no_frame_timeout_cleans_worker_and_persists_offline(monkeypatch):
 
     assert camera.status == "Offline"
     assert cap.release_count == 1
+    assert reconnect_capture.release_count == 1
     assert camera.camera_id not in processor._active_cameras
     assert events[-1][0]["data"]["status"] == "Offline"
     assert events[-1][1] == "Offline"
 
 
-def test_explicit_stop_releases_blocked_read_and_cleans_camera(monkeypatch):
+def test_explicit_stop_preserves_source_until_source_shutdown(monkeypatch):
     camera = SimpleNamespace(
         camera_id="stopped",
         owner_id=None,
@@ -783,14 +816,18 @@ def test_explicit_stop_releases_blocked_read_and_cleans_camera(monkeypatch):
 
     asyncio.run(stop_during_read())
 
-    assert camera.status == "Offline"
-    assert cap.release_count == 1
+    assert camera.status == "Processing"
+    assert cap.release_count == 0
+    assert processor.has_active_camera_source(camera.camera_id)
     assert camera.camera_id not in processor._active_cameras
-    assert events[-1][0]["data"]["status"] == "Offline"
-    assert events[-1][1] == "Offline"
+    assert events[-1][0]["data"]["status"] == "Processing"
+    assert events[-1][1] == "Processing"
+    processor.stop_camera_source(camera.camera_id)
+    assert cap.release_count == 1
+    assert not processor.has_active_camera_source(camera.camera_id)
 
 
-def test_worker_cancellation_releases_capture_and_persists_offline(monkeypatch):
+def test_worker_cancellation_preserves_source_until_shutdown(monkeypatch):
     camera = SimpleNamespace(
         camera_id="shutdown-cancel",
         owner_id=None,
@@ -818,11 +855,15 @@ def test_worker_cancellation_releases_capture_and_persists_offline(monkeypatch):
 
     asyncio.run(cancel_worker())
 
-    assert camera.status == "Offline"
-    assert cap.release_count == 1
+    assert camera.status == "Processing"
+    assert cap.release_count == 0
+    assert processor.has_active_camera_source(camera.camera_id)
     assert camera.camera_id not in processor._active_cameras
-    assert events[-1][0]["data"]["status"] == "Offline"
-    assert events[-1][1] == "Offline"
+    assert events[-1][0]["data"]["status"] == "Processing"
+    assert events[-1][1] == "Processing"
+    processor.stop_camera_source(camera.camera_id)
+    assert cap.release_count == 1
+    assert not processor.has_active_camera_source(camera.camera_id)
 
 
 def test_unexpected_capture_exception_cleans_only_its_camera(monkeypatch):

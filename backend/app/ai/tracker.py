@@ -112,7 +112,8 @@ class IoUTracker:
             # create tracks for unassigned detections
             for i, det in enumerate(detections):
                 if not det_assigned[i]:
-                    self._create_track(det)
+                    track = self._create_track(det)
+                    assigned.add(track.track_id)
 
             # increment lost_frames for unassigned tracks
             for tid, track in list(self._tracks.items()):

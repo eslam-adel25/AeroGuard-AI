@@ -1,0 +1,19 @@
+api:
+  listen: "127.0.0.1:1984"
+  local_auth: true
+
+rtsp:
+  listen: "127.0.0.1:8556"
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    - "127.0.0.1:8555"
+
+log:
+  level: info
+streams:
+  c97659a4-a9de-4ee9-a6de-7c93257257aa:
+    - rtsp://127.0.0.1:8554/camera2
+  camera-a:
+    - rtsp://camera-a/stream

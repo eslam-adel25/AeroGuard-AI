@@ -9,9 +9,16 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 import cv2
 import asyncio
-from urllib.parse import urlparse
+from urllib.parse import unquote_plus, urlparse, urlsplit, urlunsplit
 
 from ...database.session import get_db
+from ...ai.capture import (
+    CameraSourceError,
+    RTSPCaptureError,
+    RTSP_TIMEOUT_SECONDS,
+    open_live_capture,
+    resolve_camera_source,
+)
 from ...models.models import (
     Camera,
     CustomerProfile,
@@ -37,7 +44,16 @@ from ...core.customer_features import (
 )
 from ...core.tenant import tenant_camera_child_filter, tenant_owner_filter
 from ...repositories.camera_repository import CameraRepository
-from ...services.camera_status import apply_camera_runtime_statuses
+from ...services.camera_status import (
+    apply_camera_runtime_statuses,
+    resolve_camera_status,
+)
+from ...services.go2rtc import (
+    Go2RTCError,
+    build_go2rtc_source_url,
+    go2rtc_service,
+    resolve_live_pipeline_url,
+)
 from ...ai.processor import ai_engine 
 from ...websocket.manager import manager
 
@@ -80,7 +96,8 @@ UPLOAD_DIR = Path(BASE_DIR) / "uploads" / "videos"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 MAX_VIDEO_SIZE = 200 * 1024 * 1024
-LIVE_PROBE_TIMEOUT_SECONDS = 10
+LIVE_PROBE_TIMEOUT_SECONDS = RTSP_TIMEOUT_SECONDS
+RTSP_CAMERA_TYPES = {"LIVE", "NVR"}
 
 
 def _validate_live_rtsp_url(stream_url: str) -> str:
@@ -91,17 +108,100 @@ def _validate_live_rtsp_url(stream_url: str) -> str:
     return value
 
 
+def _redact_stream_url_credentials(stream_url: str) -> str:
+    parts = urlsplit(stream_url)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    sensitive_query_keys = {
+        "access_key",
+        "access_token",
+        "api_key",
+        "auth",
+        "authorization",
+        "credential",
+        "password",
+        "passwd",
+        "pwd",
+        "secret",
+        "token",
+        "user",
+        "username",
+    }
+    query = []
+    for pair in parts.query.split("&"):
+        key, separator, _ = pair.partition("=")
+        if unquote_plus(key).lower() in sensitive_query_keys:
+            query.append(f"{key}{separator}REDACTED")
+        else:
+            query.append(pair)
+    return urlunsplit(
+        (parts.scheme, host, parts.path, "&".join(query), parts.fragment)
+    )
+
+
+def _camera_response(camera: Camera) -> CameraResponse:
+    response = CameraResponse.from_orm(camera)
+    response.stream_url = _redact_stream_url_credentials(response.stream_url)
+    return response
+
+
+def resolve_camera_live_source(camera_id: str, stream_url: str | None = None) -> str | None:
+    go2rtc_url = resolve_live_pipeline_url(camera_id, stream_url)
+    if go2rtc_url is not None:
+        return go2rtc_url
+    if stream_url:
+        return stream_url
+    return None
+
+
+def resolve_camera_restream_url(camera_id: str, stream_url: str | None = None) -> str | None:
+    source_url = stream_url or ""
+    if not source_url:
+        return None
+    return build_go2rtc_source_url(camera_id, source_url)
+
+
+def _encode_mjpeg_frame(frame) -> bytes | None:
+    if (
+        frame is None
+        or getattr(frame, "size", 0) <= 0
+        or len(getattr(frame, "shape", ())) != 3
+    ):
+        return None
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "camera frame stage=pre-encode shape=%s dtype=%s contiguous=%s",
+            getattr(frame, "shape", None),
+            getattr(getattr(frame, "dtype", None), "name", None),
+            bool(getattr(frame, "flags", {}).c_contiguous)
+            if getattr(frame, "flags", None) is not None
+            else None,
+        )
+    encoded, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), 75],
+    )
+    if not encoded or buffer is None or buffer.size <= 0:
+        return None
+    payload = buffer.tobytes()
+    if not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+        return None
+    return payload
+
+
 def _probe_live_rtsp(stream_url: str) -> bool:
     capture = cv2.VideoCapture()
     try:
-        capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, LIVE_PROBE_TIMEOUT_SECONDS * 1000)
-        capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, LIVE_PROBE_TIMEOUT_SECONDS * 1000)
-        if not capture.open(stream_url):
-            return False
-        if not capture.isOpened():
-            return False
+        if not open_live_capture(
+            capture,
+            stream_url,
+            timeout_seconds=LIVE_PROBE_TIMEOUT_SECONDS,
+        ) or not capture.isOpened():
+            raise RTSPCaptureError("open_failed")
         ret, frame = capture.read()
-        return bool(ret and frame is not None and frame.size > 0)
+        if not ret or frame is None or frame.size <= 0:
+            raise RTSPCaptureError("no_frame")
+        return True
     finally:
         capture.release()
 
@@ -112,12 +212,31 @@ async def _verify_live_rtsp(stream_url: str) -> None:
             asyncio.to_thread(_probe_live_rtsp, stream_url),
             timeout=LIVE_PROBE_TIMEOUT_SECONDS + 1,
         )
-    except Exception:
-        available = False
-    if not available:
+    except asyncio.TimeoutError:
+        logger.warning("RTSP probe failed: connection_timeout")
+        detail = "RTSP connection timed out"
+    except RTSPCaptureError as exc:
+        logger.warning("RTSP probe failed: %s", exc.category)
+        detail = {
+            "connection_timeout": "RTSP connection timed out",
+            "authentication_rejected": "RTSP server rejected authentication (401)",
+            "authorization_rejected": "RTSP server rejected authorization (403)",
+            "backend_unavailable": "RTSP capture backend or timeout configuration is unavailable",
+            "no_frame": "RTSP stream opened but no frame was received",
+            "open_failed": "RTSP connection failed; server response is unavailable",
+        }.get(exc.category, "RTSP connection failed")
+    except Exception as exc:
+        logger.warning("RTSP probe failed unexpectedly: %s", type(exc).__name__)
+        detail = "RTSP probe failed unexpectedly"
+    else:
+        if available:
+            return
+        detail = "RTSP connection failed; server response is unavailable"
+
+    if detail:
         raise HTTPException(
             status_code=400,
-            detail="The RTSP camera could not be opened or did not provide a frame",
+            detail=detail,
         )
 
 
@@ -125,11 +244,13 @@ async def _run_live_camera(
     camera_id: str,
     stream_url: str,
     reserved: bool = False,
+    camera_type: str = "LIVE",
 ) -> None:
     await ai_engine.process_camera(
         camera_id,
         stream_url,
         reserved=reserved,
+        camera_type=camera_type,
     )
 
 # 1. تسجيل كاميرا (بث مباشر أو رفع فيديو)
@@ -164,12 +285,19 @@ async def add_camera(
     else:
         customer_profile_id = current_user.get("customer_profile_id")
         check_camera_quota(db, str(current_user.get("user_id")))
+    camera_type = camera_type.strip().upper()
     final_url = stream_url
-    if camera_type == "LIVE":
+    if camera_type in RTSP_CAMERA_TYPES:
         final_url = _validate_live_rtsp_url(stream_url)
+        try:
+            go2rtc_service.start()
+        except Go2RTCError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="go2rtc live streaming service is unavailable",
+            ) from exc
         await _verify_live_rtsp(final_url)
-    # دعم كاميرا الجهاز (USB/Webcam)
-    if camera_type == "USB":
+    elif camera_type == "USB":
         final_url = "0"
 
     uploaded_file_path = None
@@ -188,6 +316,13 @@ async def add_camera(
         with uploaded_file_path.open("wb") as buffer:
             buffer.write(contents)
         final_url = str(uploaded_file_path)
+    elif camera_type == "UPLOAD":
+        try:
+            resolve_camera_source(camera_type, final_url)
+        except CameraSourceError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif camera_type not in {"USB"}:
+        raise HTTPException(status_code=422, detail="Unsupported camera source type")
 
     new_cam = Camera(
         camera_name=camera_name,
@@ -213,7 +348,17 @@ async def add_camera(
             except OSError:
                 logger.exception("Could not remove video upload after camera creation failed")
         raise
-    return created
+    if camera_type in RTSP_CAMERA_TYPES:
+        try:
+            go2rtc_service.register_stream(created.camera_id, final_url)
+        except Go2RTCError as exc:
+            db.delete(created)
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="Camera was not saved because its go2rtc stream could not be registered",
+            ) from exc
+    return _camera_response(created)
 
 # 2. إدارة المناطق المحظورة (Restricted Zones) لكل كاميرا
 def _extract_zone_metadata(raw_polygon):
@@ -387,6 +532,7 @@ def confirm_tripwire_occupancy(
 @router.post("/{camera_id}/start")
 async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
+    camera_type = (cam.camera_type or "").strip().upper()
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
 
@@ -408,9 +554,27 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
     startup_activated = False
     worker_scheduled = False
     try:
-        if cam.camera_type == "LIVE":
+        if camera_type in RTSP_CAMERA_TYPES:
             live_url = _validate_live_rtsp_url(cam.stream_url)
             await _verify_live_rtsp(live_url)
+            try:
+                go2rtc_service.register_stream(cam.camera_id, live_url)
+            except Go2RTCError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="go2rtc could not register this camera stream",
+                ) from exc
+            ai_source_url = resolve_camera_restream_url(
+                str(cam.camera_id),
+                live_url,
+            )
+            if ai_source_url is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="go2rtc did not provide an AI restream URL",
+                )
+        else:
+            ai_source_url = cam.stream_url
 
         if ai_engine.activate_camera_startup(cam.camera_id) != "reserved":
             startup_reservation_owned = False
@@ -423,12 +587,13 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
 
         cam.status = "Processing"
         db.commit()
-        if cam.camera_type == "LIVE":
+        if cam.camera_type in RTSP_CAMERA_TYPES:
             background_tasks.add_task(
                 _run_live_camera,
                 cam.camera_id,
-                cam.stream_url,
+                ai_source_url,
                 True,
+                camera_type,
             )
         else:
             background_tasks.add_task(
@@ -437,6 +602,7 @@ async def start_analysis(camera_id: str, background_tasks: BackgroundTasks, db: 
                 cam.stream_url,
                 None,
                 True,
+                camera_type,
             )
         worker_scheduled = True
     finally:
@@ -470,13 +636,17 @@ async def stop_analysis(camera_id: str, db: Session = Depends(get_db), current_u
     with ai_engine._active_camera_lock:
         worker_active = camera_key in ai_engine._active_cameras
     if not worker_active:
-        cam.status = "Offline"
+        cam.status = resolve_camera_status(
+            camera_key,
+            "Offline",
+            ai_engine.get_camera_runtime_statuses([camera_key]),
+        )
         db.commit()
         await manager.broadcast({
             "event": "camera_status",
             "data": {
                 "camera_id": camera_key,
-                "status": "Offline",
+                "status": cam.status,
             },
         }, audience_customer_profile_id=(
             cam.customer_profile_id
@@ -492,7 +662,7 @@ def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_
         customer_profile_id=current_user.get("customer_profile_id"),
         platform_wide=current_user.get("role") == "Owner",
     )
-    responses = [CameraResponse.from_orm(camera) for camera in cameras]
+    responses = [_camera_response(camera) for camera in cameras]
     apply_camera_runtime_statuses(responses, ai_engine)
     return responses
 
@@ -500,6 +670,16 @@ def get_cameras(db: Session = Depends(get_db), current_user: dict = Depends(get_
 @router.delete("/{camera_id}")
 def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
+    camera_type = (cam.camera_type or "").strip().upper()
+
+    if camera_type in RTSP_CAMERA_TYPES:
+        try:
+            go2rtc_service.remove_stream(cam.camera_id)
+        except Go2RTCError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Camera was not deleted because its go2rtc stream could not be removed",
+            ) from exc
 
     if cam.camera_type == "UPLOAD" and cam.stream_url:
         try:
@@ -511,7 +691,7 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: d
 
     if ai_engine is not None:
         ai_engine.stop_camera(cam.camera_id)
-        ai_engine.last_frames.pop(str(cam.camera_id), None)
+        ai_engine.stop_camera_source(cam.camera_id, clear_frames=True)
 
     for related in db.query(AIEvent).filter(
         AIEvent.camera_id == cam.camera_id,
@@ -558,30 +738,163 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db), current_user: d
     return {"status": "deleted", "camera_id": camera_id}
 
 # 6. محرك البث (Streaming)
-async def frame_generator(camera_id: str):
-    iteration = 0
-    while True:
-        iteration += 1
-        frame = None
-        if ai_engine is not None:
-            frame = ai_engine.get_latest_frame(camera_id)
+async def frame_generator(camera_id: str, sequential_playback: bool = False):
+    last_sequence = 0
+    last_diagnostic_sequence = 0
+    initial_playback_frame = None
+    if sequential_playback and ai_engine is not None:
+        latest_playback_getter = getattr(
+            ai_engine,
+            "get_latest_file_playback_frame",
+            None,
+        )
+        if callable(latest_playback_getter):
+            initial_playback_frame = latest_playback_getter(camera_id)
+            if initial_playback_frame is not None:
+                last_sequence = initial_playback_frame[0] - 1
 
-        if frame is not None:
-            try:
-                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-                if ret:
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-            except Exception as exc:
-                print(f"⚠️ [stream {camera_id}] frame encode failed: {exc}")
-        else:
-            await asyncio.sleep(0.2)
+    while True:
+        if sequential_playback and ai_engine is not None:
+            playback_frame = initial_playback_frame
+            initial_playback_frame = None
+            if playback_frame is None:
+                next_playback_getter = getattr(
+                    ai_engine,
+                    "get_next_file_playback_frame",
+                    None,
+                )
+                if callable(next_playback_getter):
+                    playback_frame = await asyncio.to_thread(
+                        next_playback_getter,
+                        camera_id,
+                        last_sequence,
+                        0.25,
+                    )
+            if playback_frame is None:
+                await asyncio.sleep(0.02)
+                continue
+
+            sequence, payload, _timestamp = playback_frame
+            if sequence == last_sequence:
+                await asyncio.sleep(0.02)
+                continue
+            if sequence > last_sequence + 1:
+                logger.warning(
+                    "Uploaded video playback queue overrun camera=%s dropped_frames=%s",
+                    camera_id,
+                    sequence - last_sequence - 1,
+                )
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + payload
+                + b"\r\n"
+            )
+            last_sequence = sequence
             continue
-        await asyncio.sleep(0.05)
+
+        diagnostic_sequence = None
+        capture_timestamp_ns = None
+        snapshot = None
+        if ai_engine is not None:
+            live_getter = getattr(ai_engine, "get_live_frame_snapshot", None)
+            if callable(live_getter):
+                live_snapshot = live_getter(camera_id, last_sequence)
+                if live_snapshot is not None:
+                    snapshot = live_snapshot
+            if snapshot is None and hasattr(ai_engine, "get_next_diagnostic_frame_snapshot"):
+                diagnostic_snapshot = ai_engine.get_next_diagnostic_frame_snapshot(
+                    camera_id,
+                    last_diagnostic_sequence,
+                )
+                if diagnostic_snapshot is None:
+                    latest_getter = getattr(ai_engine, "get_latest_frame_snapshot", None)
+                    if callable(latest_getter):
+                        snapshot = latest_getter(camera_id, last_sequence)
+                else:
+                    (
+                        sequence,
+                        frame,
+                        diagnostic_sequence,
+                        capture_timestamp_ns,
+                    ) = diagnostic_snapshot
+                    snapshot = (sequence, frame)
+                    last_diagnostic_sequence = diagnostic_sequence
+            elif snapshot is None:
+                latest_getter = getattr(ai_engine, "get_latest_frame_snapshot", None)
+                if callable(latest_getter):
+                    snapshot = latest_getter(camera_id, last_sequence)
+        if snapshot is None:
+            await asyncio.sleep(0.02)
+            continue
+
+        sequence, frame = snapshot
+        diagnostics = getattr(ai_engine, "frame_diagnostics", None)
+        if diagnostics is not None and diagnostic_sequence is not None:
+            diagnostics.record_frame(
+                camera_id,
+                diagnostic_sequence,
+                "E",
+                frame,
+                capture_timestamp_ns,
+            )
+            diagnostics.record_frame(
+                camera_id,
+                diagnostic_sequence,
+                "F",
+                frame,
+                capture_timestamp_ns,
+            )
+        if sequence == last_sequence:
+            await asyncio.sleep(0.02)
+            continue
+        try:
+            payload = await asyncio.to_thread(_encode_mjpeg_frame, frame)
+            if payload is None:
+                logger.warning(
+                    "MJPEG frame rejected before send camera=%s sequence=%s",
+                    camera_id,
+                    sequence,
+                )
+            else:
+                if diagnostics is not None and diagnostic_sequence is not None:
+                    diagnostics.record_jpeg(
+                        camera_id,
+                        diagnostic_sequence,
+                        payload,
+                        capture_timestamp_ns,
+                    )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "camera frame stage=encoded camera=%s sequence=%s bytes=%s",
+                        camera_id,
+                        sequence,
+                        len(payload),
+                    )
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + payload
+                    + b"\r\n"
+                )
+        except Exception as exc:
+            logger.warning(
+                "MJPEG encoding failed camera=%s error=%s",
+                camera_id,
+                type(exc).__name__,
+            )
+        last_sequence = sequence
 
 @router.get("/{camera_id}/stream")
 async def get_stream(camera_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_resource_user)):
     cam = _get_camera_for_user(db, camera_id, current_user)
     if ai_engine is None:
         raise HTTPException(status_code=503, detail="AI engine is currently unavailable")
-    return StreamingResponse(frame_generator(camera_id), media_type='multipart/x-mixed-replace; boundary=frame')
+    return StreamingResponse(
+        frame_generator(
+            camera_id,
+            sequential_playback=(cam.camera_type or "").strip().upper()
+            == "UPLOAD",
+        ),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )

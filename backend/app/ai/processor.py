@@ -22,7 +22,21 @@ from ..models.models import (
 )
 from ..repositories.detection_repository import DetectionRepository
 from ..services.decision_engine import DecisionEngine
-from ..services.camera_status import CAMERA_NO_FRAME_GRACE_SECONDS
+from ..services.camera_status import (
+    CAMERA_NO_FRAME_GRACE_SECONDS,
+    resolve_camera_status,
+)
+from .capture import (
+    CameraSourceError,
+    RTSPCaptureError,
+    classify_capture_error,
+    open_capture,
+    open_live_capture,
+    resolve_camera_source,
+)
+from .capture_reader import CameraCaptureReader
+from .frame_state import CameraFrameState, CameraPipelineState, LatestFrameBuffer
+from .frame_diagnostics import FrameDiagnostics
 from ..websocket.manager import manager
 from .identity import PersonIdentityRegistry
 from .tracker import TrackerManager
@@ -289,6 +303,19 @@ class AIProcessor:
 
         # مخازن الذاكرة الحية
         self.last_frames = {}
+        self._frame_states = {}
+        self._frame_states_lock = threading.Lock()
+        self.camera_pipelines = {}
+        self._source_readers = {}
+        self._source_readers_lock = threading.Lock()
+        self._source_started_at = {}
+        self._source_last_frame_received_at = {}
+        self._source_stop_flags = set()
+        self.live_frame_states = {}
+        self.live_frame_lock = threading.Lock()
+        self.ai_frame_buffers = {}
+        self.ai_frame_lock = threading.Lock()
+        self.frame_diagnostics = FrameDiagnostics.from_environment()
         self.last_alert_time = {}
         self.alert_persistence = {}
         self.tripwire_runtime = {}
@@ -693,7 +720,7 @@ class AIProcessor:
             # recreate model on requested device
             with self._model_lock:
                 self.model = YOLO(self.model_path, device=dev)
-                if self.fire_smoke_model is not None:
+                if getattr(self, "fire_smoke_model", None) is not None:
                     self.fire_smoke_model = YOLO(self.fire_smoke_model_path, device=dev)
             print(f"⚙️ AI Engine model reloaded on device={dev}")
         except Exception as exc:
@@ -752,10 +779,13 @@ class AIProcessor:
             or (label_name == "smoke" and smoke_enabled)
         )
 
-    def _predict_frame(self, frame, confidence_threshold):
+    def _predict_frame(self, frame, confidence_threshold, timing=None):
+        wait_started_ns = time.monotonic_ns()
         with self._model_lock:
+            lock_acquired_ns = time.monotonic_ns()
             model = self.model
-            return (
+            inference_started_ns = time.monotonic_ns()
+            result = (
                 model.predict(
                     frame,
                     conf=confidence_threshold,
@@ -763,13 +793,26 @@ class AIProcessor:
                 ),
                 model.names,
             )
+            if timing is not None:
+                timing.update(
+                    {
+                        "model_lock_wait_ns": lock_acquired_ns - wait_started_ns,
+                        "model_lock_acquisition_monotonic_ns": lock_acquired_ns,
+                        "inference_start_monotonic_ns": inference_started_ns,
+                        "inference_complete_monotonic_ns": time.monotonic_ns(),
+                    }
+                )
+            return result
 
-    def _predict_fire_smoke_frame(self, frame, confidence_threshold):
+    def _predict_fire_smoke_frame(self, frame, confidence_threshold, timing=None):
+        wait_started_ns = time.monotonic_ns()
         with self._model_lock:
+            lock_acquired_ns = time.monotonic_ns()
             if self.fire_smoke_model is None:
                 return _build_empty_model_result(), {}
             model = self.fire_smoke_model
-            return (
+            inference_started_ns = time.monotonic_ns()
+            result = (
                 model.predict(
                     frame,
                     conf=confidence_threshold,
@@ -777,6 +820,24 @@ class AIProcessor:
                 ),
                 model.names,
             )
+            if timing is not None:
+                timing.update(
+                    {
+                        "specialist_model_lock_wait_ns": (
+                            lock_acquired_ns - wait_started_ns
+                        ),
+                        "specialist_model_lock_acquisition_monotonic_ns": (
+                            lock_acquired_ns
+                        ),
+                        "specialist_inference_start_monotonic_ns": (
+                            inference_started_ns
+                        ),
+                        "specialist_inference_complete_monotonic_ns": (
+                            time.monotonic_ns()
+                        ),
+                    }
+                )
+            return result
 
     @staticmethod
     def _extract_model_detections(results, model_names, allowed_labels, class_map=None):
@@ -906,22 +967,125 @@ class AIProcessor:
         with self._active_camera_lock:
             return self._stop_flags.get(str(camera_id), False)
 
+    def _source_stop_requested(self, camera_id):
+        source_stop_flags = getattr(self, "_source_stop_flags", set())
+        with getattr(self, "_source_readers_lock", threading.Lock()):
+            return str(camera_id) in source_stop_flags
+
+    def get_camera_source_reader(self, camera_id):
+        lock = getattr(self, "_source_readers_lock", None)
+        if lock is None:
+            self._source_readers_lock = threading.Lock()
+            lock = self._source_readers_lock
+        readers = getattr(self, "_source_readers", None)
+        if readers is None:
+            self._source_readers = {}
+            readers = self._source_readers
+        with lock:
+            reader = readers.get(str(camera_id))
+            if reader is not None and not reader.is_alive():
+                readers.pop(str(camera_id), None)
+                self._source_started_at.pop(str(camera_id), None)
+                self._source_last_frame_received_at.pop(str(camera_id), None)
+                return None
+            return reader
+
+    def register_camera_source_reader(self, camera_id, reader):
+        if not hasattr(self, "_source_readers_lock"):
+            self._source_readers_lock = threading.Lock()
+        if not hasattr(self, "_source_readers"):
+            self._source_readers = {}
+        if not hasattr(self, "_source_started_at"):
+            self._source_started_at = {}
+        if not hasattr(self, "_source_last_frame_received_at"):
+            self._source_last_frame_received_at = {}
+        if not hasattr(self, "_source_stop_flags"):
+            self._source_stop_flags = set()
+        camera_key = str(camera_id)
+        with self._source_readers_lock:
+            existing = self._source_readers.get(camera_key)
+            if existing is not None and existing.is_alive():
+                raise RuntimeError(
+                    f"Camera source reader already active: {camera_key}"
+                )
+            self._source_stop_flags.discard(camera_key)
+            self._source_readers[camera_key] = reader
+            self._source_started_at[camera_key] = time.monotonic()
+            self._source_last_frame_received_at.pop(camera_key, None)
+            reader.start()
+
+    def has_active_camera_source(self, camera_id):
+        reader = self.get_camera_source_reader(camera_id)
+        return bool(reader is not None and reader.is_alive())
+
+    def stop_camera_source(self, camera_id, clear_frames=True):
+        camera_key = str(camera_id)
+        with self._source_readers_lock:
+            self._source_stop_flags.add(camera_key)
+            reader = self._source_readers.pop(camera_key, None)
+        if reader is not None:
+            reader.stop()
+            reader.join(timeout=2.0)
+            if reader.is_alive():
+                logger.error(
+                    "Camera source reader did not stop camera=%s",
+                    camera_key,
+                )
+        with self._source_readers_lock:
+            self._source_started_at.pop(camera_key, None)
+            self._source_last_frame_received_at.pop(camera_key, None)
+            if reader is None or not reader.is_alive():
+                self._source_stop_flags.discard(camera_key)
+        if clear_frames:
+            self.clear_latest_frame(camera_key)
+
     def get_camera_runtime_statuses(self, camera_ids):
+        camera_keys = list(map(str, camera_ids))
         with self._active_camera_lock:
-            return {
+            runtime_states = {
                 camera_key: {
                     "started_at": self._camera_started_at[camera_key],
                     "last_frame_at": self._last_frame_received_at.get(camera_key),
                     "stop_requested": self._stop_flags.get(camera_key, False),
+                    "ai_processing": True,
+                    "source_active": False,
                 }
-                for camera_key in map(str, camera_ids)
+                for camera_key in camera_keys
                 if camera_key in self._active_cameras
                 and camera_key in self._camera_started_at
             }
+        source_lock = getattr(self, "_source_readers_lock", None)
+        if source_lock is None:
+            return runtime_states
+        with source_lock:
+            for camera_key in camera_keys:
+                reader = self._source_readers.get(camera_key)
+                if reader is None or not reader.is_alive():
+                    continue
+                runtime_states[camera_key] = {
+                    "started_at": self._source_started_at.get(
+                        camera_key,
+                        time.monotonic(),
+                    ),
+                    "last_frame_at": self._source_last_frame_received_at.get(
+                        camera_key
+                    ),
+                    "stop_requested": False,
+                    "ai_processing": camera_key in self._active_cameras,
+                    "source_active": True,
+                }
+        return runtime_states
 
     def _record_frame_received(self, camera_id):
+        camera_key = str(camera_id)
         with self._active_camera_lock:
-            self._last_frame_received_at[str(camera_id)] = time.monotonic()
+            if camera_key in self._active_cameras:
+                self._last_frame_received_at[camera_key] = time.monotonic()
+
+    def _record_source_frame_received(self, camera_id, timestamp):
+        camera_key = str(camera_id)
+        with self._source_readers_lock:
+            self._source_last_frame_received_at[camera_key] = timestamp
 
     @staticmethod
     def _consume_task_exception(task):
@@ -934,21 +1098,28 @@ class AIProcessor:
             return
         error = task.exception()
         if error is not None:
-            print(f"⚠️ [{camera_id}] delayed capture open failed: {type(error).__name__}: {error}")
+            print(
+                f"⚠️ [{camera_id}] delayed capture open failed: "
+                f"{type(error).__name__}"
+            )
         try:
             capture.release()
         except Exception as exc:
-            print(f"⚠️ [{camera_id}] delayed capture release failed: {type(exc).__name__}: {exc}")
+            print(
+                f"⚠️ [{camera_id}] delayed capture release failed: "
+                f"{type(exc).__name__}"
+            )
 
     async def _open_live_capture(self, capture, source, camera_id, deadline):
         open_task = asyncio.create_task(
             asyncio.to_thread(
-                capture.open,
+                open_capture,
+                capture,
                 source,
                 cv2.CAP_DSHOW,
             )
-            if source == 0
-            else asyncio.to_thread(capture.open, source)
+            if isinstance(source, int)
+            else asyncio.to_thread(open_live_capture, capture, source)
         )
         while True:
             remaining = deadline - time.monotonic()
@@ -980,6 +1151,20 @@ class AIProcessor:
             if done:
                 return bool(open_task.result() and capture.isOpened())
 
+    async def _reopen_live_capture(self, source, camera_id, deadline):
+        capture = cv2.VideoCapture()
+        try:
+            opened = await self._open_live_capture(
+                capture,
+                source,
+                camera_id,
+                deadline,
+            )
+        except Exception:
+            capture.release()
+            raise
+        return capture, opened
+
     async def _read_live_frame(self, capture, camera_id, deadline):
         while True:
             remaining = deadline - time.monotonic()
@@ -1003,7 +1188,25 @@ class AIProcessor:
                 read_task.add_done_callback(self._consume_task_exception)
                 raise
 
-            result = read_task.result()
+            try:
+                result = read_task.result()
+            except Exception as exc:
+                category = classify_capture_error(exc)
+                if category == "open_failed":
+                    category = "read_failed"
+                try:
+                    capture.release()
+                except Exception as release_error:
+                    logger.warning(
+                        "camera capture release failed camera=%s error=%s",
+                        camera_id,
+                        type(release_error).__name__,
+                    )
+                print(
+                    f"⚠️ [{camera_id}] live frame read failed: "
+                    f"{category}"
+                )
+                return None
             ret, frame = result
             if ret and frame is not None and getattr(frame, "size", 0) > 0:
                 return result
@@ -1037,7 +1240,6 @@ class AIProcessor:
 
     def _clear_camera_runtime_state(self, camera_id):
         camera_key = str(camera_id)
-        self.last_frames.pop(camera_key, None)
         for state in (
             self.trackers,
             self.object_history,
@@ -1168,7 +1370,198 @@ class AIProcessor:
         }
 
     def get_latest_frame(self, camera_id):
-        return self.last_frames.get(str(camera_id))
+        snapshot = self.get_latest_frame_snapshot(camera_id)
+        if snapshot is not None:
+            return snapshot[1]
+        frame = self.last_frames.get(str(camera_id))
+        return frame.copy() if frame is not None else None
+
+    def get_latest_frame_snapshot(self, camera_id, after_sequence=0):
+        camera_key = str(camera_id)
+        with self._frame_states_lock:
+            state = self._frame_states.get(camera_key)
+        if state is None:
+            return None
+        return state.get_frame(after_sequence)
+
+    def get_next_diagnostic_frame_snapshot(
+        self,
+        camera_id,
+        after_diagnostic_sequence=0,
+    ):
+        if getattr(self, "frame_diagnostics", None) is None:
+            return None
+        camera_key = str(camera_id)
+        with self._frame_states_lock:
+            state = self._frame_states.get(camera_key)
+        if state is None:
+            return None
+        return state.get_next_diagnostic_frame(after_diagnostic_sequence)
+
+    def get_camera_frame_metrics(self, camera_id, now=None):
+        camera_key = str(camera_id)
+        with self._frame_states_lock:
+            state = self._frame_states.get(camera_key)
+        if state is None:
+            return {
+                "capture_fps": 0.0,
+                "processing_fps": 0.0,
+                "output_fps": 0.0,
+            }
+        return state.metrics(time.monotonic() if now is None else now)
+
+    def _get_camera_frame_state(self, camera_id):
+        camera_key = str(camera_id)
+        frame_states = getattr(self, "_frame_states", None)
+        if frame_states is None:
+            self._frame_states = {}
+            self._frame_states_lock = threading.Lock()
+        with self._frame_states_lock:
+            return self._frame_states.setdefault(camera_key, CameraFrameState())
+
+    def _get_video_pipeline_state(self, camera_id):
+        camera_key = str(camera_id)
+        pipelines = getattr(self, "camera_pipelines", None)
+        if pipelines is None:
+            self.camera_pipelines = {}
+            pipelines = self.camera_pipelines
+        live_lock = getattr(self, "live_frame_lock", None)
+        if live_lock is None:
+            self.live_frame_lock = threading.Lock()
+            live_lock = self.live_frame_lock
+        with live_lock:
+            return pipelines.setdefault(camera_key, CameraPipelineState())
+
+    def _get_live_frame_state(self, camera_id):
+        camera_key = str(camera_id)
+        pipeline = self._get_video_pipeline_state(camera_id)
+        return pipeline.live_reader
+
+    def _get_ai_frame_buffer(self, camera_id):
+        camera_key = str(camera_id)
+        pipeline = self._get_video_pipeline_state(camera_id)
+        return pipeline.ai_buffer
+
+    def _get_ai_capture_buffer(self, camera_id):
+        pipeline = self._get_video_pipeline_state(camera_id)
+        return pipeline.ai_capture_buffer
+
+    def publish_live_frame(self, camera_id, frame):
+        if frame is None:
+            return None
+        pipeline = self._get_video_pipeline_state(camera_id)
+        return pipeline.publish_live_frame(frame, time.monotonic())
+
+    def _publish_capture_frame(self, camera_id, frame, timestamp):
+        self._get_camera_frame_state(camera_id).record_capture(timestamp)
+        self._record_frame_received(camera_id)
+        self._record_source_frame_received(camera_id, timestamp)
+        self.publish_live_frame(camera_id, frame)
+
+    def _publish_file_playback_frame(self, camera_id, frame, timestamp):
+        encoded, buffer = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), 75],
+        )
+        if not encoded or buffer is None or buffer.size <= 0:
+            logger.warning(
+                "Uploaded video playback JPEG encoding failed camera=%s",
+                camera_id,
+            )
+            return
+        self._get_video_pipeline_state(camera_id).publish_file_playback_frame(
+            buffer.tobytes(),
+            timestamp,
+        )
+
+    def get_latest_file_playback_frame(self, camera_id):
+        return self._get_video_pipeline_state(camera_id).get_latest_file_playback_frame()
+
+    def get_next_file_playback_frame(
+        self,
+        camera_id,
+        after_sequence=0,
+        timeout=None,
+    ):
+        return self._get_video_pipeline_state(camera_id).get_next_file_playback_frame(
+            after_sequence,
+            timeout,
+        )
+
+    def get_ai_capture_frame_snapshot(
+        self,
+        camera_id,
+        after_sequence=0,
+        timeout=None,
+    ):
+        return self._get_ai_capture_buffer(camera_id).wait_for_latest(
+            after_sequence,
+            timeout,
+        )
+
+    def get_live_frame_snapshot(self, camera_id, after_sequence=0):
+        camera_key = str(camera_id)
+        camera_pipelines = getattr(self, "camera_pipelines", None)
+        if camera_pipelines is not None:
+            pipeline = camera_pipelines.get(camera_key)
+            if pipeline is not None:
+                return pipeline.get_live_frame(after_sequence)
+        live_lock = getattr(self, "live_frame_lock", None)
+        if live_lock is not None:
+            with live_lock:
+                state = self.live_frame_states.get(camera_key)
+        else:
+            state = getattr(self, "live_frame_states", {}).get(camera_key)
+        if state is None:
+            return None
+        return state.get_frame(after_sequence)
+
+    def get_ai_frame_snapshot(self, camera_id, after_sequence=0):
+        camera_key = str(camera_id)
+        camera_pipelines = getattr(self, "camera_pipelines", None)
+        if camera_pipelines is not None:
+            pipeline = camera_pipelines.get(camera_key)
+            if pipeline is not None:
+                return pipeline.get_ai_frame(after_sequence)
+        buffer = self._get_ai_frame_buffer(camera_id)
+        return buffer.get_latest(after_sequence)
+
+    def clear_latest_frame(self, camera_id):
+        camera_key = str(camera_id)
+        frame_states_lock = getattr(self, "_frame_states_lock", None)
+        if frame_states_lock is not None:
+            with frame_states_lock:
+                self._frame_states.pop(camera_key, None)
+                self.last_frames.pop(camera_key, None)
+        else:
+            self._frame_states = getattr(self, "_frame_states", {})
+            self.last_frames = getattr(self, "last_frames", {})
+            self._frame_states.pop(camera_key, None)
+            self.last_frames.pop(camera_key, None)
+        camera_pipelines = getattr(self, "camera_pipelines", None)
+        live_lock = getattr(self, "live_frame_lock", None)
+        if live_lock is not None:
+            with live_lock:
+                if camera_pipelines is not None:
+                    camera_pipelines.pop(camera_key, None)
+                self.live_frame_states.pop(camera_key, None)
+        else:
+            if camera_pipelines is not None:
+                camera_pipelines.pop(camera_key, None)
+            self.live_frame_states = getattr(self, "live_frame_states", {})
+            self.live_frame_states.pop(camera_key, None)
+        ai_lock = getattr(self, "ai_frame_lock", None)
+        if ai_lock is not None:
+            with ai_lock:
+                buffer = self.ai_frame_buffers.pop(camera_key, None)
+                if buffer is not None:
+                    buffer.clear()
+        else:
+            self.ai_frame_buffers = getattr(self, "ai_frame_buffers", {})
+            buffer = self.ai_frame_buffers.pop(camera_key, None)
+            if buffer is not None:
+                buffer.clear()
 
     @staticmethod
     def _get_detection_box_color(label_name):
@@ -1218,6 +1611,39 @@ class AIProcessor:
         except (TypeError, ValueError):
             configured = 0.5
         return max(0.25, min(0.5, configured - 0.12))
+
+    @staticmethod
+    def _build_detection_overlay_payload(
+        camera_id,
+        detections,
+        frame_shape,
+        frame_sequence,
+        capture_timestamp_ns,
+        draw_settings,
+        pipeline_timing=None,
+    ):
+        serialized_detections = []
+        for detection in detections:
+            box_color = detection["box_color_bgr"]
+            text_color = AIProcessor._get_text_color(box_color)
+            serialized_detections.append(
+                {
+                    **detection,
+                    "box_color_rgb": [int(channel) for channel in reversed(box_color)],
+                    "text_color_rgb": [int(channel) for channel in reversed(text_color)],
+                }
+            )
+
+        return {
+            "camera_id": str(camera_id),
+            "frame_sequence": int(frame_sequence),
+            "capture_timestamp_ns": int(capture_timestamp_ns),
+            "frame_width": int(frame_shape[1]),
+            "frame_height": int(frame_shape[0]),
+            "draw_settings": dict(draw_settings),
+            "pipeline_timing": dict(pipeline_timing or {}),
+            "detections": serialized_detections,
+        }
 
     def _assign_display_ids(self, camera_id, active_tracks):
         """Create visualization-only display IDs for currently visible tracks without changing tracker internals."""
@@ -1527,6 +1953,7 @@ class AIProcessor:
         rtsp_url,
         db: Session = None,
         reserved: bool = False,
+        camera_type: str | None = None,
     ):
         """المحرك الشامل: معالجة البث الحي أو الفيديوهات المرفوعة (Section 5 & 13)"""
         camera_id_str = str(camera_id)
@@ -1545,14 +1972,13 @@ class AIProcessor:
         local_db = None
         own_db = db is None
         cap = None
+        capture_reader = None
+        capture_owned_by_reader = False
         capture_released = False
-        consecutive_read_failures = 0
-        last_frame_pos = -1
         status_broadcasted = False
         camera_owner_id = None
         camera_tenant_id = None
         camera_record_tenant_id = None
-        last_frame_received_at = None
         try:
             local_db = db if db is not None else SessionLocal()
             if self._camera_stop_requested(camera_id_str):
@@ -1595,16 +2021,36 @@ class AIProcessor:
             if self._camera_stop_requested(camera_id_str):
                 return
             # 1. تحديد نوع المصدر ومعالجته
-            source = 0 if str(rtsp_url) == "0" else rtsp_url
-            is_file_source = False
-            if isinstance(source, str) and not source.isdigit():
-                is_file_source = not source.startswith(("rtsp://", "http://", "https://", "rtmp://"))
-                if is_file_source and not os.path.isabs(source):
-                    backend_root = os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "..", "..")
-                    )
-                    source = os.path.abspath(os.path.join(backend_root, source))
-                    print(f"📌 [{camera_id}] resolved source path={source}")
+            source_type = camera_type or getattr(camera_owner, "camera_type", None)
+            if not source_type:
+                source_value = str(rtsp_url)
+                source_type = (
+                    "LIVE"
+                    if source_value.lower().startswith(("rtsp://", "rtsps://"))
+                    else "USB"
+                    if source_value.isdigit()
+                    else "UPLOAD"
+                )
+            try:
+                source_kind, source = resolve_camera_source(
+                    source_type,
+                    str(rtsp_url),
+                )
+            except CameraSourceError as exc:
+                logger.error(
+                    "Invalid camera source camera=%s type=%s error=%s",
+                    camera_id,
+                    source_type,
+                    exc,
+                )
+                return
+            file_source = source_kind == "file"
+            if file_source and not os.path.isabs(source):
+                backend_root = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..")
+                )
+                source = os.path.abspath(os.path.join(backend_root, source))
+                print(f"📌 [{camera_id}] resolved local video path")
 
             with self._active_camera_lock:
                 startup_time = self._camera_started_at.get(
@@ -1613,25 +2059,43 @@ class AIProcessor:
                 )
 
             print(
-                f"📌 [{camera_id}] source={source!r} type={type(source).__name__} file_source={is_file_source}"
+                f"📌 [{camera_id}] source_kind={source_kind} "
+                f"file_source={file_source}"
             )
-            if is_file_source:
-                cap = cv2.VideoCapture(source)
-            else:
+            capture_reader = self.get_camera_source_reader(camera_id_str)
+            if capture_reader is None:
                 cap = cv2.VideoCapture()
-                capture_opened = await self._open_live_capture(
-                    cap,
-                    source,
-                    camera_id_str,
-                    startup_time + CAMERA_NO_FRAME_GRACE_SECONDS,
-                )
+                try:
+                    capture_opened = await self._open_live_capture(
+                        cap,
+                        source,
+                        camera_id_str,
+                        startup_time + CAMERA_NO_FRAME_GRACE_SECONDS,
+                    )
+                except RTSPCaptureError as exc:
+                    print(
+                        f"⚠️ [{camera_id}] RTSP capture open failed: "
+                        f"{exc.category}"
+                    )
+                    return
                 if capture_opened is None:
                     capture_released = True
+                    if not self._camera_stop_requested(camera_id_str):
+                        print(f"⚠️ [{camera_id}] live stream connection timed out")
                     return
                 if not capture_opened:
-                    print(f"❌ Critical: Could not open camera/video {camera_id}")
+                    print(
+                        f"⚠️ [{camera_id}] live capture open failed; "
+                        "server response unavailable"
+                    )
                     return
-            print(f"📌 [{camera_id}] cap created, isOpened={cap.isOpened()}")
+            else:
+                cap = capture_reader.capture
+                capture_owned_by_reader = True
+            print(
+                f"📌 [{camera_id}] capture available="
+                f"{bool(capture_reader and capture_reader.is_alive()) or bool(cap and cap.isOpened())}"
+            )
 
             # 2. تحميل إعدادات المناطق المحظورة (نُحمّلها أولياً ونقوم بتحديثها دورياً داخل الحلقة)
             zones = []
@@ -1719,9 +2183,66 @@ class AIProcessor:
             if max_objs is None:
                 max_objs = 50
 
-            if not cap.isOpened():
-                print(f"❌ Critical: Could not open camera/video {camera_id}")
-                return
+            if capture_reader is None:
+                if not cap.isOpened():
+                    print(f"❌ Critical: Could not open camera/video {camera_id}")
+                    return
+
+                def reopen_source():
+                    reopened_capture = cv2.VideoCapture()
+                    try:
+                        if not open_capture(
+                            reopened_capture,
+                            source,
+                            cv2.CAP_DSHOW if source_kind == "device" else None,
+                        ) or not reopened_capture.isOpened():
+                            raise RuntimeError("Camera source could not be reopened")
+                    except Exception:
+                        reopened_capture.release()
+                        raise
+                    return reopened_capture
+
+                frame_period = _get_source_frame_period(cap, file_source)
+                if file_source and frame_period is None:
+                    frame_period = 1.0 / 30.0
+                capture_reader = CameraCaptureReader(
+                    camera_id_str,
+                    cap,
+                    self._get_ai_capture_buffer(camera_id_str),
+                    lambda frame, timestamp: self._publish_capture_frame(
+                        camera_id_str,
+                        frame,
+                        timestamp,
+                    ),
+                    lambda: self._source_stop_requested(camera_id_str),
+                    CAMERA_NO_FRAME_GRACE_SECONDS,
+                    file_source=file_source,
+                    frame_period=frame_period,
+                    reopen_capture=None if file_source else reopen_source,
+                    on_file_frame=(
+                        lambda frame, timestamp: self._publish_file_playback_frame(
+                            camera_id_str,
+                            frame,
+                            timestamp,
+                        )
+                        if file_source
+                        else None
+                    ),
+                )
+                try:
+                    self.register_camera_source_reader(
+                        camera_id_str,
+                        capture_reader,
+                    )
+                    capture_owned_by_reader = True
+                except RuntimeError:
+                    capture_reader.stop()
+                    capture_reader.join(timeout=1.0)
+                    capture_reader = self.get_camera_source_reader(camera_id_str)
+                    cap = capture_reader.capture if capture_reader is not None else None
+                    if capture_reader is None:
+                        raise
+                    capture_owned_by_reader = True
 
             repo = DetectionRepository(local_db)
             ai_service = AIService(local_db)
@@ -1729,103 +2250,98 @@ class AIProcessor:
 
             iteration = 0
             last_valid_frame = 0
-            frame_period = _get_source_frame_period(cap, is_file_source)
-            next_frame_deadline = time.perf_counter()
-            while cap.isOpened():
+            capture_sequence = 0
+            while True:
+                if self._camera_stop_requested(camera_id_str):
+                    print(f"📌 [{camera_id}] stop signal received")
+                    break
+
+                frame_result = await asyncio.to_thread(
+                    capture_reader.wait_for_frame,
+                    capture_sequence,
+                    0.25,
+                )
+                if frame_result is None:
+                    if self._camera_stop_requested(camera_id_str):
+                        print(f"📌 [{camera_id}] stop signal received during AI wait")
+                        break
+                    if capture_reader.done:
+                        print(f"📌 [{camera_id}] source reader finished")
+                        break
+                    continue
+
+                (
+                    capture_sequence,
+                    frame,
+                    _captured_at,
+                    capture_metadata,
+                ) = frame_result
+                capture_timestamp_ns = (
+                    capture_metadata.get("capture_timestamp_ns")
+                    if capture_metadata is not None
+                    else None
+                ) or time.monotonic_ns()
+                scheduler_queue_entry_ns = (
+                    capture_metadata.get("scheduler_queue_entry_ns")
+                    if capture_metadata is not None
+                    else None
+                )
+                ai_submission_ns = time.monotonic_ns()
+                pipeline_timing = {
+                    "capture_timestamp_monotonic_ns": capture_timestamp_ns,
+                    "capture_clock": (
+                        capture_metadata.get("capture_clock", "unavailable")
+                        if capture_metadata is not None
+                        else "unavailable"
+                    ),
+                    "source_pts": (
+                        capture_metadata.get("source_pts")
+                        if capture_metadata is not None
+                        else None
+                    ),
+                    "source_rtp_timestamp": (
+                        capture_metadata.get("source_rtp_timestamp")
+                        if capture_metadata is not None
+                        else None
+                    ),
+                    "scheduler_queue_entry_monotonic_ns": scheduler_queue_entry_ns,
+                    "ai_submission_monotonic_ns": ai_submission_ns,
+                }
+
                 camera_settings = self._get_settings_for_owner(
                     camera_tenant_id,
                     camera_settings,
                 )
                 iteration += 1
-                if self._camera_stop_requested(camera_id_str):
-                    print(f"📌 [{camera_id}] stop signal received")
-                    break
-
-                if is_file_source:
-                    ret, frame = cap.read()
-                else:
-                    frame_deadline = (
-                        last_frame_received_at
-                        if last_frame_received_at is not None
-                        else startup_time
-                    ) + CAMERA_NO_FRAME_GRACE_SECONDS
-                    frame_result = await self._read_live_frame(
-                        cap,
-                        camera_id_str,
-                        frame_deadline,
-                    )
-                    if frame_result is None:
-                        capture_released = True
-                        if self._camera_stop_requested(camera_id_str):
-                            print(f"📌 [{camera_id}] stop signal received during capture read")
-                        else:
-                            print(
-                                f"⚠️ [{camera_id}] no valid frame received for "
-                                f"{CAMERA_NO_FRAME_GRACE_SECONDS:g} seconds"
-                            )
-                        break
-                    ret, frame = frame_result
-
-                frame_is_valid = bool(
-                    ret
-                    and frame is not None
-                    and getattr(frame, "size", 0) > 0
+                frame_skip = 0
+                if camera_settings is not None:
+                    frame_skip = getattr(camera_settings, "frame_skip", 0) or 0
+                if frame_skip is None:
+                    frame_skip = 0
+                do_infer = (frame_skip <= 0) or (
+                    iteration % (frame_skip + 1) == 0
                 )
-                if not frame_is_valid:
-                    if isinstance(source, str) and not source.isdigit():
-                        
-                        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-                        frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
-                        consecutive_read_failures += 1
 
-                        if frame_count > 0 and frame_pos >= frame_count:
-                            print(
-                                f"✅ [{camera_id}] EOF reached after last_valid_frame={last_valid_frame} "
-                                f"iterations={iteration-1} source={source!r} frame_pos={frame_pos} frame_count={frame_count}"
-                            )
-                            break
-
-                        if (
-                            consecutive_read_failures >= 3
-                            or (frame_pos == last_frame_pos and frame_pos > 0)
-                        ):
-                            print(
-                                f"⚠️ [{camera_id}] persistent read failure, stopping playback "
-                                f"source={source!r} frame_pos={frame_pos} frame_count={frame_count} "
-                                f"consecutive_failures={consecutive_read_failures}"
-                            )
-                            break
-
-                        print(
-                            f"⚠️ [{camera_id}] transient file read failure at frame_pos={frame_pos} "
-                            f"frame_count={frame_count}, retrying ({consecutive_read_failures})"
-                        )
-                        await asyncio.sleep(0.1)
-                        continue
-                    print(f"⚠️ [{camera_id}] camera stream read failed, retrying after sleep")
-                    with self._active_camera_lock:
-                        latest_frame_at = self._last_frame_received_at.get(camera_id_str)
-                    no_frame_since = latest_frame_at if latest_frame_at is not None else startup_time
-                    remaining = (
-                        no_frame_since
-                        + CAMERA_NO_FRAME_GRACE_SECONDS
-                        - time.monotonic()
+                diagnostic_sequence = None
+                diagnostics = getattr(self, "frame_diagnostics", None)
+                if diagnostics is not None and do_infer:
+                    diagnostic_sequence = diagnostics.begin_frame(
+                        camera_id_str,
+                        frame,
+                        capture_timestamp_ns,
                     )
-                    if remaining <= 0:
-                        print(
-                            f"⚠️ [{camera_id}] no valid frame received for "
-                            f"{CAMERA_NO_FRAME_GRACE_SECONDS:g} seconds"
-                        )
-                        break
-                    await asyncio.sleep(min(1.0, remaining))
-                    continue
 
-                consecutive_read_failures = 0
-                last_frame_received_at = time.monotonic()
-                self._record_frame_received(camera_id_str)
-                frame_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
-                last_frame_pos = frame_pos
-
+                frame_state = self._get_camera_frame_state(camera_id_str)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "camera frame stage=capture camera=%s shape=%s dtype=%s contiguous=%s",
+                        camera_id,
+                        getattr(frame, "shape", None),
+                        getattr(getattr(frame, "dtype", None), "name", None),
+                        bool(getattr(frame, "flags", {}).c_contiguous)
+                        if getattr(frame, "flags", None) is not None
+                        else None,
+                    )
                 if not status_broadcasted:
                     await manager.broadcast({
                         "event": "camera_status",
@@ -1842,25 +2358,27 @@ class AIProcessor:
                     print(f"📌 [{camera_id}] first frame decoded successfully")
                 last_valid_frame = iteration
 
-                start_time = time.time()
-
-                # respect frame-skip
-                frame_skip = 0
-                if camera_settings is not None:
-                    frame_skip = getattr(camera_settings, "frame_skip", 0) or 0
-                if frame_skip is None:
-                    frame_skip = 0
-                do_infer = (frame_skip <= 0) or (iteration % (frame_skip + 1) == 0)
                 results = None
                 model_names = None
                 specialist_results = _build_empty_model_result()
                 specialist_model_names = {}
                 if do_infer:
+                    model_timing = {}
+                    if diagnostic_sequence is not None:
+                        diagnostics.record_frame(
+                            camera_id_str,
+                            diagnostic_sequence,
+                            "B",
+                            frame,
+                            capture_timestamp_ns,
+                        )
                     results, model_names = await asyncio.to_thread(
                         self._predict_frame,
                         frame,
                         conf_thr,
+                        model_timing,
                     )
+                    pipeline_timing.update(model_timing)
                     if self._is_fire_smoke_enabled(
                         "fire",
                         camera_settings,
@@ -1871,6 +2389,7 @@ class AIProcessor:
                                     self._predict_fire_smoke_frame,
                                     frame,
                                     conf_thr,
+                                    pipeline_timing,
                                 )
                             )
                         except Exception as specialist_exc:
@@ -1880,6 +2399,16 @@ class AIProcessor:
                                 type(specialist_exc).__name__,
                                 specialist_exc,
                             )
+                    pipeline_timing["model_inference_complete_monotonic_ns"] = (
+                        pipeline_timing.get(
+                            "specialist_inference_complete_monotonic_ns",
+                            pipeline_timing.get(
+                                "inference_complete_monotonic_ns",
+                                time.monotonic_ns(),
+                            ),
+                        )
+                    )
+                    frame_state.record_processing(time.monotonic())
                 else:
                     results = _build_empty_model_result()
                 annotated_frame = frame.copy()
@@ -1914,7 +2443,13 @@ class AIProcessor:
 
                 camera_tracker = self.trackers[camera_id_str]
                 if do_infer:
+                    pipeline_timing["tracker_update_start_monotonic_ns"] = (
+                        time.monotonic_ns()
+                    )
                     camera_tracker.update(detections_for_tracker)
+                    pipeline_timing["tracker_complete_monotonic_ns"] = (
+                        time.monotonic_ns()
+                    )
                 active_tracks = camera_tracker.get_active_tracks()
                 active_objs_count = len(active_tracks)
                 person_count = sum(1 for t in active_tracks if t.class_name == "person")
@@ -2003,6 +2538,7 @@ class AIProcessor:
                 )
 
                 active_alert_keys = set()
+                overlay_detections = []
                 for track in active_tracks:
                     if active_objs_count >= max_objs:
                         print(f"📌 [{camera_id}] track loop break due to max_objs={max_objs}")
@@ -2485,6 +3021,21 @@ class AIProcessor:
                         box_color,
                         draw_settings,
                     )
+                    overlay_detections.append(
+                        {
+                            "track_id": str(obj_id) if obj_id is not None else None,
+                            "identity_id": person_ids.get(obj_id),
+                            "class_name": str(label_name),
+                            "confidence": float(conf),
+                            "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                            "label": str(overlay_label),
+                            "status": str(status),
+                            "display_label": str(display_label),
+                            "box_color_bgr": [
+                                int(channel) for channel in box_color
+                            ],
+                        }
+                    )
 
                     if display_label == "ABANDONED_BAG":
                         try:
@@ -2528,12 +3079,42 @@ class AIProcessor:
 
                 self._reset_inactive_alert_persistence(camera_id, active_alert_keys)
 
-                elapsed = time.time() - start_time
-                current_fps = (
-                    int(round(1.0 / frame_period))
-                    if frame_period is not None
-                    else int(1.0 / elapsed) if elapsed > 0 else 30
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "camera frame stage=annotated camera=%s shape=%s dtype=%s contiguous=%s",
+                        camera_id,
+                        getattr(annotated_frame, "shape", None),
+                        getattr(getattr(annotated_frame, "dtype", None), "name", None),
+                        bool(getattr(annotated_frame, "flags", {}).c_contiguous)
+                        if getattr(annotated_frame, "flags", None) is not None
+                        else None,
+                    )
+                if diagnostic_sequence is not None:
+                    diagnostics.record_frame(
+                        camera_id_str,
+                        diagnostic_sequence,
+                        "C",
+                        annotated_frame,
+                        capture_timestamp_ns,
+                    )
+                    diagnostics.record_frame(
+                        camera_id_str,
+                        diagnostic_sequence,
+                        "D",
+                        annotated_frame,
+                        capture_timestamp_ns,
+                    )
+                stored_frame = frame_state.publish(
+                    annotated_frame,
+                    time.monotonic(),
+                    diagnostic_sequence=diagnostic_sequence,
+                    capture_timestamp_ns=(
+                        capture_timestamp_ns
+                        if diagnostic_sequence is not None
+                        else None
+                    ),
                 )
+                frame_metrics = self.get_camera_frame_metrics(camera_id)
                 critical_alert_count = self._get_active_critical_alert_count(camera_id)
                 new_alarm_active = len(alarm_sources) > 0
                 camera_key = str(camera_id)
@@ -2554,40 +3135,138 @@ class AIProcessor:
                         camera_tenant_id,
                     )
 
+                overlay_payload = None
+                if do_infer:
+                    pipeline_timing["capture_to_inference_start_ms"] = (
+                        (
+                            pipeline_timing["inference_start_monotonic_ns"]
+                            - capture_timestamp_ns
+                        )
+                        / 1_000_000
+                        if "inference_start_monotonic_ns" in pipeline_timing
+                        else None
+                    )
+                    pipeline_timing["scheduler_queue_wait_ms"] = (
+                        (
+                            ai_submission_ns - scheduler_queue_entry_ns
+                        )
+                        / 1_000_000
+                        if scheduler_queue_entry_ns is not None
+                        else None
+                    )
+                    pipeline_timing["model_lock_wait_ms"] = (
+                        (
+                            pipeline_timing.get("model_lock_wait_ns", 0)
+                            + pipeline_timing.get(
+                                "specialist_model_lock_wait_ns", 0
+                            )
+                        )
+                        / 1_000_000
+                    )
+                    pipeline_timing["model_inference_ms"] = (
+                        (
+                            pipeline_timing["model_inference_complete_monotonic_ns"]
+                            - pipeline_timing["inference_start_monotonic_ns"]
+                        )
+                        / 1_000_000
+                        if "inference_start_monotonic_ns" in pipeline_timing
+                        else None
+                    )
+                    pipeline_timing["tracker_processing_ms"] = (
+                        (
+                            pipeline_timing["tracker_complete_monotonic_ns"]
+                            - pipeline_timing[
+                                "tracker_update_start_monotonic_ns"
+                            ]
+                        )
+                        / 1_000_000
+                        if "tracker_complete_monotonic_ns" in pipeline_timing
+                        and "model_inference_complete_monotonic_ns" in pipeline_timing
+                        else None
+                    )
+                    pipeline_timing["overlay_payload_creation_start_monotonic_ns"] = (
+                        time.monotonic_ns()
+                    )
+                    overlay_payload = self._build_detection_overlay_payload(
+                        camera_id,
+                        overlay_detections,
+                        frame.shape,
+                        capture_sequence,
+                        capture_timestamp_ns,
+                        self._get_overlay_draw_settings(frame.shape),
+                        pipeline_timing,
+                    )
+                    pipeline_timing["overlay_payload_created_monotonic_ns"] = (
+                        time.monotonic_ns()
+                    )
+                    overlay_payload["pipeline_timing"] = dict(pipeline_timing)
+
+                websocket_send_started_ns = time.monotonic_ns()
+                pipeline_timing["websocket_send_started_monotonic_ns"] = (
+                    websocket_send_started_ns
+                )
+                if overlay_payload is not None:
+                    overlay_payload["pipeline_timing"] = dict(pipeline_timing)
                 await manager.broadcast({
                     "event": "ai_status",
                     "data": {
-                        "fps": current_fps,
+                        "fps": frame_metrics["output_fps"],
+                        **frame_metrics,
                         "objects": active_objs_count,
                         "persons": person_count,
                         "bags": bag_count,
                         "cars": vehicle_count,
                         "critical_alerts": critical_alert_count,
-                        "camera_id": str(camera_id)
+                        "camera_id": str(camera_id),
+                        **(
+                            {"detection_overlay": overlay_payload}
+                            if overlay_payload is not None
+                            else {}
+                        ),
                    }
                 }, audience_customer_profile_id=(
                     str(camera_tenant_id) if camera_tenant_id else None
                 ))
+                websocket_send_completed_ns = time.monotonic_ns()
+                if do_infer and diagnostics is not None:
+                    pipeline_timing["websocket_send_completed_monotonic_ns"] = (
+                        websocket_send_completed_ns
+                    )
+                    pipeline_timing["backend_to_websocket_send_ms"] = (
+                        (
+                            websocket_send_completed_ns
+                            - pipeline_timing[
+                                "overlay_payload_created_monotonic_ns"
+                            ]
+                        )
+                        / 1_000_000
+                    )
+                    diagnostics.record_timing(
+                        camera_id_str,
+                        capture_sequence,
+                        pipeline_timing,
+                    )
 
-                self.last_frames[str(camera_id)] = annotated_frame
-                if frame_period is not None:
-                    next_frame_deadline += frame_period
-                    remaining = next_frame_deadline - time.perf_counter()
-                    if remaining > 0:
-                        await asyncio.sleep(remaining)
-                    else:
-                        next_frame_deadline = time.perf_counter()
-                else:
-                    await asyncio.sleep(0.01)
+                self.last_frames[str(camera_id)] = stored_frame
+                ai_buffer = self._get_ai_frame_buffer(camera_id_str)
+                ai_buffer.publish(stored_frame, time.monotonic())
+                await asyncio.sleep(0.01)
         except Exception as exc:
-            print(f"❌ [{camera_id}] unexpected termination: {type(exc).__name__}: {exc}")
+            logger.exception(
+                "Unexpected camera processing failure camera=%s error=%s",
+                camera_id,
+                type(exc).__name__,
+            )
         finally:
-            if cap is not None and not capture_released:
+            if cap is not None and not capture_released and not capture_owned_by_reader:
                 try:
                     cap.release()
                     print(f"📌 [{camera_id}] cap released and processing ended")
                 except Exception as exc:
-                    print(f"⚠️ [{camera_id}] capture release failed: {type(exc).__name__}: {exc}")
+                    print(
+                        f"⚠️ [{camera_id}] capture release failed: "
+                        f"{type(exc).__name__}"
+                    )
             if self._active_alarm_state.get(camera_id_str, False):
                 try:
                     await self._broadcast_alarm_state(
@@ -2620,6 +3299,11 @@ class AIProcessor:
                 self._starting_cameras.discard(camera_id_str)
                 self._camera_started_at.pop(camera_id_str, None)
                 self._last_frame_received_at.pop(camera_id_str, None)
+            final_camera_status = resolve_camera_status(
+                camera_id_str,
+                "Offline",
+                self.get_camera_runtime_statuses([camera_id_str]),
+            )
 
             cleanup_db = local_db
             if cleanup_db is None and own_db:
@@ -2632,8 +3316,8 @@ class AIProcessor:
                     camera = cleanup_db.query(Camera).filter(
                         Camera.camera_id == camera_id
                     ).first()
-                    if camera is not None and camera.status != "Offline":
-                        camera.status = "Offline"
+                    if camera is not None and camera.status != final_camera_status:
+                        camera.status = final_camera_status
                         cleanup_db.commit()
             except Exception as exc:
                 print(f"⚠️ [{camera_id}] failed to persist Offline status: {type(exc).__name__}: {exc}")
@@ -2654,7 +3338,7 @@ class AIProcessor:
                     "event": "camera_status",
                     "data": {
                         "camera_id": str(camera_id),
-                        "status": "Offline",
+                        "status": final_camera_status,
                     }
                 }, audience_customer_profile_id=(
                     str(camera_tenant_id) if camera_tenant_id else None
@@ -2678,6 +3362,24 @@ class AIProcessor:
 
         for camera_id in camera_ids:
             self.stop_camera(camera_id)
+
+    def close(self):
+        active_camera_lock = getattr(self, "_active_camera_lock", None)
+        if active_camera_lock is not None:
+            with active_camera_lock:
+                for camera_key in (
+                    getattr(self, "_active_cameras", set())
+                    | getattr(self, "_starting_cameras", set())
+                ):
+                    self._stop_flags[camera_key] = True
+        source_readers = getattr(self, "_source_readers", {})
+        for camera_key in list(source_readers):
+            self.stop_camera_source(camera_key)
+        diagnostics = getattr(self, "frame_diagnostics", None)
+        if diagnostics is None:
+            return
+        self.frame_diagnostics = None
+        diagnostics.close()
 
 
 # تصدير نسخة المحرك الموحدة

@@ -274,14 +274,17 @@ const Cameras = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {cameras.map((cam) => {
             const liveStatus = cam.status || "Offline";
+            const isRtspCamera = ["LIVE", "NVR"].includes(
+              cam.camera_type?.toUpperCase() ?? "",
+            );
             const isLive =
-              cam.camera_type === "LIVE"
+              isRtspCamera
                 ? ["ACTIVE", "Online", "Processing", "Running"].includes(
                     liveStatus,
                   )
                 : cam.status === "ACTIVE";
             const statusLabel =
-              cam.camera_type === "LIVE"
+              isRtspCamera
                 ? (() => {
                     switch (liveStatus.toUpperCase()) {
                       case "ACTIVE":
@@ -319,7 +322,7 @@ const Cameras = () => {
 
                   {/* Dynamic central visual element */}
                   <div className="flex flex-col items-center justify-center text-gray-500 group-hover:text-ag-success/50 transition-colors">
-                    {cam.camera_type === "LIVE" ? (
+                    {isRtspCamera ? (
                       <Radio size={40} className="stroke-[1.5] animate-pulse" />
                     ) : (
                       <Video size={40} className="stroke-[1.5]" />
